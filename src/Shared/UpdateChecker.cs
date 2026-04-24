@@ -57,7 +57,7 @@ internal class UpdateCheckerCacheWrapper
 internal static class UpdateChecker
 {
     internal const string SentinelName = "GYK_UpdateChecker";
-    internal const string ManifestUrl = "https://raw.githubusercontent.com/p1xel8ted/Game-Mods/main/Graveyard%20Keeper/versions.json";
+    internal const string ManifestUrl = "https://raw.githubusercontent.com/p1xel8ted/Graveyard-Keeper-Mods/main/versions.json";
     internal const int CacheTtlHours = 4;
     internal const string LogSourceName = "GYK_UpdateChecker";
 
