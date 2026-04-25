@@ -22,7 +22,7 @@ public static class Patches
         switch (__instance.type)
         {
             case SmartWeatherState.WeatherType.Fog:
-                if (!Plugin.DisableFogCached) return;
+                if (!Plugin.RemoveFogCached) return;
                 __instance._previously_enabled = false;
                 __instance._enabled = false;
                 __instance._cur_amount = 0f;
@@ -30,7 +30,7 @@ public static class Patches
                 break;
 
             case SmartWeatherState.WeatherType.Wind:
-                if (!Plugin.DisableWindCached) return;
+                if (!Plugin.RemoveWindCached) return;
                 __instance._previously_enabled = false;
                 __instance._enabled = false;
                 __instance._cur_amount = 0f;
@@ -38,7 +38,7 @@ public static class Patches
                 break;
 
             case SmartWeatherState.WeatherType.Rain:
-                if (!Plugin.DisableRainCached) return;
+                if (!Plugin.RemoveRainCached) return;
                 __instance._previously_enabled = false;
                 __instance._enabled = false;
                 __instance._cur_amount = 0f;

@@ -13,72 +13,47 @@ public class Plugin : BaseUnityPlugin
 
     private static ManualLogSource Log { get; set; }
 
-    internal static ConfigEntry<bool> DisableFog { get; private set; }
-    internal static ConfigEntry<bool> DisableWind { get; private set; }
-    internal static ConfigEntry<bool> DisableRain { get; private set; }
+    internal static ConfigEntry<bool> RemoveFog { get; private set; }
+    internal static ConfigEntry<bool> RemoveWind { get; private set; }
+    internal static ConfigEntry<bool> RemoveRain { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
-    internal static bool DisableFogCached;
-    internal static bool DisableWindCached;
-    internal static bool DisableRainCached;
+    internal static bool RemoveFogCached;
+    internal static bool RemoveWindCached;
+    internal static bool RemoveRainCached;
 
     private void Awake()
     {
         Log = Logger;
-        MigrateRenamedSections();
+        ConfigMigration.MigrateRenamedSections(Config, Log, SectionRenames);
+        ConfigMigration.MigrateRenamedKeys(Config, Log,
+            new ConfigMigration.KeyRename(GeneralSection, "Disable Fog", "Remove Fog"),
+            new ConfigMigration.KeyRename(GeneralSection, "Disable Wind", "Remove Wind"),
+            new ConfigMigration.KeyRename(GeneralSection, "Disable Rain", "Remove Rain"));
         InitConfiguration();
         UpdateChecker.Register(Info, CheckForUpdates);
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites legacy numbered section headers to the plain "── Name ──" style so existing
-    // user values survive the rename. Idempotent.
-    private void MigrateRenamedSections()
-    {
-        var path = Config.ConfigFilePath;
-        if (!File.Exists(path)) return;
-
-        string content;
-        try { content = File.ReadAllText(path); }
-        catch (Exception ex) { Log.LogWarning($"[Migration] Could not read {path}: {ex.Message}"); return; }
-
-        var renamed = 0;
-        foreach (var kv in SectionRenames)
-        {
-            var oldHeader = $"[{kv.Key}]";
-            var newHeader = $"[{kv.Value}]";
-            if (!content.Contains(oldHeader)) continue;
-            content = content.Replace(oldHeader, newHeader);
-            renamed++;
-        }
-        if (renamed == 0) return;
-
-        try { File.WriteAllText(path, content); }
-        catch (Exception ex) { Log.LogWarning($"[Migration] Could not write {path}: {ex.Message}"); return; }
-
-        Log.LogInfo($"[Migration] Renamed {renamed} legacy config section header(s) to the '── Name ──' style. Existing user values preserved.");
-        Config.Reload();
-    }
-
     private void InitConfiguration()
     {
-        DisableFog = Config.Bind(GeneralSection, "Disable Fog", true,
+        RemoveFog = Config.Bind(GeneralSection, "Remove Fog", true,
             new ConfigDescription("Remove fog from outdoor and indoor weather.", null,
                 new ConfigurationManagerAttributes { Order = 3 }));
-        DisableWind = Config.Bind(GeneralSection, "Disable Wind", false,
+        RemoveWind = Config.Bind(GeneralSection, "Remove Wind", false,
             new ConfigDescription("Remove wind weather effects.", null,
                 new ConfigurationManagerAttributes { Order = 2 }));
-        DisableRain = Config.Bind(GeneralSection, "Disable Rain", false,
+        RemoveRain = Config.Bind(GeneralSection, "Remove Rain", false,
             new ConfigDescription("Remove rain weather effects.", null,
                 new ConfigurationManagerAttributes { Order = 1 }));
 
-        DisableFogCached = DisableFog.Value;
-        DisableWindCached = DisableWind.Value;
-        DisableRainCached = DisableRain.Value;
+        RemoveFogCached = RemoveFog.Value;
+        RemoveWindCached = RemoveWind.Value;
+        RemoveRainCached = RemoveRain.Value;
 
-        DisableFog.SettingChanged += (_, _) => DisableFogCached = DisableFog.Value;
-        DisableWind.SettingChanged += (_, _) => DisableWindCached = DisableWind.Value;
-        DisableRain.SettingChanged += (_, _) => DisableRainCached = DisableRain.Value;
+        RemoveFog.SettingChanged += (_, _) => RemoveFogCached = RemoveFog.Value;
+        RemoveWind.SettingChanged += (_, _) => RemoveWindCached = RemoveWind.Value;
+        RemoveRain.SettingChanged += (_, _) => RemoveRainCached = RemoveRain.Value;
 
         CheckForUpdates = Config.Bind(UpdatesSection, "Check for Updates", true,
             new ConfigDescription(

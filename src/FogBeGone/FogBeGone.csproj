@@ -7,5 +7,6 @@
     <ItemGroup>
         <Compile Include="..\Shared\ConfigurationManagerAttributes.cs" Link="ConfigurationManagerAttributes.cs"/>
         <Compile Include="..\Shared\StartupLogger.cs" Link="StartupLogger.cs"/>
+        <Compile Include="..\Shared\ConfigMigration.cs" Link="ConfigMigration.cs"/>
     </ItemGroup>
 </Project>
