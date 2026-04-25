@@ -108,6 +108,6 @@ public class Plugin : BaseUnityPlugin
         GameBalance.me.craft_data.Add(_newItem);
         GameBalance.me.AddDataUniversal(_newItem);
         GameBalance.me.AddData(_newItem);
-        Log.LogWarning($"Added {WoodenStick} to game balance.");
+        Log.LogInfo($"Added {WoodenStick} to game balance.");
     }
 }
