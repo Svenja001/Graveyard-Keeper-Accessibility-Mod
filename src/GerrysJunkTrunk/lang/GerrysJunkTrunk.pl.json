@@ -2,6 +2,7 @@
   "Bye": "Do widzenia.",
   "ConfigMessage": "Konfiguracja została ponownie załadowana!",
   "DebugWarning": "Tryb debugowania jest włączony. Nie zaleca się pozostawiania go włączonego, chyba że masz ku temu powód.",
+  "DisableTaxConfirm": "Uwaga — działka Gerry'ego to element balansu moda. Kufer jest pomyślany jako podatek za wygodę: oddajesz część wartości w zamian za to, że nie musisz iść do sprzedawcy. Wyłączenie tej opcji sprawia, że kufer staje się po prostu lepszy od sprzedaży bezpośredniej i obchodzi ten kompromis. Twój zapis, twoja decyzja.",
   "For": "dla",
   "GerrysPrice": "Cena Gerry'ego",
   "Header": "Śmieciowy kufer Gerry'ego",

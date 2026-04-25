@@ -2,6 +2,7 @@
   "Bye": "Bye.",
   "ConfigMessage": "Config Reloaded!",
   "DebugWarning": "Please note you have debug mode turned on. It isn't recommended to leave this on unless you have a purpose for it.",
+  "DisableTaxConfirm": "Heads up — Gerry's cut is the mod's balance. The trunk is designed as a convenience tax: you trade a slice of value for skipping the walk to a vendor. Disabling it makes the trunk strictly better than selling directly and sidesteps that tradeoff. Your save, your call.",
   "For": "for",
   "GerrysPrice": "Gerry's Price",
   "Header": "Gerry's Junk Trunk",

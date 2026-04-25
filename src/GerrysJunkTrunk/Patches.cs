@@ -7,6 +7,16 @@ public static class Patches
     [HarmonyPatch(typeof(MainGame), nameof(MainGame.Update))]
     public static void MainGame_Update()
     {
+        // Drain the Disable Tax confirmation BEFORE the game_started guard so the popup
+        // also fires when the player toggles the option from the main menu (where the
+        // dialog system is already alive but no save is loaded).
+        if (Plugin._disableTaxPromptDirty && !Plugin._disableTaxDialogOpen)
+        {
+            Plugin._disableTaxPromptDirty = false;
+            Plugin._disableTaxDialogOpen = true;
+            Plugin.ShowDisableTaxConfirm();
+        }
+
         if (!MainGame.game_started) return;
 
         // Cinematic watchdog. The 20s GJTimer safety-net inside StartGerryRoutine can be
@@ -82,6 +92,7 @@ public static class Patches
                 Plugin._shippingBox.data.SetInventorySize(invSize);
 
                 sbCraft.hidden = true;
+                Plugin.ApplyBoxTint();
             }
         }
     }

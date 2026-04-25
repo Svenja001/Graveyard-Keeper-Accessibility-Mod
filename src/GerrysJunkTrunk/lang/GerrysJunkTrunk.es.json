@@ -2,6 +2,7 @@
   "Bye": "Adiós.",
   "ConfigMessage": "¡Configuración recargada!",
   "DebugWarning": "Ten en cuenta que el modo de depuración está activado. No se recomienda dejarlo activado a menos que tengas un propósito para ello.",
+  "DisableTaxConfirm": "Aviso — la parte que se queda Gerry forma parte del equilibrio del mod. El baúl está diseñado como un impuesto de comodidad: cedes una parte del valor a cambio de ahorrarte el viaje al vendedor. Desactivarlo hace que el baúl sea estrictamente mejor que vender directamente y elude ese equilibrio. Tu partida, tu decisión.",
   "For": "por",
   "GerrysPrice": "Precio de Gerry",
   "Header": "Baúl de chatarra de Gerry",

@@ -2,6 +2,7 @@
   "Bye": "Addio.",
   "ConfigMessage": "Configurazione ricaricata!",
   "DebugWarning": "Nota: la modalità debug è attivata. Non è consigliato lasciarla attiva a meno che tu non abbia un motivo specifico.",
+  "DisableTaxConfirm": "Attenzione — la quota di Gerry fa parte del bilanciamento del mod. Il baule è pensato come una tassa di comodità: rinunci a una fetta del valore per evitarti il viaggio fino al venditore. Disattivarla rende il baule semplicemente migliore della vendita diretta e aggira quel compromesso. Il tuo salvataggio, la tua scelta.",
   "For": "per",
   "GerrysPrice": "Il prezzo di Gerry",
   "Header": "Il baule spazzatura di Gerry",

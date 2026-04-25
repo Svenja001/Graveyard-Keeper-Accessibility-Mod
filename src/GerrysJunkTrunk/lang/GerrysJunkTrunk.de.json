@@ -2,6 +2,7 @@
   "Bye": "Wiedersehen.",
   "ConfigMessage": "Konfiguration neu geladen!",
   "DebugWarning": "Bitte beachten Sie, dass der Debug-Modus aktiviert ist. Es wird nicht empfohlen, diesen eingeschaltet zu lassen, es sei denn, Sie haben einen Zweck dafür.",
+  "DisableTaxConfirm": "Hinweis — Gerrys Anteil gehört zur Balance des Mods. Die Trödelkiste ist als Komfortsteuer gedacht: Du verzichtest auf einen Teil des Wertes, um dir den Weg zum Händler zu sparen. Wenn du sie deaktivierst, ist die Kiste schlicht besser als der direkte Verkauf und umgeht diesen Kompromiss. Dein Spielstand, deine Entscheidung.",
   "For": "zum",
   "GerrysPrice": "Gerrys Preis",
   "Header": "Gerrys Trödelkiste",

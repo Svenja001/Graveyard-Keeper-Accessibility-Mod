@@ -18,12 +18,14 @@ public class Plugin : BaseUnityPlugin
         ["03. Price Tooltips"]    = PriceTooltipsSection,
     };
 
-    internal const float FullPriceModifier = 0.70f;
+    // Fraction of vendor value the player keeps when Best Friend perk + Engineer + Wood Processing are all unlocked (Stage 3).
+    internal const float BestFriendPayoutFraction = 0.80f;
     internal const float PityPrice = 0.10f;
     internal const int LargeInvSize = 20;
     internal const int LargeMaxItemCount = 100;
     internal const string ModGerryTag = "mod_gerry";
-    internal const float PriceModifier = 0.60f;
+    // Fraction of vendor value the player keeps before Best Friend is unlocked (Stages 1 + 2).
+    internal const float BasePayoutFraction = 0.70f;
     internal const string ShippingBoxTag = "shipping_box";
     internal const string ShippingItem = "shipping";
     internal const int SmallInvSize = 10;
@@ -42,6 +44,8 @@ public class Plugin : BaseUnityPlugin
     internal static Transform _cinematicCameraTarget;
     internal static float _cinematicStartedAt;
     internal static int _lastMorningSweepDay = -1;
+    internal static bool _disableTaxPromptDirty;
+    internal static bool _disableTaxDialogOpen;
 
     // Watchdog upper bound for the gerry routine. Routine is hard-capped at 20s by the
     // existing safety-net timer; anything past 25s means the timer chain broke (sleep,
@@ -57,6 +61,9 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> ShowSoldMessagesOnPlayer { get; private set; }
     internal static ConfigEntry<bool> EnableGerry { get; private set; }
     internal static ConfigEntry<bool> CinematicMode { get; private set; }
+    internal static ConfigEntry<bool> ConvenienceTax { get; private set; }
+    internal static ConfigEntry<bool> ShowDisableTaxPopup { get; private set; }
+    internal static ConfigEntry<Color> BoxTintColor { get; private set; }
     internal static ConfigEntry<bool> ShowItemPriceTooltips { get; private set; }
     internal static ConfigEntry<bool> InternalShippingBoxBuilt { get; private set; }
     internal static ConfigEntry<bool> InternalShowIntroMessage { get; private set; }
@@ -78,56 +85,15 @@ public class Plugin : BaseUnityPlugin
     {
         Log = Logger;
         LogHelper.Log = Logger;
-        MigrateRenamedSections();
+        ConfigMigration.MigrateRenamedSections(Config, Log, SectionRenames);
+        ConfigMigration.MigrateRenamedKeys(Config, Log,
+            new ConfigMigration.KeyRename(GerrySection, "Disable Tax", "Convenience Tax", ConfigMigration.InvertBool));
         InitInternalConfiguration();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
         UpdateChecker.Register(Info, CheckForUpdates);
         DebugWarningDialog.Register(MyPluginInfo.PLUGIN_NAME, () => DebugEnabled);
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
-    }
-
-    // Rewrites old numbered section headers to the new "── Name ──" style on first launch so
-    // existing user values survive the rename. Idempotent.
-    private void MigrateRenamedSections()
-    {
-        var path = Config.ConfigFilePath;
-        if (!File.Exists(path)) return;
-
-        string content;
-        try
-        {
-            content = File.ReadAllText(path);
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[Migration] Could not read {path} for section rename: {ex.Message}");
-            return;
-        }
-
-        var renamed = 0;
-        foreach (var kv in SectionRenames)
-        {
-            var oldHeader = $"[{kv.Key}]";
-            var newHeader = $"[{kv.Value}]";
-            if (!content.Contains(oldHeader)) continue;
-            content = content.Replace(oldHeader, newHeader);
-            renamed++;
-        }
-        if (renamed == 0) return;
-
-        try
-        {
-            File.WriteAllText(path, content);
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[Migration] Could not write {path} after section rename: {ex.Message}");
-            return;
-        }
-
-        Log.LogInfo($"[Migration] Renamed {renamed} legacy config section header(s) to the '── Name ──' style. Existing user values preserved.");
-        Config.Reload();
     }
 
     private void InitInternalConfiguration()
@@ -167,6 +133,23 @@ public class Plugin : BaseUnityPlugin
                 HideCinematic();
             }
         };
+
+        ConvenienceTax = Config.Bind(GerrySection, "Convenience Tax", true,
+            new ConfigDescription("When on, Gerry takes a cut of every sale (30% before the Best Friend perk, 20% after). Disable to pay the full vendor value with no cut taken — bypasses the convenience-tax design.", null,
+                new ConfigurationManagerAttributes {Order = 4, DispName = "    └ Convenience Tax"}));
+        ConvenienceTax.SettingChanged += (_, _) =>
+        {
+            if (!ConvenienceTax.Value && ShowDisableTaxPopup.Value) _disableTaxPromptDirty = true;
+        };
+
+        ShowDisableTaxPopup = Config.Bind(GerrySection, "Show Disable Tax Popup", true,
+            new ConfigDescription("Show the in-game advisory dialog when you turn the Convenience Tax off. Turn off if you've read it once and don't need the reminder.", null,
+                new ConfigurationManagerAttributes {Order = 3, DispName = "        └ Show Disable Tax Popup"}));
+
+        BoxTintColor = Config.Bind(GerrySection, "Shipping Box Tint", Color.white,
+            new ConfigDescription("Tint colour multiplied over the shipping box sprite. Default white means no tint. Pick a darker colour to make the box less visually loud.", null,
+                new ConfigurationManagerAttributes {Order = 2, DispName = "    └ Shipping Box Tint"}));
+        BoxTintColor.SettingChanged += (_, _) => ApplyBoxTint();
 
         ShowSoldMessagesOnPlayer = Config.Bind(MessagesSection, "Show Sold Messages On Player", true,
             new ConfigDescription("Show the earned-coin bubble above your character instead of above the shipping box when Gerry pays out.", null,
@@ -287,7 +270,8 @@ public class Plugin : BaseUnityPlugin
 
         float ApplyPriceModifier(float price)
         {
-            return UnlockedFullPrice() ? price * FullPriceModifier : price * PriceModifier;
+            if (!ConvenienceTax.Value) return price;
+            return UnlockedFullPrice() ? price * BestFriendPayoutFraction : price * BasePayoutFraction;
         }
     }
 
@@ -296,6 +280,55 @@ public class Plugin : BaseUnityPlugin
         GUIElements.me.dialog.OpenOK(Lang.Get("Message1"), null,
             $"{Lang.Get("Message2")}\n{Lang.Get("Message3")}\n{Lang.Get("Message4")}\n{Lang.Get("Message5")}\n{Lang.Get("Message6")}\n{Lang.Get("Message7")}",
             true, Lang.Get("Message8"));
+    }
+
+    internal static void ShowDisableTaxConfirm()
+    {
+        Lang.Reload();
+        HideConfigurationManagerWindow();
+        GUIElements.me.dialog.OpenOK(Lang.Get("DisableTaxConfirm"), () => _disableTaxDialogOpen = false);
+    }
+
+    internal static void ApplyBoxTint()
+    {
+        if (_shippingBox == null) return;
+        var tint = BoxTintColor.Value;
+        foreach (var sr in _shippingBox.GetComponentsInChildren<SpriteRenderer>(true))
+        {
+            sr.color = tint;
+        }
+    }
+
+    // Soft-dependency hook for BepInEx ConfigurationManager. Mirrors the pattern in
+    // WheresMaStorage/Helpers.cs so toggling Disable Tax pops the in-game dialog into focus
+    // instead of leaving it hidden behind the CM overlay. Lookup is lazy because plugin load
+    // order isn't guaranteed.
+    private const string CmGuid = "com.bepis.bepinex.configurationmanager";
+    private static object _cmInstance;
+    private static PropertyInfo _cmDisplayingWindow;
+
+    internal static void HideConfigurationManagerWindow()
+    {
+        EnsureCmCached();
+        if (_cmInstance == null || _cmDisplayingWindow == null) return;
+        try
+        {
+            _cmDisplayingWindow.SetValue(_cmInstance, false);
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"[CM] Could not hide window: {ex.Message}");
+        }
+    }
+
+    private static void EnsureCmCached()
+    {
+        if (_cmDisplayingWindow != null) return;
+        if (!BepInEx.Bootstrap.Chainloader.PluginInfos.TryGetValue(CmGuid, out var info)) return;
+        if (info?.Instance == null) return;
+        _cmInstance = info.Instance;
+        _cmDisplayingWindow = info.Instance.GetType()
+            .GetProperty("DisplayingWindow", BindingFlags.Instance | BindingFlags.Public);
     }
 
     internal static void StartGerryRoutine(float num)
@@ -518,6 +551,7 @@ public class Plugin : BaseUnityPlugin
             _shippingBox.data.SetInventorySize(invSize);
 
             sbCraft.hidden = true;
+            ApplyBoxTint();
         }
     }
 }

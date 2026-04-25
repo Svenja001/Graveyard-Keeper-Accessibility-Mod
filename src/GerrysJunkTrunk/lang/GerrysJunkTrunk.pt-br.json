@@ -2,6 +2,7 @@
   "Bye": "Tchau.",
   "ConfigMessage": "Configuração recarregada!",
   "DebugWarning": "Observe que o modo de depuração está ativado. Não é recomendado deixá-lo ativado a menos que você tenha um propósito para isso.",
+  "DisableTaxConfirm": "Atenção — a parte que o Gerry leva faz parte do balanceamento do mod. O baú foi pensado como uma taxa de conveniência: você abre mão de uma fatia do valor para evitar a caminhada até o vendedor. Desativar a taxa torna o baú estritamente melhor do que vender direto e ignora esse compromisso. Seu save, sua escolha.",
   "For": "por",
   "GerrysPrice": "Preço de Gerry",
   "Header": "Tronco de lixo de Gerry",

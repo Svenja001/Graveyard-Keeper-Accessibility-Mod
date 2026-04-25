@@ -2,6 +2,7 @@
   "Bye": "Au revoir.",
   "ConfigMessage": "Configuration rechargée !",
   "DebugWarning": "Veuillez noter que le mode débogage est activé. Il n'est pas recommandé de le laisser activé sauf si vous en avez besoin.",
+  "DisableTaxConfirm": "À noter — la part prélevée par Gerry fait partie de l'équilibrage du mod. Le coffre est conçu comme une taxe de confort : tu abandonnes une part de la valeur pour t'épargner le trajet jusqu'au vendeur. Le désactiver rend le coffre strictement meilleur que la vente directe et contourne ce compromis. Ta sauvegarde, ton choix.",
   "For": "pour",
   "GerrysPrice": "Le prix de Gerry",
   "Header": "Malle à déchets de Gerry",

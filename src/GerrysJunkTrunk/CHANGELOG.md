@@ -2,6 +2,9 @@
 
 ## 1.9.7 | 18 April 2026
 
+- Reduced Gerry's cut a touch at every unlock stage
+- Added an option to disable Gerry's cut entirely
+- Added a tint colour option for the shipping box
 - Fixed Gerry's price line appearing twice on bag items (Farmers Bag, Potion Bag, etc.) in the inventory tooltip
 - Fixed Chinese translations not loading
 - Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it
