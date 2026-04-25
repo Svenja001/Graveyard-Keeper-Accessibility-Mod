@@ -10,7 +10,7 @@ public class Plugin : BaseUnityPlugin
     private const string ConvenienceSection = "── Convenience ──";
     private const string UpdatesSection     = "── Updates ──";
 
-    internal static ConfigEntry<bool> EnableAutoCraft { get; private set; }
+    internal static ConfigEntry<bool> AutoCraft { get; private set; }
     internal static Dictionary<CraftCategory, ConfigEntry<bool>> CategoryToggles { get; } = new();
 
     internal static ConfigEntry<bool> HalfFireRequirements { get; private set; }
@@ -74,6 +74,8 @@ public class Plugin : BaseUnityPlugin
     {
         Log = Logger;
         LogHelper.Log = Logger;
+        ConfigMigration.MigrateRenamedKeys(Config, Log,
+            new ConfigMigration.KeyRename(AutoCraftSection, "Enable Auto-Craft", "Auto-Craft"));
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
         UpdateChecker.Register(Info, CheckForUpdates);
@@ -98,7 +100,7 @@ public class Plugin : BaseUnityPlugin
         DebugEnabled = Debug.Value;
         Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
 
-        EnableAutoCraft = Config.Bind(AutoCraftSection, "Enable Auto-Craft", true,
+        AutoCraft = Config.Bind(AutoCraftSection, "Auto-Craft", true,
             new ConfigDescription("Master switch for converting hand crafts into queueable auto-crafts. Use the per-workbench toggles below to choose which benches get converted. If this is off, nothing is converted regardless of the child toggles.",
                 null, new ConfigurationManagerAttributes {Order = 100}));
 
@@ -142,7 +144,7 @@ public class Plugin : BaseUnityPlugin
             new ConfigDescription("Makes almost all crafting items able to be queued.",
                 null, new ConfigurationManagerAttributes {Order = 96}));
 
-        EnableAutoCraft.SettingChanged      += OnCraftSettingChanged;
+        AutoCraft.SettingChanged      += OnCraftSettingChanged;
         HalfFireRequirements.SettingChanged += OnCraftSettingChanged;
         HalfCraftOutputs.SettingChanged     += OnCraftSettingChanged;
         ForceMultiCraft.SettingChanged      += OnCraftSettingChanged;
@@ -169,7 +171,7 @@ public class Plugin : BaseUnityPlugin
 
     internal static bool IsCategoryEnabled(CraftCategory category)
     {
-        if (!EnableAutoCraft.Value)
+        if (!AutoCraft.Value)
         {
             return false;
         }
@@ -179,7 +181,7 @@ public class Plugin : BaseUnityPlugin
 
     internal static bool AnyAutoCraftCategoryEnabled()
     {
-        if (!EnableAutoCraft.Value)
+        if (!AutoCraft.Value)
         {
             return false;
         }
