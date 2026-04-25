@@ -47,6 +47,7 @@ public static class Patches
         }
 
         Plugin._techCount = MainGame.me.save.unlocked_techs.Count;
+
         if (Plugin._techCount > Plugin._oldTechCount)
         {
             Plugin._oldTechCount = Plugin._techCount;
@@ -108,13 +109,6 @@ public static class Patches
                 __result = false;
             }
         }
-    }
-
-    [HarmonyPrefix]
-    [HarmonyPatch(typeof(InventoryPanelGUI), nameof(InventoryPanelGUI.Open))]
-    public static void InventoryPanelGUI_Open()
-    {
-        Plugin.AlreadyDone.Clear();
     }
 
     [HarmonyPrefix]
@@ -205,25 +199,33 @@ public static class Patches
         Lang.Reload();
 
         if (!Plugin.ShowItemPriceTooltips.Value || !Plugin.UnlockedShippingBox() || __instance == null || item_gui == null ||
-            Plugin.AlreadyDone.Contains(item_gui) || item_gui.id_empty)
+            item_gui.id_empty)
             return;
 
         var container = item_gui.container;
-        if (container != null && container.tooltip != null && container.tooltip.has_info)
-        {
-            var itemEarnings = Plugin.GetItemEarnings(item_gui.item);
-            container.tooltip.AddData(new BubbleWidgetSeparatorData());
+        if (container == null || container.tooltip == null || !container.tooltip.has_info)
+            return;
 
-            container.tooltip.AddData(new BubbleWidgetTextData(
-                Lang.Get("GerrysPrice"),
-                UITextStyles.TextStyle.Usual, NGUIText.Alignment.Left));
-            container.tooltip.AddData(new BubbleWidgetSeparatorData());
-            container.tooltip.AddData(new BubbleWidgetTextData(
-                $"{Trading.FormatMoney(itemEarnings, true)}",
-                UITextStyles.TextStyle.TinyDescription, NGUIText.Alignment.Left));
+        // Dedup against the tooltip itself, not a side-channel list. The previous
+        // approach used a static AlreadyDone list cleared on every InventoryPanelGUI.Open,
+        // but opening a bag popup re-fires Open on its panel and clears the list while
+        // the parent panel's item_gui tooltips still hold our entries — the next hover
+        // on a parent item then duplicated the data.
+        var marker = Lang.Get("GerrysPrice");
+        foreach (var d in container.tooltip.data.data_list)
+        {
+            if (d is BubbleWidgetTextData t && t.text == marker) return;
         }
 
-        Plugin.AlreadyDone.Add(item_gui);
+        var itemEarnings = Plugin.GetItemEarnings(item_gui.item);
+        container.tooltip.AddData(new BubbleWidgetSeparatorData());
+        container.tooltip.AddData(new BubbleWidgetTextData(
+            marker,
+            UITextStyles.TextStyle.Usual, NGUIText.Alignment.Left));
+        container.tooltip.AddData(new BubbleWidgetSeparatorData());
+        container.tooltip.AddData(new BubbleWidgetTextData(
+            $"{Trading.FormatMoney(itemEarnings, true)}",
+            UITextStyles.TextStyle.TinyDescription, NGUIText.Alignment.Left));
     }
 
     [HarmonyPostfix]
@@ -260,7 +262,7 @@ public static class Patches
         var cd = GameBalance.me.GetData<ObjectCraftDefinition>("mf_wood_builddesk:p:mf_box_stuff_place");
         newCd.craft_in = cd.craft_in;
         newCd.builder_ids = cd.builder_ids;
-        newCd.out_obj = "mf_shipping_box_place";
+        newCd.out_obj = "mf_box_stuff_place"; //was mf_shipping_box_place
         newCd.needs = cd.needs;
         newCd.needs_from_wgo = cd.needs_from_wgo;
         newCd.output = cd.output;
@@ -537,6 +539,14 @@ public static class Patches
     [HarmonyPatch(typeof(GameSave), nameof(GameSave.GlobalEventsCheck))]
     private static void FindJunkTrunk()
     {
+        // _oldTechCount is a static, so it carries the previous save's tech count across save
+        // switches. If the player loads a save with fewer unlocked techs than the previous one,
+        // MainGame_Update's `_techCount > _oldTechCount` comparison stays false and
+        // CheckShippingBox never fires on the new save — leaving the trunk hidden in the build
+        // menu even when Wood Processing is unlocked. Resetting to 0 forces one re-sync on the
+        // first tick of the new save.
+        Plugin._oldTechCount = 0;
+
         // _cinematicPlaying is a static; if a previous play session ended (save-load) mid-
         // cinematic the flag persists and the next ShowCinematic returns early forever.
         // Force a recovery on every load so HUD/control are guaranteed restored.
@@ -552,19 +562,28 @@ public static class Patches
         // Sweep any leftover tagged Gerrys on load so the trunk tile is clean.
         Plugin.SweepOrphanGerrys("FindJunkTrunk");
 
+        // sbCraft is a static reference to the one trunk CD in GameBalance — shared across
+        // saves. Its `hidden` field is a runtime mutation, not save-bound, so it inherits the
+        // previous save's value. Both branches below reset it to match the loaded save's
+        // actual world state, mirroring what the on-tick self-heal at MainGame_Update lines
+        // 65-77 does — but covering the case the self-heal can't reach (saves without Wood
+        // Processing, where the line-63 gate keeps the self-heal from running at all).
         var trunks = WorldMap.GetWorldGameObjectsByCustomTag(Plugin.ShippingBoxTag);
+        var sbCraft = GameBalance.me.GetData<ObjectCraftDefinition>(Plugin.ShippingBoxId);
         if (trunks.Count > 0)
         {
             Plugin._shippingBox = trunks[0];
             Plugin.InternalShippingBoxBuilt.Value = true;
-            var sbCraft = GameBalance.me.GetData<ObjectCraftDefinition>(Plugin.ShippingBoxId);
             sbCraft.hidden = true;
 
             if (Plugin.DebugEnabled) Plugin.WriteLog($"[FindJunkTrunk] found existing shipping box at {Plugin._shippingBox.pos3} on save load");
         }
-        else if (Plugin.DebugEnabled)
+        else
         {
-            Plugin.WriteLog("[FindJunkTrunk] no shipping box in save");
+            Plugin._shippingBox = null;
+            Plugin.InternalShippingBoxBuilt.Value = false;
+            sbCraft.hidden = false;
+            if (Plugin.DebugEnabled) Plugin.WriteLog("[FindJunkTrunk] no shipping box in save");
         }
     }
 }

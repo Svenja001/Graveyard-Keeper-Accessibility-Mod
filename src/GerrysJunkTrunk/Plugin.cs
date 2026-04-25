@@ -34,6 +34,7 @@ public class Plugin : BaseUnityPlugin
 
     internal static int _techCount;
     internal static int _oldTechCount;
+
     internal static readonly Dictionary<string, int> StackSizeBackups = new();
 
     internal static WorldGameObject _shippingBox;
@@ -52,7 +53,6 @@ public class Plugin : BaseUnityPlugin
     // save-load, scene unload, NPC dialog stomp) and HUD/control are stranded.
     internal const float CinematicMaxDurationSeconds = 25f;
 
-    internal static readonly List<BaseItemCellGUI> AlreadyDone = [];
     internal static ObjectCraftDefinition NewItem { get; private set; }
 
     internal static ConfigEntry<bool> Debug { get; private set; }
@@ -374,10 +374,7 @@ public class Plugin : BaseUnityPlugin
             });
         });
 
-        GJTimer.AddTimer(20f, delegate
-        {
-            HideCinematic();
-        });
+        GJTimer.AddTimer(20f, HideCinematic);
     }
 
     private static WorldGameObject SpawnGerry(Transform parent, Vector3 pos)
@@ -417,9 +414,9 @@ public class Plugin : BaseUnityPlugin
         if (orphans == null || orphans.Count == 0) return;
 
         if (DebugEnabled) WriteLog($"[{source}] found {orphans.Count} orphaned Gerry WGO(s) — destroying");
-        foreach (var g in orphans)
+        foreach (var g in orphans.Where(g => g))
         {
-            if (g != null) g.DestroyMe();
+            g.DestroyMe();
         }
     }
 
@@ -468,8 +465,8 @@ public class Plugin : BaseUnityPlugin
 
     internal static bool UnlockedShippingBoxExpansion()
     {
-        return UnlockedShippingBox() &&
-               MainGame.me.save.unlocked_techs.Exists(a => a.ToLowerInvariant().Equals("Engineer".ToLowerInvariant()));
+        return UnlockedShippingBox() && MainGame.me.save.unlocked_techs.Exists(a => a.ToLowerInvariant().Equals("Engineer".ToLowerInvariant()));
+
     }
 
     internal static void UpdateItemStates(ChestGUI instance)
@@ -510,16 +507,9 @@ public class Plugin : BaseUnityPlugin
 
     internal static void CheckShippingBox()
     {
-        if (UnlockedShippingBox())
-        {
-            MainGame.me.save.UnlockCraft(ShippingBoxId);
-            if (Plugin.DebugEnabled) WriteLog($"Tech requirements met, unlocking shipping box craft!");
-        }
-        else
-        {
-            MainGame.me.save.LockCraft(ShippingBoxId);
-            if (Plugin.DebugEnabled) WriteLog($"Tech requirements not met, locking shipping box craft!");
-        }
+        if (!UnlockedShippingBox()) return;
+        MainGame.me.save.UnlockCraft(ShippingBoxId);
+        if (DebugEnabled) WriteLog("Tech requirements met, unlocking shipping box craft!");
     }
 
     internal static void UpdateShippingBox(CraftDefinition sbCraft, WorldGameObject shippingBoxInstance = null)
