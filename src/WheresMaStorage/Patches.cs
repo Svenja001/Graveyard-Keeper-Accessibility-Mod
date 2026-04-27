@@ -160,8 +160,12 @@ public static class Patches
         var isQuarry = worldZoneId.Contains("stone_workyard") || worldZoneId.Contains("marble_deposit");
         var isWell = objId.Contains("well");
         var isZombieMill = worldZoneId.Contains("zombie_mill");
+        var isBuilder = __instance.obj_def.interaction_type == ObjectDefinition.InteractionType.Builder;
 
-        if (Fields.AlwaysSkipInventories.Any(skipItem => objId.Contains(skipItem) || objDefId.Contains(skipItem) || worldZoneId.Contains(skipItem)))
+        // Build desks (apiary, mining, garden, etc.) must always receive the shared pool —
+        // their obj_id can incidentally match the substring filter (e.g. apiary contains "bee")
+        // even though the filter is meant for passive production containers like the beehives themselves.
+        if (!isBuilder && Fields.AlwaysSkipInventories.Any(skipItem => objId.Contains(skipItem) || objDefId.Contains(skipItem) || worldZoneId.Contains(skipItem)))
         {
             if (Plugin.DebugEnabled) Helpers.Log($"[GetMultiInventory] skip (AlwaysSkipInventories match) obj={objId} zone={worldZoneId}");
             return true;
@@ -286,8 +290,9 @@ public static class Patches
         var crafteryObjDefId = crafteryWGO.obj_def.id;
         var instanceName = __instance.name;
         var crafteryWzId = crafteryWGO.GetMyWorldZoneId();
+        var isBuilder = crafteryWGO.obj_def.interaction_type == ObjectDefinition.InteractionType.Builder;
 
-        if (Fields.AlwaysSkipInventories.Any(a => crafteryObjId.Contains(a) || crafteryObjDefId.Contains(a) || crafteryWzId.Contains(a)))
+        if (!isBuilder && Fields.AlwaysSkipInventories.Any(a => crafteryObjId.Contains(a) || crafteryObjDefId.Contains(a) || crafteryWzId.Contains(a)))
         {
             if (Plugin.DebugEnabled) Helpers.Log($"[BaseCraftGUI] skip (AlwaysSkipInventories match) obj={crafteryObjId} zone={crafteryWzId}");
             return;

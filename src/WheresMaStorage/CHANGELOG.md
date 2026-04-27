@@ -1,7 +1,8 @@
 # Changelog
 
-## 2.1.14 | 18 April 2026
+## 2.1.14 | 27 April 2026
 
+- Fixed the apiary build desk showing no shared inventory
 - Fixed a duplicate "Player (7/7)" widget appearing next to your bag when you opened the inventory — that was your tool belt, which the game already shows in its own dedicated slot strip
 - New "Hide Bag Widgets" option (UI section, on by default) — bags and backpacks you're carrying no longer get their own expanded widget in the inventory panel. Right-click the bag icon to open it as before. Turn the option off if you prefer the old inline look
 - Fixed Chinese translations not loading

@@ -284,7 +284,9 @@ public static class Invents
         var isZombie = objId.Contains("zombie") || linkedWorkerObjId.Contains("zombie");
         Fields.ZombieWorker = isZombie;
 
-        if (Fields.AlwaysSkipZones.Any(a => objId.Contains(a) || worldZoneId.Contains(a)))
+        var isBuilder = otherGameObject.obj_def.interaction_type == ObjectDefinition.InteractionType.Builder;
+
+        if (!isBuilder && Fields.AlwaysSkipZones.Any(a => objId.Contains(a) || worldZoneId.Contains(a)))
         {
             if (Plugin.DebugEnabled) Helpers.Log($"[GetMi] skip (AlwaysSkipZones match) obj={objId} zone={worldZoneId}");
             return orig;
