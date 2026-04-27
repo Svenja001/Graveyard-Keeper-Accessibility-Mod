@@ -156,17 +156,13 @@ public static class Patches
         var globalMulti = Plugin.CraftOutputMultiplier.Value;
         var excludeTools = Plugin.CraftExcludeToolsAndEquipment.Value;
         var excludeProgression = Plugin.CraftExcludeProgressionCrafts.Value;
-        var stationOverrides = Plugin.CraftStationOverrideMap;
-        var excludedIds = BuildExcludedCraftIdSet(Plugin.CraftExcludedIds.Value);
 
-        // Fast exit: global is 1.0, no overrides, nothing to do.
-        var anyOverride = stationOverrides.Count > 0;
-        if (Mathf.Approximately(globalMulti, 1f) && !anyOverride)
+        if (Mathf.Approximately(globalMulti, 1f))
         {
             _craftOutputApplied = true;
             if (Plugin.DebugEnabled)
             {
-                Helpers.Log("[CraftApply] global=1.0 and no per-station overrides — nothing to multiply");
+                Helpers.Log("[CraftApply] global=1.0 — nothing to multiply");
             }
             return;
         }
@@ -174,18 +170,11 @@ public static class Patches
         var mutatedCrafts = 0;
         var mutatedOutputs = 0;
         var skippedProgression = 0;
-        var skippedExcludedId = 0;
         var skippedToolLike = 0;
 
         foreach (var craft in GameBalance.me.craft_data)
         {
             if (craft == null || string.IsNullOrEmpty(craft.id)) continue;
-
-            if (excludedIds.Contains(craft.id))
-            {
-                skippedExcludedId++;
-                continue;
-            }
 
             if (excludeProgression && IsProgressionCraft(craft.id))
             {
@@ -193,8 +182,7 @@ public static class Patches
                 continue;
             }
 
-            var multi = ResolveCraftMultiplier(craft, globalMulti, stationOverrides);
-            if (Mathf.Approximately(multi, 1f) || multi <= 0f) continue;
+            var multi = globalMulti;
 
             var craftMutated = false;
             for (var i = 0; i < craft.output.Count; i++)
@@ -231,21 +219,8 @@ public static class Patches
 
         if (Plugin.DebugEnabled || mutatedCrafts > 0)
         {
-            Helpers.Log($"[CraftApply] global={globalMulti}, overrides={stationOverrides.Count}, excludedIds={excludedIds.Count}, excludeTools={excludeTools}, excludeProgression={excludeProgression} → mutatedCrafts={mutatedCrafts}, mutatedOutputs={mutatedOutputs}, skipped(progression={skippedProgression}, excludedId={skippedExcludedId}, toolLike={skippedToolLike})");
+            Helpers.Log($"[CraftApply] global={globalMulti}, excludeTools={excludeTools}, excludeProgression={excludeProgression} → mutatedCrafts={mutatedCrafts}, mutatedOutputs={mutatedOutputs}, skipped(progression={skippedProgression}, toolLike={skippedToolLike})");
         }
-    }
-
-    private static HashSet<string> BuildExcludedCraftIdSet(string raw)
-    {
-        var set = new HashSet<string>(StringComparer.Ordinal);
-        if (string.IsNullOrWhiteSpace(raw)) return set;
-        foreach (var part in raw.Split(';'))
-        {
-            var trimmed = part.Trim();
-            if (trimmed.Length == 0) continue;
-            set.Add(trimmed);
-        }
-        return set;
     }
 
     private static bool IsProgressionCraft(string craftId)
@@ -275,23 +250,6 @@ public static class Patches
             default:
                 return false;
         }
-    }
-
-    private static float ResolveCraftMultiplier(CraftDefinition craft, float globalMulti, Dictionary<string, float> stationOverrides)
-    {
-        if (stationOverrides.Count == 0) return globalMulti;
-        foreach (var station in craft.craft_in)
-        {
-            if (stationOverrides.TryGetValue(station, out var overrideValue))
-            {
-                if (Plugin.DebugEnabled)
-                {
-                    Helpers.Log($"[CraftApply] station override '{station}' → multiplier={overrideValue} (craft='{craft.id}')");
-                }
-                return overrideValue;
-            }
-        }
-        return globalMulti;
     }
 
     [HarmonyPrefix]

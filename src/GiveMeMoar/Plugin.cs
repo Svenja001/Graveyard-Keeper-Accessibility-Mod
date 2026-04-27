@@ -53,14 +53,8 @@ public class Plugin : BaseUnityPlugin
 
     // ── Crafting ── (craft-output scaling)
     internal static ConfigEntry<float>  CraftOutputMultiplier { get; private set; }
-    internal static ConfigEntry<string> CraftPerStationOverrides { get; private set; }
-    internal static ConfigEntry<string> CraftExcludedIds { get; private set; }
     internal static ConfigEntry<bool>   CraftExcludeToolsAndEquipment { get; private set; }
     internal static ConfigEntry<bool>   CraftExcludeProgressionCrafts { get; private set; }
-
-    // Cached parse of CraftPerStationOverrides ("station_id=multi;station_id=multi"). Rebuilt
-    // on SettingChanged so the hot path doesn't re-parse the string on every craft.
-    internal static Dictionary<string, float> CraftStationOverrideMap { get; private set; } = new();
 
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
@@ -250,18 +244,6 @@ public class Plugin : BaseUnityPlugin
                 new AcceptableValueRange<float>(0.1f, 50f),
                 new ConfigurationManagerAttributes {Order = 100}));
 
-        CraftPerStationOverrides = Config.Bind(CraftingSection, "Per-Station Overrides", string.Empty,
-            new ConfigDescription(
-                "Optional per-station overrides that beat the global Craft Output Multiplier. Format: station_id=multi;station_id=multi — for example 'mf_sawhorse_1=10;mf_anvil_2=3' scales sawhorse crafts by 10× and anvil-II crafts by 3×, while every other station uses the global multiplier.",
-                null,
-                new ConfigurationManagerAttributes {Order = 99, DispName = "    └ Per-Station Overrides"}));
-
-        CraftExcludedIds = Config.Bind(CraftingSection, "Excluded Craft IDs", string.Empty,
-            new ConfigDescription(
-                "Optional semicolon-separated list of craft definition IDs to skip on top of the automatic progression deny-list. Useful if you find a specific craft that shouldn't be multiplied (e.g. a DLC recipe). Leave blank unless you know what you're doing.",
-                null,
-                new ConfigurationManagerAttributes {Order = 90}));
-
         CraftExcludeToolsAndEquipment = Config.Bind(CraftingSection, "Exclude Tools And Equipment", true,
             new ConfigDescription(
                 "On: tools, weapons, armour and sermon scrolls are never multiplied, so one craft still makes one sword. Off: the multiplier applies to these too, which usually produces multiple equipped items per craft (weird but available).",
@@ -276,12 +258,8 @@ public class Plugin : BaseUnityPlugin
 
         // Craft-output patch reacts to config changes by restoring snapshots and reapplying.
         CraftOutputMultiplier.SettingChanged         += OnCraftOutputSettingChanged;
-        CraftPerStationOverrides.SettingChanged      += OnCraftOutputSettingChanged;
-        CraftExcludedIds.SettingChanged              += OnCraftOutputSettingChanged;
         CraftExcludeToolsAndEquipment.SettingChanged += OnCraftOutputSettingChanged;
         CraftExcludeProgressionCrafts.SettingChanged += OnCraftOutputSettingChanged;
-
-        RebuildCraftStationOverrideMap();
 
         // ── 5. Updates ──
         CheckForUpdates = Config.Bind(UpdatesSection, "Check for Updates", true,
@@ -293,35 +271,6 @@ public class Plugin : BaseUnityPlugin
 
     private static void OnCraftOutputSettingChanged(object sender, EventArgs e)
     {
-        RebuildCraftStationOverrideMap();
         Patches.RequestCraftOutputReapply();
-    }
-
-    internal static void RebuildCraftStationOverrideMap()
-    {
-        var map = new Dictionary<string, float>(StringComparer.Ordinal);
-        var raw = CraftPerStationOverrides?.Value;
-        if (!string.IsNullOrWhiteSpace(raw))
-        {
-            var pairs = raw.Split(';');
-            foreach (var pair in pairs)
-            {
-                var trimmed = pair.Trim();
-                if (trimmed.Length == 0) continue;
-                var eq = trimmed.IndexOf('=');
-                if (eq <= 0) continue;
-                var key = trimmed.Substring(0, eq).Trim();
-                var valPart = trimmed.Substring(eq + 1).Trim();
-                if (key.Length == 0) continue;
-                if (!float.TryParse(valPart, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) continue;
-                if (value <= 0f) continue;
-                map[key] = value;
-            }
-        }
-        CraftStationOverrideMap = map;
-        if (DebugEnabled)
-        {
-            Helpers.Log($"[CraftOverrides] rebuilt map, entries={map.Count} raw='{raw}'");
-        }
     }
 }
