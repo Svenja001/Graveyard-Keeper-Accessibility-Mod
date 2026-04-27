@@ -1069,3 +1069,8 @@ _ul
 
 # Decompiled game assemblies (reference only, not for version control)
 **/decompiled_assembly/
+
+# Per-mod Nexus page summary (local copy used to sync the website blurb), and the
+# diff scratchpad written by nexus-compare.ps1 — both are personal dev aids.
+**/desc-summary.txt
+nexus-desc-compare.md
