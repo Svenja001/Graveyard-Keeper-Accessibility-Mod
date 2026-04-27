@@ -3,16 +3,9 @@ namespace RestInPatches.Patches;
 [Harmony]
 public static class CraftArrowFixPatches
 {
-
     private const string MaxButtonGuid = "p1xel8ted.gyk.maxbuttonsredux";
-
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(CraftItemGUI), nameof(CraftItemGUI.Redraw))]
-    public static void CraftItemGUI_Redraw_RestoreArrows(CraftItemGUI __instance)
-    {
-        RestoreArrows(__instance);
-    }
-
+    private const string ArrowSpr = "arrow spr";
+    private const string Arr = "arr";
 
     [HarmonyPostfix]
     [HarmonyBefore(MaxButtonGuid)]
@@ -32,82 +25,86 @@ public static class CraftArrowFixPatches
 
     private static void RestoreArrowsForAll(CraftGUI craftGui)
     {
-        if (craftGui == null)
-        {
-            return;
-        }
-
-        if (Plugin.ArrowLeftSprite == null && Plugin.ArrowUpSprite == null && Plugin.ArrowDownSprite == null)
+        if (!craftGui)
         {
             return;
         }
 
         foreach (var item in craftGui.GetComponentsInChildren<CraftItemGUI>(true))
         {
-            RestoreArrows(item);
+            RestoreFromButton(item.btn_amount_plus);
+            RestoreFromButton(item.btn_amount_minus);
         }
     }
 
-    private static void RestoreArrows(CraftItemGUI item)
+    private static void RestoreFromButton(UIButton btn)
     {
-        if (item == null)
+        if (!btn)
         {
             return;
         }
 
-        if (Plugin.ArrowLeftSprite != null)
-        {
-            AssignIfMissing(item.btn_amount_plus, "arrow spr", Plugin.ArrowLeftSprite);
-            AssignIfMissing(item.btn_amount_minus, "arrow spr", Plugin.ArrowLeftSprite);
-        }
-
-        if (Plugin.ArrowUpSprite != null)
-        {
-            RestoreArrSprite(item.full_detailed_go, Plugin.ArrowUpSprite);
-        }
-
-        if (Plugin.ArrowDownSprite != null)
-        {
-            RestoreArrSprite(item.multi_quality_go, Plugin.ArrowDownSprite);
-        }
-    }
-
-    private static void RestoreArrSprite(GameObject root, Sprite sprite)
-    {
-        if (root == null)
-        {
-            return;
-        }
-
-        foreach (var spr in root.GetComponentsInChildren<UI2DSprite>(true))
-        {
-            if (spr == null || spr.sprite2D != null) continue;
-            if (!string.Equals(spr.name, "arr", StringComparison.Ordinal)) continue;
-            spr.sprite2D = sprite;
-            spr.MarkAsChanged();
-        }
-    }
-
-    private static void AssignIfMissing(UIButton btn, string childName, Sprite sprite)
-    {
-        if (btn == null)
-        {
-            return;
-        }
-
-        var arrow = btn.transform.Find(childName);
-        if (arrow == null)
+        var arrow = btn.transform.Find(ArrowSpr);
+        if (!arrow)
         {
             return;
         }
 
         var spr = arrow.GetComponent<UI2DSprite>();
-        if (spr == null || spr.sprite2D != null)
+        if (spr && !spr.sprite2D)
+        {
+            Assign(spr, Plugin.ArrowLeftSprite);
+        }
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(UIWidget), nameof(UIWidget.CreatePanel))]
+    public static void UIWidget_CreatePanel_RestoreArrows(UIWidget __instance)
+    {
+        if (__instance is not UI2DSprite sprite || sprite.sprite2D)
         {
             return;
         }
 
-        spr.sprite2D = sprite;
-        spr.MarkAsChanged();
+        var name = sprite.name;
+
+        if (string.Equals(name, ArrowSpr, StringComparison.Ordinal))
+        {
+            Assign(sprite, Plugin.ArrowLeftSprite);
+            return;
+        }
+
+        if (!string.Equals(name, Arr, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var craftItem = sprite.GetComponentInParent<CraftItemGUI>();
+        if (!craftItem)
+        {
+            return;
+        }
+
+        if (craftItem.full_detailed_go && sprite.transform.IsChildOf(craftItem.full_detailed_go.transform))
+        {
+            Assign(sprite, Plugin.ArrowUpSprite);
+            return;
+        }
+
+        if (craftItem.multi_quality_go && sprite.transform.IsChildOf(craftItem.multi_quality_go.transform))
+        {
+            Assign(sprite, Plugin.ArrowDownSprite);
+        }
+    }
+
+    private static void Assign(UI2DSprite sprite, Sprite replacement)
+    {
+        if (!replacement)
+        {
+            return;
+        }
+
+        sprite.sprite2D = replacement;
+        sprite.MarkAsChanged();
     }
 }

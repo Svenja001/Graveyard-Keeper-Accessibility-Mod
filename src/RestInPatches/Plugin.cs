@@ -13,7 +13,7 @@ public class Plugin : BaseUnityPlugin
         ["02. Footprints"]  = FootprintsSection,
     };
 
-    private static ManualLogSource Log { get; set; }
+    internal static ManualLogSource Log { get; set; }
     internal static Sprite ArrowLeftSprite { get; private set; }
     internal static Sprite ArrowUpSprite { get; private set; }
     internal static Sprite ArrowDownSprite { get; private set; }
