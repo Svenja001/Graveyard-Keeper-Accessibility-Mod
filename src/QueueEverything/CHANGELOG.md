@@ -1,10 +1,11 @@
 # Changelog
 
-## 2.1.13 | 18 April 2026
+## 2.1.13 | 27 April 2026
 
 - Fixed Chinese translations not loading
 - Fixed graves, garden beds, and other build-menu items becoming unplaceable when Auto Max Normal Crafts or Auto Max Multi-Quality Crafts was enabled
 - Fixed the "Auto Select Craft Button With Controller" option doing nothing — expanding a multi-quality craft on controller now focuses the Craft Now button when enabled, as it should
+- New installs now have all workbench categories enabled by default — no more digging through settings to switch on each one individually before the mod does anything. Existing installs keep whatever you've already set.
 - Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it
 - Rest In Patches is now a required dependency. Install it first or this mod will refuse to load
 

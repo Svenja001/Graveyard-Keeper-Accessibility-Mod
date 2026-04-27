@@ -162,7 +162,7 @@ public class Plugin : BaseUnityPlugin
 
         void BindCategory(CraftCategory category, string label, string description, int order)
         {
-            var entry = Config.Bind(AutoCraftSection, label, false,
+            var entry = Config.Bind(AutoCraftSection, label, true,
                 new ConfigDescription(description, null,
                     new ConfigurationManagerAttributes {Order = order, DispName = "    └ " + label}));
             CategoryToggles[category] = entry;
