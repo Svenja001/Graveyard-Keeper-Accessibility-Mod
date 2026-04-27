@@ -525,7 +525,10 @@ public static class Helpers
                 break;
         }
 
-        foreach (var tp in TechPointDrop.all)
+        // Snapshot — tp.Collect() removes itself from TechPointDrop._all, which would invalidate
+        // the live enumerator and throw "Collection was modified". The throw skipped the
+        // DropsCleaned/InventoriesLoaded resets below, leaving the mod in a permanent retry loop.
+        foreach (var tp in TechPointDrop.all.ToArray())
         {
             tp.Collect();
             if (Plugin.DebugEnabled) Log($"Attempting to collect TP: {tp.type}");

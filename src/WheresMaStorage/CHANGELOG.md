@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.15 | 27 April 2026
+
+- Fixed saves not completing and sleeping in bed softlocking the game
+
 ## 2.1.14 | 27 April 2026
 
 - Fixed the apiary build desk showing no shared inventory
