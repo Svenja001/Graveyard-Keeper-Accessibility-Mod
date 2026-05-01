@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.8 | 30 April 2026
+
+- Fixed the HUD staying hidden after Gerry's empty-trunk visit
+- Log messages now include timestamps for easier bug reporting
+
 ## 1.9.7 | 27 April 2026
 
 - Reduced Gerry's cut a touch at every unlock stage

@@ -57,7 +57,7 @@ public class Plugin : BaseUnityPlugin
 
     internal static ConfigEntry<bool> Debug { get; private set; }
     internal static bool DebugEnabled;
-    internal static ManualLogSource Log { get; set; }
+    internal static TimestampedLogger Log { get; set; }
     internal static ConfigEntry<bool> ShowSoldMessagesOnPlayer { get; private set; }
     internal static ConfigEntry<bool> EnableGerry { get; private set; }
     internal static ConfigEntry<bool> CinematicMode { get; private set; }
@@ -83,8 +83,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         ConfigMigration.MigrateRenamedSections(Config, Log, SectionRenames);
         ConfigMigration.MigrateRenamedKeys(Config, Log,
             new ConfigMigration.KeyRename(GerrySection, "Disable Tax", "Convenience Tax", ConfigMigration.InvertBool));
@@ -195,7 +195,6 @@ public class Plugin : BaseUnityPlugin
     internal static void HideCinematic()
     {
         if (!_cinematicPlaying) return;
-        _cinematicPlaying = false;
         if (_cinematicCameraTarget != null)
         {
             GS.RemoveCameraTarget(_cinematicCameraTarget);
@@ -203,6 +202,10 @@ public class Plugin : BaseUnityPlugin
         }
         GS.AddCameraTarget(MainGame.me.player.transform);
         GS.SetPlayerEnable(true, true);
+        // Flip the flag last so a partial-failure restore (NRE on player.transform during
+        // a scene transition, etc.) leaves _cinematicPlaying=true and the 25s watchdog in
+        // Patches.MainGame_Update can retry instead of silently losing the HUD.
+        _cinematicPlaying = false;
     }
 
     internal static void ClearGerryFlag(ChestGUI chestGui)
@@ -337,7 +340,11 @@ public class Plugin : BaseUnityPlugin
         var noSales = num <= 0;
         var money = Trading.FormatMoney(num, true);
         var gerry = SpawnGerry(_shippingBox.transform, _shippingBox.pos3);
-        ShowCinematic(gerry.transform);
+        // Empty-trunk path: skip the cinematic entirely. Nothing to focus the camera on,
+        // and the immediate Show→Hide pair this used to do could strand the HUD if any
+        // step of the restore failed. Gerry still pops up, says "Nothing!", and gets
+        // cleaned up by DestroyGerryWithDelay.
+        if (!noSales) ShowCinematic(gerry.transform);
         GJTimer.AddTimer(2f,
             delegate
             {
@@ -347,11 +354,7 @@ public class Plugin : BaseUnityPlugin
                 });
             });
 
-        if (noSales)
-        {
-            HideCinematic();
-            return;
-        }
+        if (noSales) return;
 
         GJTimer.AddTimer(8f, delegate
         {
@@ -516,7 +519,7 @@ public class Plugin : BaseUnityPlugin
     {
         if (!InternalShippingBoxBuilt.Value || _shippingBox != null) return;
 
-        _shippingBox = shippingBoxInstance ? shippingBoxInstance : UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true)
+        _shippingBox = shippingBoxInstance ? shippingBoxInstance : FindObjectsOfType<WorldGameObject>(true)
             .FirstOrDefault(x => string.Equals(x.custom_tag, ShippingBoxTag));
 
         if (_shippingBox == null)
