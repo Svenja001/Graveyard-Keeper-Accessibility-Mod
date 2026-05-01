@@ -1,10 +1,13 @@
 # Changelog
 
-## 0.1.2 | 27 April 2026
+## 0.1.2 | 30 April 2026
 
 - The +/- arrows are now also restored on items already sitting in your craft queue, not just the recipe list.
 - Config section headers restyled to the "── Name ──" look used by the rest of the collection. Existing settings carry over automatically.
 - Reduced unnecessary per-frame work across several systems (HUD labels, ground item highlighting, world-object processing, and a few others).
+- Repairs corrupted refugee-camp tent occupancy on save load. Saves where a tent's "busy" count had drifted above its capacity (a vanilla bug visible as "Wrong vacant places count in tent" / "No refugee for spawn" errors) are now reset to match the actual refugees living in the camp, so spawning resumes working.
+- Log messages now include timestamps for easier bug reporting.
+- Mod settings are now logged at startup for easier bug reporting.
 
 ## 0.1.1 | 19 April 2026
 

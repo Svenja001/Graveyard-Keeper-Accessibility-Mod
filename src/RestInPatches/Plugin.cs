@@ -13,7 +13,7 @@ public class Plugin : BaseUnityPlugin
         ["02. Footprints"]  = FootprintsSection,
     };
 
-    internal static ManualLogSource Log { get; set; }
+    internal static TimestampedLogger Log { get; set; }
     internal static Sprite ArrowLeftSprite { get; private set; }
     internal static Sprite ArrowUpSprite { get; private set; }
     internal static Sprite ArrowDownSprite { get; private set; }
@@ -24,7 +24,7 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         MigrateRenamedSections();
         InitConfiguration();
         ArrowLeftSprite = LoadEmbeddedSprite("RestInPatches.Resources.ui_btn_arrow_left.png", "ui_btn_arrow_left");
