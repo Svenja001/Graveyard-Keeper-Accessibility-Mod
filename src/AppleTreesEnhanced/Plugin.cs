@@ -19,7 +19,7 @@ public class Plugin : BaseUnityPlugin
         ["5. Advanced"]          = AdvancedSection,
     };
 
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
     internal static ConfigEntry<bool> Debug { get; private set; }
     internal static bool DebugEnabled;
@@ -36,8 +36,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateRenamedSections();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
@@ -141,7 +141,7 @@ public class Plugin : BaseUnityPlugin
 
     private static void ProcessDudBees()
     {
-        var dudBees = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true)
+        var dudBees = FindObjectsOfType<WorldGameObject>(true)
             .Where(a => a.obj_id == Helpers.Constants.HarvestGrowing.BeeHouse).Where(b => b.progress <= 0)
             .Where(Helpers.IsPlayerBeeHive);
 
@@ -160,7 +160,7 @@ public class Plugin : BaseUnityPlugin
 
     private static void ProcessDudTrees()
     {
-        var dudTrees = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true)
+        var dudTrees = FindObjectsOfType<WorldGameObject>(true)
             .Where(a => a.obj_id == Helpers.Constants.HarvestGrowing.GardenAppleTree).Where(b => b.progress <= 0);
 
         var dudTreeCount = 0;
@@ -179,7 +179,7 @@ public class Plugin : BaseUnityPlugin
 
     private static void ProcessDudBushes()
     {
-        var dudBushes = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true)
+        var dudBushes = FindObjectsOfType<WorldGameObject>(true)
             .Where(a => a.obj_id == Helpers.Constants.HarvestGrowing.GardenBerryBush).Where(b => b.progress <= 0);
 
         var dudBushCount = 0;
@@ -198,11 +198,11 @@ public class Plugin : BaseUnityPlugin
 
     private static void ProcessReadyObjects()
     {
-        var readyBees = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true).Where(a => a.obj_id == Helpers.Constants.HarvestReady.BeeHouse)
+        var readyBees = FindObjectsOfType<WorldGameObject>(true).Where(a => a.obj_id == Helpers.Constants.HarvestReady.BeeHouse)
             .Where(Helpers.IsPlayerBeeHive);
-        var readyGardenTrees = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true).Where(a => a.obj_id == Helpers.Constants.HarvestReady.GardenAppleTree);
-        var readyGardenBushes = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true).Where(a => a.obj_id == Helpers.Constants.HarvestReady.GardenBerryBush);
-        var readyWorldBushes = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true).Where(a => Helpers.WorldReadyHarvests.Contains(a.obj_id));
+        var readyGardenTrees = FindObjectsOfType<WorldGameObject>(true).Where(a => a.obj_id == Helpers.Constants.HarvestReady.GardenAppleTree);
+        var readyGardenBushes = FindObjectsOfType<WorldGameObject>(true).Where(a => a.obj_id == Helpers.Constants.HarvestReady.GardenBerryBush);
+        var readyWorldBushes = FindObjectsOfType<WorldGameObject>(true).Where(a => Helpers.WorldReadyHarvests.Contains(a.obj_id));
 
         foreach (var item in readyBees)
         {

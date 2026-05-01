@@ -55,13 +55,13 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> OldEnglishThrowback { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateRenamedSections();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
@@ -273,7 +273,7 @@ public class Plugin : BaseUnityPlugin
 
             visitor.UnlinkWithSpawnerIfExists();
             visitor.is_removed = true;
-            UnityEngine.Object.Destroy(visitor.gameObject);
+            Destroy(visitor.gameObject);
             if (!visitor._was_ever_active)
             {
                 visitor.OnDestroy();

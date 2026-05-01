@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.9 | 30 April 2026
+
+- Log messages now include timestamps for easier bug reporting
+
 ## 0.1.8 | 27 April 2026
 
 - Incense burners now burn forever and auto-light on placement, just like candelabras

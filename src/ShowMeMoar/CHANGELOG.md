@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.12 | 30 April 2026
+
+- Log messages now include timestamps for easier bug reporting
+
 ## 0.1.11 | 27 April 2026
 
 - On first launch with Windows display scaling set above 100%, the mod now offers to apply the high-DPI compatibility fix automatically so the game renders sharply at 4K and other scaled resolutions. Click Yes on the main-menu prompt, restart the game, and you're set. You can apply, undo, or silence the prompt any time under the new "── 9. High-DPI Fix ──" settings section. The old manual steps on the mod page still work if you prefer to do it yourself. The prompt, status text, and result dialogs are translated for all 11 supported languages (DE, EN, ES, FR, IT, JA, KO, PL, PT-BR, RU, ZH-CN); feel free to improve the translations by editing the matching file in the mod's `lang` folder.

@@ -11,7 +11,7 @@ public class Plugin : BaseUnityPlugin
         ["01. Economy"] = EconomySection,
     };
 
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
     internal static ConfigEntry<bool> DynamicBuyPricing { get; private set; }
     internal static ConfigEntry<float> BuyPriceMultiplier { get; private set; }
@@ -21,7 +21,7 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         var legacy = MigrateConfig();
         InitConfiguration();
         ApplyLegacyMigration(legacy);

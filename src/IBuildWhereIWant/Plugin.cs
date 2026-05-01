@@ -22,7 +22,7 @@ public class Plugin : BaseUnityPlugin
     private const string Zone = "mf_wood";
     private const string BuildDeskConst = "buildanywhere_desk";
 
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
     internal static ConfigEntry<bool> Grid { get; private set; }
     internal static ConfigEntry<bool> GreyOverlay { get; private set; }
     internal static ConfigEntry<bool> BuildingCollision { get; private set; }
@@ -43,8 +43,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateRenamedSections();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
@@ -154,7 +154,7 @@ public class Plugin : BaseUnityPlugin
 
         if (BuildDesk == null)
         {
-            BuildDesk = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true)
+            BuildDesk = FindObjectsOfType<WorldGameObject>(true)
                 .FirstOrDefault(x => string.Equals(x.obj_id, "mf_wood_builddesk"));
         }
 
@@ -165,10 +165,10 @@ public class Plugin : BaseUnityPlugin
 
         if (BuildDeskClone != null)
         {
-            UnityEngine.Object.Destroy(BuildDeskClone);
+            Destroy(BuildDeskClone);
         }
 
-        BuildDeskClone = UnityEngine.Object.Instantiate(BuildDesk);
+        BuildDeskClone = Instantiate(BuildDesk);
 
         BuildDeskClone.name = BuildDeskConst;
 

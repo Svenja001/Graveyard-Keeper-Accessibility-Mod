@@ -11,7 +11,7 @@ public class Plugin : BaseUnityPlugin
 
     internal static ConfigEntry<bool> Debug;
     internal static bool DebugEnabled;
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
     internal static bool PrideDayLogged { get; set; }
     internal static WorldGameObject Donkey { get; set; }
@@ -32,8 +32,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         InitConfiguration();
         InitInternalConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);

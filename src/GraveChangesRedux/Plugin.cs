@@ -21,7 +21,7 @@ public class Plugin : BaseUnityPlugin
     private static readonly Dictionary<string,SmartExpression> ObjDefBackups = new();
 
     private static readonly string[] SkipThese = ["grave_empty", "_place", "place_", "grave_corp", "grave_exhume", "grave_ground"];
-    private static ManualLogSource LOG { get; set; }
+    private static TimestampedLogger LOG { get; set; }
     private static ConfigEntry<bool> Debug { get; set; }
     internal static bool DebugEnabled;
     private static ConfigEntry<bool> ModifyGraves { get; set; }
@@ -30,8 +30,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        LOG = Logger;
-        LogHelper.Log = Logger;
+        LOG = new TimestampedLogger(Logger);
+        LogHelper.Log = LOG;
         MigrateRenamedSections();
 
         Debug = Config.Bind(AdvancedSection, "Debug Logging", false,

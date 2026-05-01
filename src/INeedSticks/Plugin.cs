@@ -5,12 +5,12 @@ public class Plugin : BaseUnityPlugin
 {
     private static CraftDefinition _newItem;
     private const string WoodenStick = "wooden_stick";
-    private static ManualLogSource Log { get; set; }
+    private static TimestampedLogger Log { get; set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         CheckForUpdates = Config.Bind("── Updates ──", "Check for Updates", true,
             "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page.");
         Lang.Init(Assembly.GetExecutingAssembly(), Log);

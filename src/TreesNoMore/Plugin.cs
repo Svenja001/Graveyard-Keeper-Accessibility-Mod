@@ -27,7 +27,7 @@ public class Plugin : BaseUnityPlugin
     };
 
     private static bool ShowConfirmationDialog { get; set; }
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
     internal static List<Tree> Trees { get; private set; } = [];
 
@@ -40,8 +40,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateRenamedSections();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
@@ -143,7 +143,7 @@ public class Plugin : BaseUnityPlugin
             {
                 if (GUILayout.Button(Lang.Get("Yes"), GUILayout.ExpandWidth(true)))
                 {
-                    if (Plugin.DebugEnabled) Helpers.Log($"[Reset] User confirmed — clearing {Trees.Count} tracked tree(s) and deleting {FilePath}");
+                    if (DebugEnabled) Helpers.Log($"[Reset] User confirmed — clearing {Trees.Count} tracked tree(s) and deleting {FilePath}");
                     Trees.Clear();
                     File.Delete(FilePath);
                     ShowConfirmationDialog = false;

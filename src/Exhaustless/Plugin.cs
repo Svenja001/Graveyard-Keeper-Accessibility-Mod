@@ -37,12 +37,12 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> UnlimitedSanity { get; private set; }
     internal static ConfigEntry<int> EnergySpendBeforeSleepDebuff { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
-    private static ManualLogSource Log { get; set; }
+    private static TimestampedLogger Log { get; set; }
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateRenamedSections();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);

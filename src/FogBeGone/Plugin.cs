@@ -11,7 +11,7 @@ public class Plugin : BaseUnityPlugin
         ["01. General"] = GeneralSection,
     };
 
-    private static ManualLogSource Log { get; set; }
+    private static TimestampedLogger Log { get; set; }
 
     internal static ConfigEntry<bool> RemoveFog { get; private set; }
     internal static ConfigEntry<bool> RemoveWind { get; private set; }
@@ -24,7 +24,7 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         ConfigMigration.MigrateRenamedSections(Config, Log, SectionRenames);
         ConfigMigration.MigrateRenamedKeys(Config, Log,
             new ConfigMigration.KeyRename(GeneralSection, "Disable Fog", "Remove Fog"),

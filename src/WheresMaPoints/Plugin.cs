@@ -19,11 +19,11 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> StillPlayCollectAudio { get; private set; }
     internal static ConfigEntry<bool> AlwaysShowXpBar { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
-    private static ManualLogSource Log { get; set; }
+    private static TimestampedLogger Log { get; set; }
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         MigrateRenamedSections();
         InitConfiguration();
         UpdateChecker.Register(Info, CheckForUpdates);

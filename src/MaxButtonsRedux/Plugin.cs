@@ -4,7 +4,7 @@ namespace MaxButtonsRedux;
 [BepInDependency("p1xel8ted.gyk.restinpatches")]
 public class Plugin : BaseUnityPlugin
 {
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
     internal const string VendorGui = "VendorGUI";
@@ -42,7 +42,7 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         CheckForUpdates = Config.Bind("── Updates ──", "Check for Updates", true,
             "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page.");
         UpdateChecker.Register(Info, CheckForUpdates);

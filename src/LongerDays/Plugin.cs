@@ -17,13 +17,13 @@ public class Plugin : BaseUnityPlugin
     internal const float DefaultIncreaseSeconds = 675f;
 
     internal static float Seconds;
-    private static ManualLogSource Log { get; set; }
+    private static TimestampedLogger Log { get; set; }
     private static ConfigEntry<float> DayLength { get; set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         MigrateRenamedSections();
 
         DayLength = Config.Bind(DayLengthSection, "Day Length", 675f, new ConfigDescription($"Set the length of a day", new AcceptableValueList<float>(675f, 900f, 1125f, 1350f), new ConfigurationManagerAttributes {Order = 1, CustomDrawer = LengthSlider}));

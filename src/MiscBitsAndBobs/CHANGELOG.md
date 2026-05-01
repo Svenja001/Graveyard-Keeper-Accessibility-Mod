@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.6 | 30 April 2026
+
+- Log messages now include timestamps for easier bug reporting
+
 ## 2.3.5 | 27 April 2026
 
 - Fixed Chinese translations not loading

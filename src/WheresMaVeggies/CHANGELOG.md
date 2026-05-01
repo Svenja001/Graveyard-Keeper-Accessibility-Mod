@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.10 | 30 April 2026
+
+- Log messages now include timestamps for easier bug reporting
+
 ## 0.1.9 | 27 April 2026
 
 - Fixed Chinese translations not loading

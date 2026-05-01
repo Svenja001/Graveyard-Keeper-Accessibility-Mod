@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6 | 30 April 2026
+
+- Log messages now include timestamps for easier bug reporting
+
 ## 0.1.5 | 27 April 2026
 
 - Chopped logs, broken stones, and mined blocks now land next to the tree or rock instead of flying at your feet (toggleable in the config)

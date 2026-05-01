@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.11 | 30 April 2026
+
+- Log messages now include timestamps for easier bug reporting
+
 ## 1.3.10 | 27 April 2026
 
 - Fixed vendor tier progress freezing when inflation or deflation was turned off. The level-up bar now advances with every buy and sell even when prices are locked to the base rate, so shops continue to upgrade through your playthrough

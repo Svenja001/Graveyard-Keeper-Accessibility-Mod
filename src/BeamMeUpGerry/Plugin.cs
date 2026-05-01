@@ -50,7 +50,7 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<string> SaveCustomLocationControllerButton { get; set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
     internal static Player CachedPlayer { get; set; }
     internal static Item CachedHearthstone { get; set; }
@@ -60,8 +60,8 @@ public class Plugin : BaseUnityPlugin
     private void Awake()
     {
         ConfigInstance = Config;
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateRenamedSections();
         InitConfiguration();
         InitInternalConfiguration();

@@ -23,7 +23,7 @@ public static class MaxButtonCrafting
         parentButtonSprite.SetDimensions(26, 26);
         parentButtonCollider.size = new Vector2(29.4f, 26f);
 
-        var minMaxButton = UnityEngine.Object.Instantiate(parentButtonTransform.gameObject, parentButtonTransform.parent);
+        var minMaxButton = Object.Instantiate(parentButtonTransform.gameObject, parentButtonTransform.parent);
         minMaxButton.name = minMaxButtonName;
         minMaxButton.transform.localPosition = new Vector3(minMaxButton.transform.localPosition.x, -31f, minMaxButton.transform.localPosition.z);
 

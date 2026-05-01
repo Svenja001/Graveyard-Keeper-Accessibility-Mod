@@ -11,7 +11,7 @@ public class Plugin : BaseUnityPlugin
         ["01. Regeneration"] = RegenerationSection,
     };
 
-    private static ManualLogSource Log { get; set; }
+    private static TimestampedLogger Log { get; set; }
     internal static ConfigEntry<bool> ShowRegenUpdates { get; private set; }
     internal static ConfigEntry<float> LifeRegen { get; private set; }
     internal static ConfigEntry<float> EnergyRegen { get; private set; }
@@ -20,7 +20,7 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         MigrateRenamedSections();
         InitConfiguration();
         UpdateChecker.Register(Info, CheckForUpdates);

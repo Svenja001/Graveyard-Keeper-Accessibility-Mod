@@ -13,7 +13,7 @@ public class Plugin : BaseUnityPlugin
         ["Colors"]       = ColorsSection,
     };
 
-    internal static ManualLogSource LOG { get; private set; }
+    internal static TimestampedLogger LOG { get; private set; }
     internal static ConfigEntry<bool> Debug { get; private set; }
     internal static bool DebugEnabled;
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
@@ -56,8 +56,8 @@ public class Plugin : BaseUnityPlugin
     
     private void Awake()
     {
-        LOG = Logger;
-        LogHelper.Log = Logger;
+        LOG = new TimestampedLogger(Logger);
+        LogHelper.Log = LOG;
         MigrateRenamedSections();
 
         Debug = Config.Bind(AdvancedSection, "Debug Logging", false,

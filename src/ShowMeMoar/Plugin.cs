@@ -59,13 +59,13 @@ public class Plugin : BaseUnityPlugin
     internal static bool HighDpiDetected => DpiHost == HighDpiFix.Host.Windows && CurrentDpi > 96;
 
     private static GameObject Icons { get; set; }
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
     internal static float MaxRefreshRate => Screen.resolutions.Max(a => a.refreshRate);
 
     private void Awake()
     {
-        Log = Logger;
+        Log = new TimestampedLogger(Logger);
         SceneManager.sceneLoaded += (_, _) =>
         {
             var smallFont = GameObject.Find("UI Root/Label size calculators/small_font");

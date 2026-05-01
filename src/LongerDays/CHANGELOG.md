@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.11 | 30 April 2026
+
+- Log messages now include timestamps for easier bug reporting
+
 ## 1.6.10 | 27 April 2026
 
 - Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it

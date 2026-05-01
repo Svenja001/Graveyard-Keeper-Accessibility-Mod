@@ -19,7 +19,7 @@ public class Plugin : BaseUnityPlugin
 
     private const float EnergyRequirement = 3f;
 
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
 
     internal static List<Stockpile> SortedStockpiles { get; } = [];
     internal static float LastBubbleTime { get; set; }
@@ -43,8 +43,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateRenamedSections();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
@@ -226,7 +226,7 @@ public class Plugin : BaseUnityPlugin
             };
 
             MainGame.me.player.DropItem(item, Direction.IgnoreDirection, location, 0f, false);
-            if (Plugin.DebugEnabled) WriteLog($"Teleporting {item.id} to dump site.");
+            if (DebugEnabled) WriteLog($"Teleporting {item.id} to dump site.");
             __instance.SetOverheadItem(null);
         }
         else
@@ -240,7 +240,7 @@ public class Plugin : BaseUnityPlugin
                 EffectBubblesManager.ShowImmediately(pwo.bubble_pos,
                     GJL.L("not_enough_something", $"(en)"),
                     EffectBubblesManager.BubbleColor.Energy, true, 1f);
-                if (Plugin.DebugEnabled) WriteLog($"Not enough energy to teleport. Dropping.");
+                if (DebugEnabled) WriteLog($"Not enough energy to teleport. Dropping.");
             }
         }
     }
@@ -295,7 +295,7 @@ public class Plugin : BaseUnityPlugin
         var stockpile = SortedStockpiles.Find(a => a.Wgo == wgo);
         if (stockpile != null)
         {
-            if (Plugin.DebugEnabled) WriteLog($"Removed stockpile: location: {stockpile.Location}, type: {stockpile.Type}, distance: {stockpile.DistanceFromPlayer}");
+            if (DebugEnabled) WriteLog($"Removed stockpile: location: {stockpile.Location}, type: {stockpile.Type}, distance: {stockpile.DistanceFromPlayer}");
             SortedStockpiles.Remove(stockpile);
         }
         else

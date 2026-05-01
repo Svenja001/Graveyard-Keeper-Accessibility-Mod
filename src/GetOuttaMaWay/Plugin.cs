@@ -15,7 +15,7 @@ public class Plugin : BaseUnityPlugin
 
     private const string Donkey = "donkey";
     private const string NpcPrefix = "[wgo] ";
-    internal static ManualLogSource LOG { get; private set; }
+    internal static TimestampedLogger LOG { get; private set; }
     internal static bool DebugEnabled;
     private static ConfigEntry<bool> Debug { get; set; }
     private static ConfigEntry<bool> NpcCollision { get; set; }
@@ -26,7 +26,7 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        LOG = Logger;
+        LOG = new TimestampedLogger(Logger);
         MigrateRenamedSections();
 
         Debug = Config.Bind(AdvancedSection, "Debug Logging", false,

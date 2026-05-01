@@ -41,7 +41,7 @@ public class Plugin : BaseUnityPlugin
 
     internal static readonly List<GameObject> ChurchColumnsList = [];
 
-    internal static ManualLogSource Log { get; private set; }
+    internal static TimestampedLogger Log { get; private set; }
     internal static bool DebugEnabled;
 
     internal static ConfigEntry<bool> Debug { get; private set; }
@@ -58,8 +58,8 @@ public class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Log = Logger;
-        LogHelper.Log = Logger;
+        Log = new TimestampedLogger(Logger);
+        LogHelper.Log = Log;
         MigrateConfig();
         InitConfiguration();
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
