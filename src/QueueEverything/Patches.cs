@@ -725,6 +725,32 @@ public static class CraftGUIPatches
     {
         Plugin.AlreadyRun = false;
     }
+
+    // Singular +1 / -1 buttons in the expanded multi-quality view. Vanilla never
+    // wired amount controls into full_detailed_go; QE owns these because QE's
+    // multi-qual features are what make that view actually adjustable. Min/Max
+    // in the same view are owned by MaxButtonsRedux — see ExpandViewAmountButtons.cs.
+    [HarmonyAfter("p1xel8ted.gyk.restinpatches")]
+    [HarmonyPostfix, HarmonyPatch(typeof(CraftGUI), nameof(CraftGUI.Open),
+        typeof(WorldGameObject), typeof(CraftsInventory), typeof(string))]
+    public static void CraftGUI_Open_InstallExpandButtons(CraftGUI __instance)
+    {
+        if (LazyInput.gamepad_active) return;
+        foreach (var t in __instance.GetComponentsInChildren<CraftItemGUI>())
+        {
+            ExpandViewAmountButtons.Install(t);
+        }
+    }
+
+    [HarmonyAfter("p1xel8ted.gyk.restinpatches")]
+    [HarmonyPostfix, HarmonyPatch(typeof(CraftGUI), nameof(CraftGUI.SwitchTab))]
+    public static void CraftGUI_SwitchTab_InstallExpandButtons(CraftGUI __instance)
+    {
+        foreach (var t in __instance.GetComponentsInChildren<CraftItemGUI>())
+        {
+            ExpandViewAmountButtons.Install(t);
+        }
+    }
 }
 
 

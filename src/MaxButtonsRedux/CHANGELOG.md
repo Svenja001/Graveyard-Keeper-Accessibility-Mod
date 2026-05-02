@@ -1,9 +1,9 @@
 # Changelog
 
-## 1.3.13 | 1 May 2026
+## 1.3.13 | 2 May 2026
 
 - Fixed Max button giving the wrong amount on multi-quality crafts after changing your selection
-- Added +1, -1, Min, and Max buttons to the expanded multi-quality craft view
+- Added Min and Max buttons to the expanded multi-quality craft view
 - Log messages now include timestamps for easier bug reporting
 - Setting changes are now logged for easier bug reporting
 

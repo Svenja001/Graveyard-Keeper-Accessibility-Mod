@@ -13,3 +13,4 @@ global using BepInEx.Logging;
 global using Shared;
 global using HarmonyLib;
 global using UnityEngine;
+global using Object = UnityEngine.Object;

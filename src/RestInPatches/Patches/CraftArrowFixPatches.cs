@@ -4,11 +4,18 @@ namespace RestInPatches.Patches;
 public static class CraftArrowFixPatches
 {
     private const string MaxButtonGuid = "p1xel8ted.gyk.maxbuttonsredux";
+    private const string QueueEverythingGuid = "p1xel8ted.gyk.queueeverything";
     private const string ArrowSpr = "arrow spr";
     private const string Arr = "arr";
 
+    // Both MBR and QE clone the vanilla L/R amount buttons into the craft GUI; if their
+    // postfixes run before this one, they capture the broken arrow sprites and propagate
+    // them to every clone. Declaring the order from both sides (HarmonyAfter on theirs,
+    // HarmonyBefore here) is belt-and-suspenders — Harmony only needs one side, but the
+    // explicit pair survives any future patch-order regressions caused by load order or
+    // assembly trimming.
     [HarmonyPostfix]
-    [HarmonyBefore(MaxButtonGuid)]
+    [HarmonyBefore(MaxButtonGuid, QueueEverythingGuid)]
     [HarmonyPatch(typeof(CraftGUI), nameof(CraftGUI.Open), typeof(WorldGameObject), typeof(CraftsInventory), typeof(string))]
     public static void CraftGUI_Open_RestoreArrows(CraftGUI __instance)
     {
@@ -16,7 +23,7 @@ public static class CraftArrowFixPatches
     }
 
     [HarmonyPostfix]
-    [HarmonyBefore(MaxButtonGuid)]
+    [HarmonyBefore(MaxButtonGuid, QueueEverythingGuid)]
     [HarmonyPatch(typeof(CraftGUI), nameof(CraftGUI.SwitchTab))]
     public static void CraftGUI_SwitchTab_RestoreArrows(CraftGUI __instance)
     {

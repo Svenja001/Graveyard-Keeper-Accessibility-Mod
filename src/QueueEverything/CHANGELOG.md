@@ -1,8 +1,9 @@
 # Changelog
 
-## 2.1.14 | 1 May 2026
+## 2.1.14 | 2 May 2026
 
 - Fixed zombies dropping their crafted items on the ground next to the workbench instead of into a nearby trunk when they were assigned to anvils, cooking tables, or other regular human workbenches
+- Added +1 and -1 buttons to the expanded multi-quality craft view
 - Log messages now include timestamps for easier bug reporting
 - Setting changes are now logged for easier bug reporting
 

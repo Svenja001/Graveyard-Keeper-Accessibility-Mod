@@ -32,28 +32,17 @@ public static class MaxButtonCrafting
                 new Vector3(sourceButton.localPosition.x, -31f, sourceButton.localPosition.z));
         }
 
-        // Secondary install: full_detailed_go has no vanilla amount-button siblings at all (the
-        // expand view was never designed for amount controls), so we add the full set ourselves —
-        // singular (+1/-1) on top, Min/Max on bottom, two per side. Each call to this method
-        // handles one side: the R/max call adds +1 above Max on the right, the L/min call adds
-        // -1 above Min on the left. Final positions per user spec — measured against the expand
-        // panel's local space, with the bottom row (Min/Max) ~21 units below the top row.
-        if (craftItemGUI.full_detailed_go != null)
+        // Secondary install: Min/Max on the bottom row of full_detailed_go (the vanilla expand
+        // view, which has no amount controls of its own). The singular +1/-1 on the top row are
+        // owned by QueueEverything — installed under the same parent with different child names
+        // ("amount btn R/L"), so the two coexist. Gated on QE being loaded: without QE there are
+        // no +1/-1 between Min and Max, which would be a confusing partial UI.
+        if (craftItemGUI.full_detailed_go != null && Harmony.HasAnyPatches("p1xel8ted.gyk.queueeverything"))
         {
             var detailHost = craftItemGUI.full_detailed_go.transform;
             var sideX = isMaximum ? 109f : -281.7757f;
-            const float topY = -10f;
             const float bottomY = -31.1383f;
 
-            // Singular +1 (right) or -1 (left) on top — name matches the vanilla button name so
-            // we don't dupe across re-installs. Wires to OnAmountPlus/OnAmountMinus directly.
-            if (detailHost.Find(parentButtonName) == null)
-            {
-                InstallSingularClone(craftItemGUI, sourceButton.gameObject, detailHost, parentButtonName, isMaximum,
-                    new Vector3(sideX, topY, 0f));
-            }
-
-            // Min/Max on bottom — uses the same SetMin/SetMax logic as the primary install.
             if (detailHost.Find(minMaxButtonName) == null)
             {
                 InstallClone(craftItemGUI, sourceButton.gameObject, detailHost, minMaxButtonName, isMaximum, crafteryWgo,
@@ -103,34 +92,6 @@ public static class MaxButtonCrafting
         clonedSprite.name = spriteName;
         clonedSprite.transform.localPosition += new Vector3(xOffset, 0f, 0f);
     }
-
-    // Adds a singular +1/-1 button under full_detailed_go by cloning the legacy R/L source and
-    // wiring its onClick to OnAmountPlus/OnAmountMinus. No extra arrow-sprite stack — this is a
-    // one-step button, not a Min/Max stack.
-    private static void InstallSingularClone(CraftItemGUI craftItemGUI, GameObject sourceGo, Transform host, string buttonName, bool isPlus, Vector3 localPos)
-    {
-        var sourceUi = sourceGo.GetComponent<UIButton>();
-
-        var btn = Object.Instantiate(sourceGo, host);
-        btn.name = buttonName;
-        btn.transform.localPosition = localPos;
-
-        var btnUi = btn.GetComponent<UIButton>();
-        btnUi.normalSprite2D = sourceUi.normalSprite2D;
-        btnUi.hoverSprite2D = sourceUi.hoverSprite2D;
-        btnUi.pressedSprite2D = sourceUi.pressedSprite2D;
-        btnUi.onClick = [];
-
-        if (isPlus)
-        {
-            EventDelegate.Add(btnUi.onClick, craftItemGUI.OnAmountPlus);
-        }
-        else
-        {
-            EventDelegate.Add(btnUi.onClick, craftItemGUI.OnAmountMinus);
-        }
-    }
-
 
     internal static void SetMinimumAmount(CraftItemGUI craftItemGUI)
     {
