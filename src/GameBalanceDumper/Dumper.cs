@@ -58,41 +58,57 @@ internal static class Dumper
         var fields = typeof(GameBalance).GetFields(BindingFlags.Public | BindingFlags.Instance);
         var dumped = 0;
 
-        foreach (var f in fields)
+        // Reflectively serializing GameBalance walks every public property on every
+        // definition. Some getters have side effects — most notably
+        // ItemDefinition.linked_craft does GameBalance.GetData<CraftDefinition>("pray:" + id)
+        // and Debug.LogErrors when the lookup misses, which fires for every item without
+        // a sermon variant (thousands of "Craft for sermon not found" lines per dump).
+        // Suppress Unity's logger for the duration; the errors are spurious here because
+        // the dumper hits the getter on items the game itself never would.
+        var prevLoggerEnabled = Debug.unityLogger.logEnabled;
+        Debug.unityLogger.logEnabled = false;
+        try
         {
-            var t = f.FieldType;
-            var isList = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(List<>);
-            var isDict = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<,>);
-            if (!isList && !isDict) continue;
-
-            var value = f.GetValue(gb);
-            var count = value is ICollection c ? c.Count : 0;
-            var path = Path.Combine(dir, $"{f.Name}.json");
-
-            try
+            foreach (var f in fields)
             {
-                var json = JsonConvert.SerializeObject(value, settings);
-                File.WriteAllText(path, json);
-                index.Add(new
+                var t = f.FieldType;
+                var isList = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(List<>);
+                var isDict = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<,>);
+                if (!isList && !isDict) continue;
+
+                var value = f.GetValue(gb);
+                var count = value is ICollection c ? c.Count : 0;
+                var path = Path.Combine(dir, $"{f.Name}.json");
+
+                try
                 {
-                    field = f.Name,
-                    type = t.ToString(),
-                    count,
-                    file = $"{f.Name}.json",
-                });
-                dumped++;
-            }
-            catch (Exception ex)
-            {
-                LogHelper.Error($"[Dumper] Field '{f.Name}' failed: {ex.Message}");
-                index.Add(new
+                    var json = JsonConvert.SerializeObject(value, settings);
+                    File.WriteAllText(path, json);
+                    index.Add(new
+                    {
+                        field = f.Name,
+                        type = t.ToString(),
+                        count,
+                        file = $"{f.Name}.json",
+                    });
+                    dumped++;
+                }
+                catch (Exception ex)
                 {
-                    field = f.Name,
-                    type = t.ToString(),
-                    count,
-                    error = ex.Message,
-                });
+                    LogHelper.Error($"[Dumper] Field '{f.Name}' failed: {ex.Message}");
+                    index.Add(new
+                    {
+                        field = f.Name,
+                        type = t.ToString(),
+                        count,
+                        error = ex.Message,
+                    });
+                }
             }
+        }
+        finally
+        {
+            Debug.unityLogger.logEnabled = prevLoggerEnabled;
         }
 
         var indexPath = Path.Combine(dir, "_index.json");
