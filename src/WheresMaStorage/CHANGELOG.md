@@ -1,13 +1,12 @@
 # Changelog
 
-## 2.1.16 | 1 May 2026
+## 2.1.16 | 3 May 2026
 
 - Fixed building options being greyed out at the Refugee Camp build desk
 - Stopped the BepInEx log filling up with repeated inventory-reload notices on some saves
 - Fixed slowdown when zombies auto-cut stone or marble at the quarry
 - Crafts now pull ingredients from the closest storage first instead of by zone discovery order. Toggle off under Inventory if you preferred the previous order
-- Log messages now include timestamps for easier bug reporting
-- Setting changes are now logged for easier bug reporting
+- Improved diagnostic logging for bug reports
 
 ## 2.1.15 | 27 April 2026
 

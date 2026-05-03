@@ -1,10 +1,9 @@
 # Changelog
 
-## 1.4.12 | 1 May 2026
+## 1.4.12 | 3 May 2026
 
 - New off-by-default toggles to speed up the home water pump, the zombie brewery, the zombie winemaking station, and the zombie crafting table — each with its own multiplier
-- Log messages now include timestamps for easier bug reporting
-- Setting changes are now logged for easier bug reporting
+- Improved diagnostic logging for bug reports
 
 ## 1.4.11 | 27 April 2026
 

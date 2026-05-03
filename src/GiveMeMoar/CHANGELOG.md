@@ -1,10 +1,9 @@
 # Changelog
 
-## 1.2.15 | 1 May 2026
+## 1.2.15 | 3 May 2026
 
 - New "Water Output Multiplier" to scale the water you get from wells
-- Log messages now include timestamps for easier bug reporting
-- Setting changes are now logged for easier bug reporting
+- Improved diagnostic logging for bug reports
 
 ## 1.2.14 | 27 April 2026
 

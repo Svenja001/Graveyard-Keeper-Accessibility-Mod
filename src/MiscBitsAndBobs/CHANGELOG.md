@@ -1,9 +1,8 @@
 # Changelog
 
-## 2.3.6 | 1 May 2026
+## 2.3.6 | 3 May 2026
 
-- Log messages now include timestamps for easier bug reporting
-- Setting changes are now logged for easier bug reporting
+- Improved diagnostic logging for bug reports
 
 ## 2.3.5 | 27 April 2026
 

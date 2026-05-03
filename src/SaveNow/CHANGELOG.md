@@ -1,10 +1,9 @@
 # Changelog
 
-## 2.5.13 | 1 May 2026
+## 2.5.13 | 3 May 2026
 
-- Log messages now include timestamps for easier bug reporting
 - Gerry no longer interrupts dungeons at the start of a new day
-- Setting changes are now logged for easier bug reporting
+- Improved diagnostic logging for bug reports
 
 ## 2.5.12 | 27 April 2026
 

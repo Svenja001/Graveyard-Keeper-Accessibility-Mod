@@ -1,11 +1,10 @@
 # Changelog
 
-## 1.3.12 | 1 May 2026
+## 1.3.12 | 3 May 2026
 
 - Settings changes now take effect immediately without restarting the game
-- Log messages now include timestamps for easier bug reporting
 - New seed ledger (Tracking section) — adds up seeds spent vs seeds returned per crop so you can spot which are net-positive and which are bleeding seeds. On by default; toggle off to disable.
-- Setting changes are now logged for easier bug reporting
+- Improved diagnostic logging for bug reports
 
 ## 1.3.11 | 27 April 2026
 
