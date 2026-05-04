@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.14 | 4 May 2026
+
+- Fixed a permanent loading screen on save load when RestInPatches was not installed
+
 ## 2.5.13 | 3 May 2026
 
 - Improved diagnostic logging for bug reports
