@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-04T16:54:36Z",
-  "generated_by": "update-manifest.yml@32a5d92d",
+  "generated_at": "2026-05-09T16:34:49Z",
+  "generated_by": "update-manifest.yml@48c02fed",
   "game_domain": "graveyardkeeper",
   "mods": [
     {
@@ -18,11 +18,11 @@
       "plugin_guid": "p1xel8ted.gyk.alchemyresearchredux",
       "nexus_mod_id": 90,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/90",
-      "latest_version": "0.1.6",
-      "latest_file_id": 1108,
-      "latest_file_name": "Alchemy Research Redux",
-      "uploaded_unix": 1777799241,
-      "status": "ok"
+      "latest_version": "",
+      "latest_file_id": 0,
+      "latest_file_name": "",
+      "uploaded_unix": 0,
+      "status": "error"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.appletreesenhanced",
@@ -148,11 +148,11 @@
       "plugin_guid": "p1xel8ted.gyk.gravechangesredux",
       "nexus_mod_id": 89,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/89",
-      "latest_version": "0.1.9",
-      "latest_file_id": 1121,
-      "latest_file_name": "Grave Changes Redux",
-      "uploaded_unix": 1777799455,
-      "status": "ok"
+      "latest_version": "",
+      "latest_file_id": 0,
+      "latest_file_name": "",
+      "uploaded_unix": 0,
+      "status": "error"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.ibuildwhereiwant",
