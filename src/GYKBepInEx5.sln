@@ -37,6 +37,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MaxButtonsRedux", "MaxButto
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiscBitsAndBobs", "MiscBitsAndBobs\MiscBitsAndBobs.csproj", "{9CDDFFBA-7D6F-424C-BCE4-46829B6A4641}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MoarWells", "MoarWells\MoarWells.csproj", "{E4BA4B92-6BAD-46C4-ACAD-2A9AEB23C615}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NewGameAtBottom", "NewGameAtBottom\NewGameAtBottom.csproj", "{8FECC18F-A13E-4D49-882D-EAC4A51AD195}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NoIntros", "NoIntros\NoIntros.csproj", "{EDB5B80C-0B57-4AAB-ACFF-1DB381AAA4A2}"
@@ -162,6 +164,10 @@ Global
 		{9CDDFFBA-7D6F-424C-BCE4-46829B6A4641}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9CDDFFBA-7D6F-424C-BCE4-46829B6A4641}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9CDDFFBA-7D6F-424C-BCE4-46829B6A4641}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E4BA4B92-6BAD-46C4-ACAD-2A9AEB23C615}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E4BA4B92-6BAD-46C4-ACAD-2A9AEB23C615}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E4BA4B92-6BAD-46C4-ACAD-2A9AEB23C615}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E4BA4B92-6BAD-46C4-ACAD-2A9AEB23C615}.Release|Any CPU.Build.0 = Release|Any CPU
 		{8FECC18F-A13E-4D49-882D-EAC4A51AD195}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{8FECC18F-A13E-4D49-882D-EAC4A51AD195}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8FECC18F-A13E-4D49-882D-EAC4A51AD195}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -255,9 +261,7 @@ Global
 		{CD83FC00-EDC7-44E4-A845-87EC73D207FA}.Release-Upload|Any CPU.ActiveCfg = Debug|Any CPU
 		{CD83FC00-EDC7-44E4-A845-87EC73D207FA}.Release-Upload|Any CPU.Build.0 = Debug|Any CPU
 		{1164718D-4B80-4B75-984C-33C219C77D2B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{1164718D-4B80-4B75-984C-33C219C77D2B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1164718D-4B80-4B75-984C-33C219C77D2B}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{1164718D-4B80-4B75-984C-33C219C77D2B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
