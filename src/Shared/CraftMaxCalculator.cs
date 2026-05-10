@@ -78,17 +78,34 @@ internal static class CraftMaxCalculator
                         var mixedMaxCrafts = totalAvailable / totalNeeded;
 
                         int maxCrafts;
+                        string chosenTierSuffix = null;
 
                         if (autoSelectHighestQuality)
                         {
-                            if (gMaxCrafts > 0) { maxCrafts = gMaxCrafts; }
-                            else if (sMaxCrafts > 0) { maxCrafts = sMaxCrafts; }
-                            else if (bMaxCrafts > 0) { maxCrafts = bMaxCrafts; }
+                            if (gMaxCrafts > 0) { maxCrafts = gMaxCrafts; chosenTierSuffix = ":3"; }
+                            else if (sMaxCrafts > 0) { maxCrafts = sMaxCrafts; chosenTierSuffix = ":2"; }
+                            else if (bMaxCrafts > 0) { maxCrafts = bMaxCrafts; chosenTierSuffix = ":1"; }
                             else { maxCrafts = mixedMaxCrafts; }
                         }
                         else
                         {
                             maxCrafts = mixedMaxCrafts;
+                        }
+
+                        // Without this, _multiquality_ids stays at whatever Draw() initialised
+                        // (typically the bronze variant), so a player holding only silver/gold
+                        // gets "not_enough_resources" at Y-press even though the calculator
+                        // returned a positive max. Mirrors the per-slot branch below for the
+                        // multi-slot-same-item recipes (e.g. Greek salad: 2x fish).
+                        if (chosenTierSuffix != null)
+                        {
+                            for (var slot = 0; slot < __instance._multiquality_ids.Count; slot++)
+                            {
+                                if (!string.IsNullOrWhiteSpace(__instance._multiquality_ids[slot]))
+                                {
+                                    __instance._multiquality_ids[slot] = firstNeedId + chosenTierSuffix;
+                                }
+                            }
                         }
 
                         if (maxCrafts > 0)
