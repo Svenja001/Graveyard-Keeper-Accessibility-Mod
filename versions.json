@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-10T05:27:45Z",
-  "generated_by": "update-manifest.yml@d895278a",
+  "generated_at": "2026-05-11T17:09:54Z",
+  "generated_by": "update-manifest.yml@eb28c3a4",
   "game_domain": "graveyardkeeper",
   "mods": [
     {
@@ -128,11 +128,11 @@
       "plugin_guid": "p1xel8ted.gyk.getouttamyway",
       "nexus_mod_id": 88,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/88",
-      "latest_version": "0.1.6",
-      "latest_file_id": 1119,
-      "latest_file_name": "Get Outta Ma Way",
-      "uploaded_unix": 1777799428,
-      "status": "ok"
+      "latest_version": "",
+      "latest_file_id": 0,
+      "latest_file_name": "",
+      "uploaded_unix": 0,
+      "status": "error"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.givememoar",
