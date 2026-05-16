@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-12T05:28:12Z",
-  "generated_by": "update-manifest.yml@907725ae",
+  "generated_at": "2026-05-16T16:34:51Z",
+  "generated_by": "update-manifest.yml@ac86ebf3",
   "game_domain": "graveyardkeeper",
   "mods": [
     {
@@ -68,11 +68,11 @@
       "plugin_guid": "p1xel8ted.gyk.decompdelight",
       "nexus_mod_id": 86,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/86",
-      "latest_version": "0.1.8",
-      "latest_file_id": 1113,
-      "latest_file_name": "Decomp Delight",
-      "uploaded_unix": 1777799330,
-      "status": "ok"
+      "latest_version": "",
+      "latest_file_id": 0,
+      "latest_file_name": "",
+      "uploaded_unix": 0,
+      "status": "error"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.economyreloaded",
