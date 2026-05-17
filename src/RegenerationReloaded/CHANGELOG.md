@@ -10,7 +10,7 @@
 
 ## 1.1.11 | 27 April 2026
 
-- Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it
+- Added a main-menu notice when a newer version is on Nexus. Toggle off in settings if you don't want it
 
 ## 1.1.10 | 11 April 2026
 
@@ -20,9 +20,9 @@
 
 - Health and energy now regenerate independently instead of energy needing to fill first
 - Energy and life regeneration rates can now be set to 0 to disable
-- Mod is now standalone — no longer requires GYK Helper
+- GYK Helper is no longer required
 
 ## 1.1.5
 
-- Slight code refactor and implemented checks to prevent HP/Energy going beyond maximum
+- HP and Energy can no longer regenerate past their maximum
 

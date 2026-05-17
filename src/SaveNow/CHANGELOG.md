@@ -14,7 +14,7 @@
 - Fixed Chinese translations not loading
 - Fixed saving staying blocked after using a teleport stone to leave a dungeon
 - Fixed the manual-save controller button triggering a save while a menu was open. It no longer competes with the tech tree, trade, and quantity-transfer screens that use LT for navigation
-- Added a quiet update notification on the main menu showing which mods in this collection have newer versions on Nexus. Click an entry to open its Nexus page. Opt-out via the new "Check for Updates" setting
+- Added a main-menu notice when a newer version is on Nexus. Toggle off in settings if you don't want it
 
 ## 2.5.11 | 15 April 2026
 
@@ -22,18 +22,18 @@
 
 ## 2.5.10 | 14 April 2026
 
-- Fixed auto-save filenames colliding: two autosaves on the same day could silently overwrite each other. New saves use a correct date format; existing saves are unaffected
-- Save list now sorts every time. Previously it silently did nothing unless you flipped a toggle, which is why autosaves crowded out your latest manual save
-- Sort mode (Game Time or Real Time) and direction (Descending or Ascending) are now dropdowns instead of two confusingly-named toggles
-- Added "Pin Last Played To Top" — keeps the save you most recently loaded or saved at the top regardless of sort. Off by default
+- Fixed auto-saves on the same day overwriting each other
+- Save list now sorts reliably so the newest save isn't buried
+- Sort mode and direction are now dropdowns instead of toggles
+- Added "Pin Last Played To Top" to keep your most recent save at the top
 - Default Maximum Saves Visible raised from 3 to 20
-- Save Interval is now a 1-60 minute slider instead of raw seconds
-- New File On Auto Save now defaults to off, so your save list no longer fills up with a new file every 10 minutes
-- Settings menu reorganised with nested sub-options and rewritten descriptions. Existing values are preserved
+- Save Interval is now a 1-60 minute slider
+- New File On Auto Save now defaults to off
+- Settings menu reorganised. Existing values preserved.
 
 ## 2.5.9 | 12 April 2026
 
-- Fixed non-English translations not loading — the mod was showing English regardless of your game language
+- Fixed non-English translations not loading - the mod was showing English regardless of your game language
 - Language changes in the game options are now picked up immediately without needing to restart
 - The Advanced section now appears at the top of the settings list instead of the bottom, and its Debug Logging option is always visible (was hidden by default)
 - Enabling Debug logging now shows a one-time in-game dialog warning you it's on, so you don't forget it's enabled
@@ -45,7 +45,7 @@
 - Fixed dungeon detection not always working correctly
 - Save key now works regardless of BepInEx HideManagerGameObject setting
 - Translations are now loaded from editable JSON files in the lang folder
-- Users can modify or contribute translations by editing the JSON files — do not rename or move them
+- Users can modify or contribute translations by editing the JSON files - do not rename or move them
 - Fixed several translation errors across multiple languages
 - Main menu now shows "BepInEx Modded" in the version text
 - Improved compatibility across different BepInEx versions
@@ -58,7 +58,7 @@
 - Fixed "stop auto-save" not actually stopping a save in progress
 - Fixed multiple auto-save timers running at the same time
 - Fixed save list crashing when two saves had the same timestamp
-- Mod is now standalone — no longer requires GYK Helper
+- GYK Helper is no longer required
 
 ## 2.5.5
 

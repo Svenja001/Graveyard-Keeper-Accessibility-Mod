@@ -10,8 +10,8 @@
 
 ## 0.1.8 | 27 April 2026
 
-- Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it
-- Settings pane tidied up: sections now use a cleaner `── Name ──` style and every option has a clearer description. Your existing values carry across unchanged
+- Added a main-menu notice when a newer version is on Nexus. Toggle off in settings if you don't want it
+- Settings menu reorganised. Existing values preserved.
 
 ## 0.1.7 | 12 April 2026
 
@@ -19,7 +19,7 @@
 
 ## 0.1.6 | 12 April 2026
 
-- Fixed grave quality ignoring the corpse's white skulls — the cross and fence no longer stack to an inflated total of 60 on bodies that shouldn't support it
+- Fixed grave quality ignoring the corpse's white skulls
 
 ## 0.1.5 | 11 April 2026
 
@@ -28,7 +28,7 @@
 ## 0.1.4
 
 - Fixed grave quality settings not being properly applied when toggled in config
-- Mod is now standalone — no longer requires GYK Helper
+- GYK Helper is no longer required
 
 ## 0.1.1
 

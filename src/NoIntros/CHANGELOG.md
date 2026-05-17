@@ -10,7 +10,7 @@
 
 ## 2.2.9 | 27 April 2026
 
-- Added a quiet update notification on the main menu showing which mods in this collection have newer versions on Nexus. Click an entry to open its Nexus page. Opt-out via the new "Check for Updates" setting
+- Added a main-menu notice when a newer version is on Nexus. Toggle off in settings if you don't want it
 
 ## 2.2.8 | 11 April 2026
 
@@ -18,7 +18,7 @@
 
 ## 2.2.7
 
-- Mod is now standalone — no longer requires GYK Helper
+- GYK Helper is no longer required
 
 ## 1
 

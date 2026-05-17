@@ -10,8 +10,8 @@
 
 ## 0.1.7 | 27 April 2026
 
-- Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it
-- Settings pane tidied up: sections now use a cleaner `── Name ──` style and every colour entry has a proper description. Your existing values carry across unchanged
+- Added a main-menu notice when a newer version is on Nexus. Toggle off in settings if you don't want it
+- Settings menu reorganised. Existing values preserved.
 
 ## 0.1.6 | 12 April 2026
 
@@ -23,15 +23,15 @@
 
 ## 0.1.4
 
-- Mod is now standalone — no longer requires GYK Helper
+- GYK Helper is no longer required
 
 ## 0.1.2
 
-- Lang fixes
+- Fixed translation errors
 
 ## 0.1.1
 
-- Fixed talent tree being busted
+- Fixed the talent tree not working
 
 ## 0.1.0
 

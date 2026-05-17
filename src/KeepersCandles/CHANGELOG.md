@@ -11,15 +11,15 @@
 ## 0.1.8 | 27 April 2026
 
 - Incense burners now burn forever and auto-light on placement, just like candelabras
-- Added a separate keybind for extinguishing the nearest lit incense and recovering the unused incense. Unbound by default — set a key or controller button in the Controls section if you want to use it. The candle keybind (C / D-Pad Up) only touches candles, so candle-only players keep their existing experience
-- The candle keybind entry was renamed to "Extinguish Candle Keybind" (and the controller button to "Extinguish Candle Controller Button") to make room for the incense pair. Your existing custom bindings are migrated automatically — nothing to reconfigure
+- Added a separate keybind for extinguishing the nearest lit incense and recovering the unused incense. Unbound by default.
+- The candle keybind entries were renamed to make room for the incense pair. Existing custom bindings are migrated.
 - Fixed Chinese translations not loading
-- Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it
+- Added a main-menu notice when a newer version is on Nexus. Toggle off in settings if you don't want it
 - The Advanced section's Debug Logging option is now always visible (was hidden by default)
-- Tidied up the settings menu with clearer, player-friendly descriptions and a new section layout (Advanced / Candles & Incenses / Church / Controls)
-- Existing settings are migrated automatically — your keybinds, distance, and column toggle are preserved
+- Settings menu reorganised. Existing values preserved.
+- Existing settings are migrated automatically - your keybinds, distance, and column toggle are preserved
 - Translations are now loaded from JSON files in the mod's `lang/` folder, so they're easier to fix up or contribute to
-- Improved debug logging so a log file is enough to diagnose issues — turn on Debug Logging before reporting a bug
+- Improved diagnostic logging for bug reports
 - A one-time reminder now pops up in-game when Debug Logging is left on, so it doesn't stay on forever by accident
 
 ## 0.1.7 | 11 April 2026
@@ -29,7 +29,7 @@
 
 ## 0.1.6
 
-- Mod is now standalone — no longer requires GYK Helper
+- GYK Helper is no longer required
 
 ## 0.1.4
 

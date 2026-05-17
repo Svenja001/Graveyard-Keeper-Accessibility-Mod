@@ -12,15 +12,15 @@
 
 ## 1.3.12 | 27 April 2026
 
-- Added an update notice on the main menu that flags when this mod (or others in this collection) has a newer version on Nexus. Click an entry to open its Nexus page. Toggle off in settings if you'd rather not see it
+- Added a main-menu notice when a newer version is on Nexus. Toggle off in settings if you don't want it
 - Rest In Patches is now a required dependency. Install it first or this mod will refuse to load
-- Max button now sets the correct amount when crafting recipes (in collapsed mode only, intentional) that use star-quality ingredients (armor, cooked meals, etc.) — previously it would fall back to 1
+- Fixed Max button falling back to 1 on collapsed crafts that use star-quality ingredients
 
 ## 1.3.11 | 12 April 2026
 
 - Renamed from "Max Button Controller Support" to "Max Buttons Redux"
-- If you had the old mod installed, delete the old `BepInEx/plugins/MaxButtonControllerSupport` folder after installing this update to avoid both versions loading at once
-- Your previous mod settings will not carry over — the config identifier changed with the rename, so the old config file (`p1xel8ted.gyk.maxbuttoncontrollersupport.cfg`) will no longer be read
+- If upgrading from the old mod, delete the old `BepInEx/plugins/MaxButtonControllerSupport` folder
+- Previous settings will not carry over after the rename
 
 ## 1.3.10 | 11 April 2026
 
@@ -29,7 +29,7 @@
 
 ## 1.3.9
 
-- Mod is now standalone — no longer requires GYK Helper
+- GYK Helper is no longer required
 
 ## 1
 
