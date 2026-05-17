@@ -4,11 +4,13 @@ using System.Linq;
 namespace MoarPallets;
 
 // Run before mods that scan the whole craft list, so our new buildable is in it.
+// Run after RIP so our crate-specific collider fix is the final word on crate drops.
 [HarmonyBefore(
     "p1xel8ted.gyk.ibuildwhereiwant",
     "p1xel8ted.gyk.queueeverything",
     "p1xel8ted.gyk.givememoar"
 )]
+[HarmonyAfter("p1xel8ted.gyk.restinpatches")]
 [HarmonyPatch]
 [SuppressMessage("ReSharper", "InconsistentNaming")]
 public static class Patches
@@ -19,6 +21,47 @@ public static class Patches
     {
         AddPalletBuildCraft();
         AddPalletRemoveCraft();
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(MainGame), nameof(MainGame.OnGameStartedPlaying))]
+    private static void MainGame_OnGameStartedPlaying_Postfix()
+    {
+        try
+        {
+            CrateRouter.SweepLooseCrates();
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"Crate sweep failed: {ex.Message}");
+        }
+    }
+
+    // Carried crates route to nearest pallet on drop; vanilla dumps them on the floor.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(BaseCharacterComponent), nameof(BaseCharacterComponent.DropOverheadItem))]
+    private static bool BaseCharacterComponent_DropOverheadItem_Prefix(BaseCharacterComponent __instance)
+    {
+        try
+        {
+            return !CrateRouter.TryRouteCarriedCrate(__instance);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"Crate carry route failed: {ex.Message}");
+            return true;
+        }
+    }
+
+    // Every crate drop (elevator distribution, vanilla craft, our dump, etc.) gets its
+    // collider flipped to a trigger so multiple crates at the same tile don't physics-push.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(DropResGameObject), nameof(DropResGameObject.DoDrop), typeof(Vector3), typeof(Item), typeof(Transform), typeof(Direction), typeof(float), typeof(int), typeof(bool))]
+    private static void DropResGameObject_DoDrop_Postfix(Item item, DropResGameObject __result)
+    {
+        if (__result == null) return;
+        if (item == null || item.definition == null || !item.definition.is_crate) return;
+        CrateRouter.MakeDropNonBlocking(__result);
     }
 
     private static void AddPalletBuildCraft()
@@ -185,6 +228,17 @@ public static class Patches
     {
         if (!GJL.cur_lng) return;
         GJL.cur_lng.dict[Plugin.PalletNameKey] = Lang.Get("Name");
+    }
+
+    // box_pallet has quality_type=Shown, so GetDescription appends "(*){quality}".
+    // The wood build desk's zone has no quality icon, leaving a bare "1" in the build menu.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(CraftDefinition), nameof(CraftDefinition.GetDescription))]
+    private static void CraftDefinition_GetDescription_Postfix(CraftDefinition __instance, ref string __result)
+    {
+        if (__instance is not ObjectCraftDefinition objCraft) return;
+        if (objCraft.id != Plugin.PalletCraftId && objCraft.id != Plugin.PalletRemoveCraftId) return;
+        __result = string.Empty;
     }
 
     // The elevator only fills its own cellar_storage zone, so pallets placed in the larger
