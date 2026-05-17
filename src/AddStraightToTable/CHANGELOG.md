@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.13 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 2.4.12 | 3 May 2026
 
 - Improved diagnostic logging for bug reports

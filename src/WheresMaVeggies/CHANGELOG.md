@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.12 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 0.1.11 | 4 May 2026
 
 - New "Cascade Radius (tiles)" setting in the Harvest section. Default of 1 keeps the original 3x3 area. Bump it up if you want a single click to reap a 5x5, 7x7, or larger plot

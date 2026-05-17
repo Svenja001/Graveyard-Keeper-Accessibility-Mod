@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.17 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 2.1.16 | 3 May 2026
 
 - Fixed building options being greyed out at the Refugee Camp build desk

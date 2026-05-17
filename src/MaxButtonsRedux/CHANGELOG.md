@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.14 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 1.3.13 | 3 May 2026
 
 - Fixed Max button giving the wrong amount on multi-quality crafts after changing your selection

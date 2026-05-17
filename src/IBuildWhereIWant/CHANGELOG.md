@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.13 | 17 May 2026
+
+- Fixed mid-game buildables from other mods (such as MoarWells' pump well) not appearing in the build-anywhere menu
+
 ## 1.7.12 | 3 May 2026
 
 - Improved diagnostic logging for bug reports

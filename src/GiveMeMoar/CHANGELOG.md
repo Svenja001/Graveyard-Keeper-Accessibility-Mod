@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.17 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 1.2.16 | 10 May 2026
 
 - Added a dedicated Gold Nugget Multiplier so you can boost just gold without scaling every other ore

@@ -17,10 +17,11 @@ internal static class StartupLogger
 {
     private const string SentinelName = "GYK_ModSummaryLogged";
 
-    [HarmonyWrapSafe] //ctd on some configurations without this; code still runs fine. no idea.
+    // Do not move back to PlatformSpecific.FixScreenModeAfterStart - chaining postfixes there
+    // crashed Mono 32-bit during Preloader on some load orders.
     [HarmonyPostfix]
-    [HarmonyPatch(typeof(PlatformSpecific), nameof(PlatformSpecific.FixScreenModeAfterStart))]
-    public static void PlatformSpecific_FixScreenModeAfterStart()
+    [HarmonyPatch(typeof(MainGame), nameof(MainGame.Awake))]
+    public static void MainGame_Awake()
     {
         try
         {
@@ -47,7 +48,7 @@ internal static class StartupLogger
             log.LogInfo($"  Storefront: {store}");
             if (!bepinexManagerHidden)
             {
-                log.LogWarning("  BepInEx Manager GameObject is NOT hidden — Unity event methods (Awake, Start, Update) will not fire on plugins!");
+                log.LogWarning("  BepInEx Manager GameObject is NOT hidden - Unity event methods (Awake, Start, Update) will not fire on plugins!");
                 log.LogWarning("  To fix: open BepInEx/config/BepInEx.cfg, find [Chainloader] section, set HideManagerGameObject = true");
             }
             log.LogInfo("------------------------------------------");
@@ -67,7 +68,7 @@ internal static class StartupLogger
 
             if (!Chainloader.ConfigHideBepInExGOs.Value)
             {
-                log.LogWarning("  BepInEx HideManagerGameObject was disabled — enabling it to prevent Unity event methods from failing");
+                log.LogWarning("  BepInEx HideManagerGameObject was disabled - enabling it to prevent Unity event methods from failing");
                 Chainloader.ConfigHideBepInExGOs.Value = true;
                 if (managerObj)
                 {

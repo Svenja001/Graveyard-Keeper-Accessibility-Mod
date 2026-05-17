@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.13 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 1.3.12 | 3 May 2026
 
 - Settings changes now take effect immediately without restarting the game

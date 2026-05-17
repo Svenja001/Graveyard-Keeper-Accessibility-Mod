@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.7 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 3.5.6 | 3 May 2026
 
 - Improved diagnostic logging for bug reports

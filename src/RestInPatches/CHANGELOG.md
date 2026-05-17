@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2 | 3 May 2026
+## 0.1.2 | 17 May 2026
 
 - The +/- arrows are now also restored on items already sitting in your craft queue, not just the recipe list
 - Config section headers restyled to the "── Name ──" look used by the rest of the collection. Existing settings carry over automatically

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.13 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 1.4.12 | 3 May 2026
 
 - New off-by-default toggles to speed up the home water pump, the zombie brewery, the zombie winemaking station, and the zombie crafting table — each with its own multiplier

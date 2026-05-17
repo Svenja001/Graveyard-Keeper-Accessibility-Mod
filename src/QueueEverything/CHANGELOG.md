@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.15 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 2.1.14 | 3 May 2026
 
 - Fixed zombies dropping their crafted items on the ground next to the workbench instead of into a nearby trunk when they were assigned to anvils, cooking tables, or other regular human workbenches

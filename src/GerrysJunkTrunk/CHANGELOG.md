@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.9 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 1.9.8 | 3 May 2026
 
 - Fixed the HUD staying hidden after Gerry's empty-trunk visit

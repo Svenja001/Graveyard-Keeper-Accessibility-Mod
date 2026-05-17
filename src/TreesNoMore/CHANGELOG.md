@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.15 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 2.5.14 | 4 May 2026
 
 - Fixed a permanent loading screen on save load when RestInPatches was not installed

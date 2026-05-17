@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.14 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 2.5.13 | 3 May 2026
 
 - Gerry no longer interrupts dungeons at the start of a new day

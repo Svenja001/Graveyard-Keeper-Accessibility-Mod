@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.14 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 2.2.13 | 4 May 2026
 
 - Fixed day-change reminders only firing on the Astrologer's day (Sloth) and not on any other day, a regression introduced in 2.2.11 when the wake-up delay was added

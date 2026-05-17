@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.2.11 | 17 May 2026
+
+- Fixed a launch crash on the 32-bit GOG build with certain mod combinations
+
 ## 3.2.10 | 3 May 2026
 
 - Added a Rare Fish Catch Rate setting for gold-tier fish (gold fish, gold salmon, gold sturgeon, gold crucian)

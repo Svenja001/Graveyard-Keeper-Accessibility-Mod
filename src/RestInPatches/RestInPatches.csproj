@@ -5,6 +5,9 @@
         <NexusGroupId>7296647</NexusGroupId>
     </PropertyGroup>
     <ItemGroup>
+        <Compile Include="..\Shared\StartupLogger.cs" Link="StartupLogger.cs"/>
+    </ItemGroup>
+    <ItemGroup>
         <EmbeddedResource Include="Resources\ui_btn_arrow_left.png" />
         <EmbeddedResource Include="Resources\ui_btn_arrow_up.png" />
         <EmbeddedResource Include="Resources\ui_btn_arrow_dn.png" />
