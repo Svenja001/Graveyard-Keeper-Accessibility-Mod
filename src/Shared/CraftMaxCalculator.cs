@@ -13,13 +13,8 @@ internal static class CraftMaxCalculator
         public List<int> NotCraftable = [];
     }
 
-    // Computes the maximum craftable amount for a recipe, correctly handling
-    // multi-quality (starred) ingredients stored per-tier as "id:1"/"id:2"/"id:3".
-    // When autoSelectHighestQuality is true, mutates __instance._multiquality_ids
-    // to lock in the preferred star tier and returns that tier's max — used by both
-    // QueueEverything (auto-max on craft GUI open) and MaxButtonsRedux (Max button)
-    // so pressing Max mid-window reproduces what the auto-max would set. Pass false
-    // for a true read-only mixed-tier calculation if a caller ever needs that.
+    // Max craftable for a recipe, handling starred ingredients ("id:1"/":2"/":3").
+    // If autoSelectHighestQuality is true, also rewrites _multiquality_ids to the chosen tier.
     internal static CraftInfo Calculate(CraftItemGUI __instance, MultiInventory multiInventory, bool autoSelectHighestQuality)
     {
         var info = new CraftInfo();
@@ -92,11 +87,8 @@ internal static class CraftMaxCalculator
                             maxCrafts = mixedMaxCrafts;
                         }
 
-                        // Without this, _multiquality_ids stays at whatever Draw() initialised
-                        // (typically the bronze variant), so a player holding only silver/gold
-                        // gets "not_enough_resources" at Y-press even though the calculator
-                        // returned a positive max. Mirrors the per-slot branch below for the
-                        // multi-slot-same-item recipes (e.g. Greek salad: 2x fish).
+                        // Lock the chosen tier into every slot, otherwise a silver/gold-only
+                        // inventory still hits "not_enough_resources" on Y-press.
                         if (chosenTierSuffix != null)
                         {
                             for (var slot = 0; slot < __instance._multiquality_ids.Count; slot++)

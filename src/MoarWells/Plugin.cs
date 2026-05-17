@@ -5,19 +5,12 @@ public class Plugin : BaseUnityPlugin
 {
     internal const string BasicWellCraftId = "mf_wood_builddesk::water_well_place";
     internal const string TemplateCraftId = "mf_wood_builddesk::well_pump_place";
-    // Includes "remove" in the id so QueueEverything's unsafe-id substring check
-    // catches it. Without that, QE turns it into an auto-craft and the build
-    // desk's player-held remove stops working.
+    // "remove" in the id so QueueEverything's unsafe-id check leaves it alone.
     internal const string BasicWellRemoveCraftId = ":r:water_well_remove";
-    // The beehouse remove takes a few seconds of holding the action button.
-    // Cloning from this one (rather than from the garden, which removes
-    // instantly) gives the same feel for our wells.
+    // Beehouse remove takes a few seconds of holding - same feel we want for wells.
     internal const string RemoveTemplateCraftId = ":r:beehouse_1";
     internal const string BasicWellNameKey = "moarwells_basic_well";
 
-    // Cloned from the vanilla pump craft but with one_time_craft=false and an
-    // empty end_script so it can be used many times. The actual upgrade happens
-    // in our ProcessFinishedCraft postfix.
     internal const string PumpWellCraftId = "mf_wood_builddesk::well_pump_buildable";
     internal const string PumpWellRemoveCraftId = ":r:well_pump_remove";
     internal const string PumpWellNameKey = "moarwells_pump_well";
@@ -31,7 +24,7 @@ public class Plugin : BaseUnityPlugin
     internal const int PumpWellDetail = 2;
 
     internal static TimestampedLogger Log { get; private set; }
-    internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
+    private static ConfigEntry<bool> CheckForUpdates { get; set; }
     internal static ConfigEntry<bool> RequireEngineerForPumpWell { get; private set; }
 
     private void Awake()

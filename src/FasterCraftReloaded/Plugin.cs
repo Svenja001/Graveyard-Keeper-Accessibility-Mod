@@ -59,7 +59,7 @@ public class Plugin : BaseUnityPlugin
     {
         Debug = Config.Bind(AdvancedSection, "Debug Logging", false,
             new ConfigDescription(
-                "Write verbose crafting diagnostics to the BepInEx console — which workbench, which craft, which speed branch was applied. Useful for reporting bugs. Leave off for normal play.",
+                "Write verbose crafting diagnostics to the BepInEx console - which workbench, which craft, which speed branch was applied. Useful for reporting bugs. Leave off for normal play.",
                 null,
                 new ConfigurationManagerAttributes {Order = 100}));
         DebugEnabled = Debug.Value;
@@ -67,7 +67,7 @@ public class Plugin : BaseUnityPlugin
 
         CraftSpeedMultiplier = Config.Bind(SpeedSection, "Craft Speed Multiplier", 2f,
             new ConfigDescription(
-                "Multiplier applied to crafts at regular workbenches (anvils, alchemy, cooking, study desks, etc.). Repair crafts are always excluded to protect per-frame energy cost. Gardens, composting, and zombie-worked stations are not covered by this — each has its own toggle further down.",
+                "Multiplier applied to crafts at regular workbenches (anvils, alchemy, cooking, study desks, etc.). Repair crafts are always excluded to protect per-frame energy cost. Gardens, composting, and zombie-worked stations are not covered by this - each has its own toggle further down.",
                 new AcceptableValueRange<float>(1f, 50f),
                 new ConfigurationManagerAttributes {Order = 100}));
 

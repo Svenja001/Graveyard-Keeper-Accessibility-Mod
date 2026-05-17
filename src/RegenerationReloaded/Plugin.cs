@@ -28,8 +28,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites legacy numbered section headers to the plain "── Name ──" style so existing
-    // user values survive the rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;

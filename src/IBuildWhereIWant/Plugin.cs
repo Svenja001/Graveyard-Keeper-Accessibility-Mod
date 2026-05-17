@@ -36,7 +36,6 @@ public class Plugin : BaseUnityPlugin
     internal static WorldGameObject BuildDeskClone { get; set; }
     internal static CraftsInventory CraftsInventory { get; set; }
     internal static Dictionary<string, string> CraftDictionary { get; set; } = new();
-    internal static int UnlockedCraftListCount { get; set; }
     internal static bool CraftAnywhere { get; set; }
     internal static string ZoneId => Zone;
     internal static string BuildDeskName => BuildDeskConst;
@@ -54,8 +53,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites old numbered section headers to the new "── Name ──" style so existing
-    // user values survive the rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -106,7 +103,7 @@ public class Plugin : BaseUnityPlugin
         Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
 
         BuildingCollision = Config.Bind(CollisionSection, "Building Collision", true,
-            new ConfigDescription("Enforce collision between buildings. Turn off to let placed structures overlap — useful for tight layouts, handy if you like stacking things.", null,
+            new ConfigDescription("Enforce collision between buildings. Turn off to let placed structures overlap - useful for tight layouts, handy if you like stacking things.", null,
                 new ConfigurationManagerAttributes {Order = 604}));
 
         Grid = Config.Bind(DisplaySection, "Grid", false,
@@ -173,26 +170,28 @@ public class Plugin : BaseUnityPlugin
 
         BuildDeskClone.name = BuildDeskConst;
 
-        var needsRefresh = false;
-        if (MainGame.me.save.unlocked_crafts.Count > UnlockedCraftListCount)
+        // Rebuild the craft list only when the visible set actually changed.
+        var freshDict = new Dictionary<string, string>();
+        foreach (var craft in GameBalance.me.craft_obj_data
+                     .Where(x => x.build_type == ObjectCraftDefinition.BuildType.Put)
+                     .Where(a => a.icon.Length > 0)
+                     .Where(b => !b.id.Contains("refugee"))
+                     .Where(d => MainGame.me.save.IsCraftVisible(d)))
         {
-            UnlockedCraftListCount = MainGame.me.save.unlocked_crafts.Count;
-            needsRefresh = true;
+            var itemName = GJL.L(craft.GetNameNonLocalized());
+            if (!freshDict.ContainsKey(itemName))
+            {
+                freshDict.Add(itemName, craft.id);
+            }
         }
 
-        if (needsRefresh)
-        {
-            foreach (var objectCraftDefinition in GameBalance.me.craft_obj_data.Where(x =>
-                             x.build_type == ObjectCraftDefinition.BuildType.Put)
-                         .Where(a => a.icon.Length > 0)
-                         .Where(b => !b.id.Contains("refugee"))
-                         .Where(d => MainGame.me.save.IsCraftVisible(d))
-                         .Where(e => !CraftDictionary.TryGetValue(GJL.L(e.GetNameNonLocalized()), out _)))
-            {
-                var itemName = GJL.L(objectCraftDefinition.GetNameNonLocalized());
-                CraftDictionary.Add(itemName, objectCraftDefinition.id);
-            }
+        var unchanged = CraftsInventory != null
+                        && freshDict.Count == CraftDictionary.Count
+                        && freshDict.All(kv => CraftDictionary.TryGetValue(kv.Key, out var id) && id == kv.Value);
 
+        if (!unchanged)
+        {
+            CraftDictionary = freshDict;
             CraftsInventory = new CraftsInventory();
 
             var craftList = CraftDictionary.ToList();

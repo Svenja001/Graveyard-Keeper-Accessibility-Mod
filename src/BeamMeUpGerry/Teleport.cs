@@ -8,9 +8,7 @@ public static class Teleport
         var targetPosition = GetTeleportPosition(chosenLocation);
         if (targetPosition == Vector2.zero) return;
 
-        // Mirror the game's own Flow_TeleportToWGO: fire "tp_<area>" before the
-        // fade so any build/quest gates tied to warping into a new area unlock,
-        // even when the player teleports to a zone they haven't walked into yet.
+        // Fire the "tp_<area>" quest key before the fade so quest/build gates tied to entering an area still unlock.
         var tag = chosenLocation.teleportPoint;
         if (!tag.IsNullOrWhiteSpace())
         {
@@ -38,10 +36,8 @@ public static class Teleport
 
     private static Vector2 GetTeleportPosition(Location chosenLocation)
     {
-        // Log the initial information about the chosen location
         if (Plugin.DebugEnabled) Helpers.Log($"[GetTeleportPosition] {chosenLocation.zone} {chosenLocation.teleportPoint} {chosenLocation.coords}");
 
-        // If a teleport point is specified and valid, return its position
         if (!chosenLocation.teleportPoint.IsNullOrWhiteSpace())
         {
             var worldGameObject = WorldMap.GetWorldGameObjectByCustomTag(chosenLocation.teleportPoint);
@@ -52,14 +48,12 @@ public static class Teleport
             }
         }
 
-        // If the chosen location has valid coordinates, return them
         if (chosenLocation.coords != Vector2.zero)
         {
             if (Plugin.DebugEnabled) Helpers.Log($"[GetTeleportPosition] {chosenLocation.coords}");
             return chosenLocation.coords;
         }
 
-        // As a fallback, use the player's current position
         if (Plugin.DebugEnabled) Helpers.Log("[GetTeleportPosition] No valid grid position found. Using player's current position.");
         return MainGame.me.player.grid_pos;
     }
@@ -68,30 +62,24 @@ public static class Teleport
 
     private static void PostPortingWork(Location chosenLocation)
     {
-        // Force the zone-change handshake immediately instead of waiting up to
-        // 0.5s for PlayerComponent's timer, so WorldZone.OnPlayerEnter ->
-        // GameSave.OnEnteredWorldZone -> "newzone_<id>" runs before the player
-        // can interact with objects in the destination zone.
+        // Run the new-zone quest key now so it fires before the player can interact with anything in the destination.
         MainGame.me.player_component?.UpdateZone();
 
         var gerryAppears = Plugin.GerryAppears.Value;
         var gerryCharges = Plugin.GerryCharges.Value;
 
-        // If Gerry appears and charges are applicable, but not for default locations
         if (gerryAppears && gerryCharges && !chosenLocation.defaultLocation)
         {
             Helpers.SpawnGerry("", Vector3.zero, true);
             return;
         }
 
-        // If Gerry appears, but no charges for default locations
         if (gerryAppears && chosenLocation.defaultLocation)
         {
             Helpers.SpawnGerry("", Vector3.zero);
             return;
         }
 
-        // If Gerry doesn't appear, but charges are applicable and not for default locations
         if (!gerryAppears && gerryCharges && !chosenLocation.defaultLocation)
         {
             Helpers.TakeMoney(Helpers.MessagePositioning());

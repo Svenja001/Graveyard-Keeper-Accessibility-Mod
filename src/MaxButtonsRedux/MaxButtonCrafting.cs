@@ -9,10 +9,6 @@ public static class MaxButtonCrafting
             return;
         }
 
-        // Primary install: the vanilla amount-button strip lives at "selection frame/amount buttons/".
-        // Clone the cloned Min/Max as a sibling of the vanilla L/R there. Visible in normal
-        // (collapsed) view; hidden when the row expands because CraftItemGUI.Redraw deactivates
-        // selection_frame at line 261 for non-gamepad players.
         var legacyHost = craftItemGUI.transform.Find("selection frame/amount buttons");
         var sourceButton = legacyHost?.Find(parentButtonName);
         if (legacyHost == null || sourceButton == null)
@@ -22,8 +18,7 @@ public static class MaxButtonCrafting
 
         if (legacyHost.Find(minMaxButtonName) == null)
         {
-            // First-time install: shrink the vanilla source button so the cloned Min/Max sits
-            // cleanly below it. Idempotent — guarded by the legacy-host duplicate check above.
+            // Shrink the vanilla button so the cloned Min/Max sits cleanly below it.
             sourceButton.localPosition = new Vector3(sourceButton.localPosition.x, -10f, sourceButton.localPosition.z);
             sourceButton.GetComponent<UI2DSprite>().SetDimensions(26, 26);
             sourceButton.GetComponent<BoxCollider2D>().size = new Vector2(29.4f, 26f);
@@ -32,11 +27,7 @@ public static class MaxButtonCrafting
                 new Vector3(sourceButton.localPosition.x, -31f, sourceButton.localPosition.z));
         }
 
-        // Secondary install: Min/Max on the bottom row of full_detailed_go (the vanilla expand
-        // view, which has no amount controls of its own). The singular +1/-1 on the top row are
-        // owned by QueueEverything — installed under the same parent with different child names
-        // ("amount btn R/L"), so the two coexist. Gated on QE being loaded: without QE there are
-        // no +1/-1 between Min and Max, which would be a confusing partial UI.
+        // Without QE, the expand view has no +1/-1, so Min/Max alone there would look broken.
         if (craftItemGUI.full_detailed_go != null && Harmony.HasAnyPatches("p1xel8ted.gyk.queueeverything"))
         {
             var detailHost = craftItemGUI.full_detailed_go.transform;
@@ -118,10 +109,7 @@ public static class MaxButtonCrafting
             return;
         }
 
-        // autoSelectHighestQuality: true so the Max button reproduces QueueEverything's auto-max
-        // semantic (lock _multiquality_ids to the highest available tier and compute that tier's
-        // max). Without this, pressing Max after the user changes selection mid-window can return
-        // a mixed-tier total that disagrees with what auto-max would have set on open.
+        // Lock to the highest tier so Max matches what auto-max would have set on open.
         var info = CraftMaxCalculator.Calculate(craftItemGUI, multiInventory, autoSelectHighestQuality: true);
         if (info.NotCraftable.Count > 0 || info.Min <= 0)
         {

@@ -3,16 +3,12 @@ namespace TreesNoMore;
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 public class Plugin : BaseUnityPlugin
 {
-    // Section names: plain "── Name ──" style. BepInEx CM renders sections in Config.Bind call
-    // order, so Advanced appears first by virtue of the Debug bind running first below.
     private const string AdvancedSection = "── Advanced ──";
     private const string TreesSection    = "── Trees ──";
     private const string StumpsSection   = "── Stumps ──";
     private const string ResetSection    = "── Reset ──";
     private const string UpdatesSection  = "── Updates ──";
 
-    // Maps legacy section names (both the old numbered-prefix and the interim "── N. Name ──"
-    // format) to the current headers so existing user values survive the rename. Idempotent.
     private static readonly Dictionary<string, string> SectionRenames = new()
     {
         ["00. Advanced"]      = AdvancedSection,
@@ -52,8 +48,6 @@ public class Plugin : BaseUnityPlugin
         Application.quitting += SaveTrees;
     }
 
-    // Rewrites legacy "[00. Advanced]" style headers to "[── 1. Advanced ──]" in the .cfg
-    // file so existing user values survive the section rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -116,7 +110,7 @@ public class Plugin : BaseUnityPlugin
         // ── 3. Stumps ──
         InstantStumpRemoval = Config.Bind(StumpsSection, "Instant Stump Removal", true,
             new ConfigDescription(
-                "On: stumps disappear the moment a tree falls — no second 'mine the stump' step. Off: stumps stay in the world until you remove them yourself with the right tool.",
+                "On: stumps disappear the moment a tree falls - no second 'mine the stump' step. Off: stumps stay in the world until you remove them yourself with the right tool.",
                 null,
                 new ConfigurationManagerAttributes {Order = 100}));
 
@@ -144,7 +138,7 @@ public class Plugin : BaseUnityPlugin
             {
                 if (GUILayout.Button(Lang.Get("Yes"), GUILayout.ExpandWidth(true)))
                 {
-                    if (DebugEnabled) Helpers.Log($"[Reset] User confirmed — clearing {Trees.Count} tracked tree(s) and deleting {FilePath}");
+                    if (DebugEnabled) Helpers.Log($"[Reset] User confirmed - clearing {Trees.Count} tracked tree(s) and deleting {FilePath}");
                     Trees.Clear();
                     File.Delete(FilePath);
                     ShowConfirmationDialog = false;
@@ -170,13 +164,13 @@ public class Plugin : BaseUnityPlugin
     {
         if (MainGame.me.save_slot.linked_save == null)
         {
-            if (DebugEnabled) Helpers.Log("[LoadTrees] save_slot.linked_save is null — nothing to load");
+            if (DebugEnabled) Helpers.Log("[LoadTrees] save_slot.linked_save is null - nothing to load");
             return false;
         }
 
         if (!File.Exists(FilePath))
         {
-            if (DebugEnabled) Helpers.Log($"[LoadTrees] no state file at {FilePath} — starting with empty tracked-tree list");
+            if (DebugEnabled) Helpers.Log($"[LoadTrees] no state file at {FilePath} - starting with empty tracked-tree list");
             return false;
         }
         var jsonString = File.ReadAllText(FilePath);
@@ -189,7 +183,7 @@ public class Plugin : BaseUnityPlugin
     {
         if (MainGame.me.save_slot.linked_save == null)
         {
-            if (DebugEnabled) Helpers.Log("[SaveTrees] save_slot.linked_save is null — skipping save");
+            if (DebugEnabled) Helpers.Log("[SaveTrees] save_slot.linked_save is null - skipping save");
             return;
         }
         var seen = new HashSet<Vector3>();

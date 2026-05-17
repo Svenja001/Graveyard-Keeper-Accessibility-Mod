@@ -46,7 +46,6 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> ColorCorrection { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
-    // High-DPI fix — one-liners read by HighDpiFix and the main-menu prompt.
     internal static ConfigEntry<string> DpiDetectedStatus { get; private set; }
     internal static ConfigEntry<string> DpiAppliedStatus { get; private set; }
     internal static ConfigEntry<bool> ApplyDpiFix { get; private set; }
@@ -54,8 +53,8 @@ public class Plugin : BaseUnityPlugin
     internal static int CurrentDpi { get; private set; }
     internal static int ScalingPercent { get; private set; }
     internal static HighDpiFix.Host DpiHost { get; private set; }
-    // Only offer the fix on real Windows — Wine/Proton and native Linux/macOS ignore the
-    // Windows compatibility flag, so prompting there would be user-hostile.
+    // Wine/Proton and native Linux/macOS ignore the Windows compatibility flag, so don't
+    // prompt on those.
     internal static bool HighDpiDetected => DpiHost == HighDpiFix.Host.Windows && CurrentDpi > 96;
 
     private static GameObject Icons { get; set; }
@@ -75,10 +74,6 @@ public class Plugin : BaseUnityPlugin
             if (widget != null) widget.color = new Color(0, 0, 0, 0);
         };
 
-        // Detect the host environment first. The fix only applies on real Windows;
-        // on Wine/Proton the AppCompat flag is written into a fake registry that wine
-        // doesn't consult for DPI awareness, and on native Linux/macOS there's no .exe
-        // or registry to target in the first place.
         DpiHost = HighDpiFix.DetectHost();
         if (DpiHost == HighDpiFix.Host.Windows)
         {
@@ -90,13 +85,11 @@ public class Plugin : BaseUnityPlugin
         {
             CurrentDpi = 96;
             ScalingPercent = 100;
-            Log.LogInfo($"[HighDpiFix] Host={DpiHost} — skipping DPI fix entirely (this is a Windows-only workaround).");
+            Log.LogInfo($"[HighDpiFix] Host={DpiHost}, skipping DPI fix entirely (this is a Windows-only workaround).");
         }
 
         MigrateRenamedSections();
         InitConfiguration();
-        // Lang.Init reads GameSettings._cur_lng lazily on every Lang.Get, so it's safe to
-        // initialise here before the game has finished loading language settings.
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
         RefreshDpiStatus();
         UpdateChecker.Register(Info, CheckForUpdates);
@@ -104,8 +97,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites legacy numbered section headers to the plain "── Name ──" style so existing
-    // user values survive the rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -133,8 +124,6 @@ public class Plugin : BaseUnityPlugin
         Config.Reload();
     }
 
-    // Updates the read-only status config entries visible in ConfigurationManager.
-    // Called at startup and after every Apply/Remove so users see live state.
     internal static void RefreshDpiStatus()
     {
         if (DpiDetectedStatus != null)
@@ -268,12 +257,10 @@ public class Plugin : BaseUnityPlugin
         SceneManager.sceneLoaded += (_, _) => UpdateCC();
     }
 
-    // Called from the SettingChanged handler AND from the main-menu dialog Yes/No callbacks.
-    // Mirrors the toggle state to the actual Windows flag + manifest files.
     private static bool _applyingDpiFix;
     internal static void OnApplyDpiFixToggled()
     {
-        if (_applyingDpiFix) return; // prevent re-entry when we write-back from the dialog path
+        if (_applyingDpiFix) return;
         _applyingDpiFix = true;
         try
         {
@@ -282,7 +269,7 @@ public class Plugin : BaseUnityPlugin
                 ShowDialog(Lang.Get(DpiHost == HighDpiFix.Host.WineProton
                     ? "DpiWineProtonDialog"
                     : "DpiNativeNonWindowsDialog"));
-                ApplyDpiFix.Value = false; // rollback — nothing was actually applied
+                ApplyDpiFix.Value = false;
                 return;
             }
 
@@ -298,7 +285,7 @@ public class Plugin : BaseUnityPlugin
                 ShowDialog(Lang.Get(key));
                 if (!result.AnySuccess)
                 {
-                    ApplyDpiFix.Value = false; // rollback toggle state — nothing was applied
+                    ApplyDpiFix.Value = false;
                 }
             }
             else

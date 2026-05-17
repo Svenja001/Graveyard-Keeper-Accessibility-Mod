@@ -69,8 +69,6 @@ public class Plugin : BaseUnityPlugin
         }
     }
 
-    // Rewrites old "── 1. Name ──" style headers to plain "── Name ──" so existing user
-    // values survive the rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;

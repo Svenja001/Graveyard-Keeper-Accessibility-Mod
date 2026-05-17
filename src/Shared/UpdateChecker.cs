@@ -12,17 +12,9 @@ using UnityEngine.Networking;
 
 namespace Shared;
 
-// Each mod DLL compiles its own copy of this file — static fields are per-assembly.
-// Cross-DLL coordination uses a DontDestroyOnLoad sentinel GameObject whose child
-// GameObject names carry the wire format (REG|..., OUT|...). No CLR type identity
-// is required across assemblies.
-//
-// Newtonsoft.Json is the parser (shipped with the game at libs/Newtonsoft.Json.dll).
-// JsonUtility was tried first and was silently returning null for the `mods` array
-// while scalar fields on the same parent class parsed correctly — a long-standing
-// Unity quirk we don't need to reverse-engineer.
+// Mods talk to each other via a named sentinel GameObject; child names carry the data.
+// Newtonsoft.Json (shipped with the game) is the parser - JsonUtility returns null for the mods array.
 
-// Newtonsoft assigns fields via reflection — compiler doesn't see the writes.
 #pragma warning disable CS0649
 
 internal class UpdateCheckerManifest
@@ -61,10 +53,7 @@ internal static class UpdateChecker
     internal const int CacheTtlHours = 4;
     internal const string LogSourceName = "GYK_UpdateChecker";
 
-    // Each mod calls this from Plugin.Awake():
-    //     UpdateChecker.Register(Info, CheckForUpdates);
-    // If enabledToggle is non-null and false, the registration is silently dropped.
-    // Exceptions are swallowed — mod loading must never fail because of this.
+    // Swallows all exceptions - mod loading must never fail because of this.
     public static void Register(PluginInfo info, ConfigEntry<bool> enabledToggle)
     {
         try
@@ -85,7 +74,6 @@ internal static class UpdateChecker
                 UnityEngine.Object.DontDestroyOnLoad(sentinel);
             }
 
-            // Encode the registration as a child GameObject name — cross-assembly-safe.
             var regChild = new GameObject($"REG|{guid}|{version}|{name}");
             regChild.transform.SetParent(sentinel.transform, false);
 
@@ -100,7 +88,6 @@ internal static class UpdateChecker
         }
     }
 
-    // Reads installed outdated entries from the sentinel — used by UpdateCheckerUI.
     internal static List<OutdatedEntry> GetOutdated()
     {
         var list = new List<OutdatedEntry>();
@@ -202,9 +189,7 @@ internal static class UpdateChecker
     internal static bool IsNewer(string installed, string remote)
     {
         if (string.IsNullOrEmpty(remote)) return false;
-        // System.Version — disambiguated from UnityEngine.Networking.Version
         if (System.Version.TryParse(installed, out var i) && System.Version.TryParse(remote, out var r)) return r > i;
-        // Non-SemVer tag — flag any inequality (rare; logged at call-site).
         return !string.Equals(installed, remote, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -256,9 +241,7 @@ internal class UpdateCheckerCoordinator : MonoBehaviour
         }
         else if (Application.internetReachability == NetworkReachability.NotReachable)
         {
-            // OS reports no network — don't bother with a 10s timeout. Fall back to
-            // stale cache if any. Captive portals / DNS holes still reach the fetch path.
-            Log.LogInfo("No network (Application.internetReachability reports NotReachable) — falling back to cache if any");
+            Log.LogInfo("No network (Application.internetReachability reports NotReachable) - falling back to cache if any");
             if (UpdateChecker.TryReadCache(out var stale, out _)) body = stale;
         }
         else
@@ -280,14 +263,14 @@ internal class UpdateCheckerCoordinator : MonoBehaviour
             }
             else
             {
-                Log.LogWarning($"Fetch failed: {req.error} — falling back to cache if any");
+                Log.LogWarning($"Fetch failed: {req.error} - falling back to cache if any");
                 if (UpdateChecker.TryReadCache(out var stale, out _)) body = stale;
             }
         }
 
         if (string.IsNullOrEmpty(body))
         {
-            Log.LogInfo("No manifest data — update check skipped this session");
+            Log.LogInfo("No manifest data - update check skipped this session");
             yield break;
         }
 
@@ -340,7 +323,7 @@ internal class UpdateCheckerCoordinator : MonoBehaviour
             if (!System.Version.TryParse(installedVer, out _) || !System.Version.TryParse(entry.LatestVersion, out _))
             {
                 nonSemVer++;
-                Log.LogWarning($"Non-SemVer version compare for {guid}: '{installedVer}' vs '{entry.LatestVersion}' — string inequality fallback fired");
+                Log.LogWarning($"Non-SemVer version compare for {guid}: '{installedVer}' vs '{entry.LatestVersion}' - string inequality fallback fired");
             }
 
             outdated++;
@@ -352,8 +335,6 @@ internal class UpdateCheckerCoordinator : MonoBehaviour
         var nonSemVerNote = nonSemVer > 0 ? $", {nonSemVer} via string fallback" : "";
         Log.LogInfo($"{outdated} outdated, {upToDate} up to date, {unknown} not in manifest{nonSemVerNote}");
 
-        // If the menu is already showing (user reached it before the fetch returned),
-        // trigger a re-render so the label appears without waiting for a menu reopen.
         try
         {
             UpdateCheckerUI.RefreshIfMenuOpen();

@@ -9,8 +9,6 @@ public class Plugin : BaseUnityPlugin
     private const string CraftingSection    = "── Crafting ──";
     private const string UpdatesSection     = "── Updates ──";
 
-    // Maps legacy section headers (from shipped versions) to current headers. Applied once on
-    // first launch so existing user values survive the rename. Idempotent.
     private static readonly Dictionary<string, string> SectionRenames = new()
     {
         ["00. Advanced"]             = AdvancedSection,
@@ -74,9 +72,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites legacy "[01. Multipliers]" style headers to the current "── N. Name ──" style
-    // in the .cfg file so existing user values survive. Idempotent — re-running on an already
-    // migrated file finds nothing to rename.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -186,7 +181,7 @@ public class Plugin : BaseUnityPlugin
 
         WaterOutputMultiplier = Config.Bind(MultipliersSection, "Water Output Multiplier", 1f,
             new ConfigDescription(
-                "Multiplies the water you get from wells — both auto-pumped water flowing into your upgraded home well's inventory and water you take by hand from any well (basic or upgraded). 1 = vanilla. Higher values let breweries and other water-heavy crafts keep up. Independent of the Multiply Miscellaneous toggle.",
+                "Multiplies the water you get from wells - both auto-pumped water flowing into your upgraded home well's inventory and water you take by hand from any well (basic or upgraded). 1 = vanilla. Higher values let breweries and other water-heavy crafts keep up. Independent of the Multiply Miscellaneous toggle.",
                 new AcceptableValueRange<float>(1f, 50f),
                 new ConfigurationManagerAttributes {Order = 91}));
 
@@ -199,7 +194,7 @@ public class Plugin : BaseUnityPlugin
         // ── 3. Categories ──
         MultiplySticks = Config.Bind(CategoriesSection, "Multiply Sticks", true,
             new ConfigDescription(
-                "On: sticks get multiplied by the Resource Multiplier alongside other resources — great for stocking fires. Off: sticks are excluded and drop at vanilla quantities, useful if high multipliers flood your inventory (deconstructing a garden is the common offender).",
+                "On: sticks get multiplied by the Resource Multiplier alongside other resources - great for stocking fires. Off: sticks are excluded and drop at vanilla quantities, useful if high multipliers flood your inventory (deconstructing a garden is the common offender).",
                 null,
                 new ConfigurationManagerAttributes {Order = 100}));
 
@@ -211,7 +206,7 @@ public class Plugin : BaseUnityPlugin
 
         MultiplySeeds = Config.Bind(CategoriesSection, "Multiply Seeds", false,
             new ConfigDescription(
-                "On: seeds you get back from harvesting get multiplied by the Resource Multiplier. Off: seeds stay at vanilla amounts. Off is usually what you want — seeds pile up fast at high multipliers because each harvest already returns more than you planted.",
+                "On: seeds you get back from harvesting get multiplied by the Resource Multiplier. Off: seeds stay at vanilla amounts. Off is usually what you want - seeds pile up fast at high multipliers because each harvest already returns more than you planted.",
                 null,
                 new ConfigurationManagerAttributes {Order = 98}));
 
@@ -235,7 +230,7 @@ public class Plugin : BaseUnityPlugin
 
         MultiplyEnemyDrops = Config.Bind(CategoriesSection, "Multiply Enemy Drops", true,
             new ConfigDescription(
-                "On: items dropped by enemies — bat wings, slimes, jelly slugs (green/blue/orange/black), spider webs and bloody nails — are multiplied. Off: vanilla.",
+                "On: items dropped by enemies - bat wings, slimes, jelly slugs (green/blue/orange/black), spider webs and bloody nails - are multiplied. Off: vanilla.",
                 null,
                 new ConfigurationManagerAttributes {Order = 94}));
 
@@ -247,14 +242,14 @@ public class Plugin : BaseUnityPlugin
 
         MultiplyBodyParts = Config.Bind(CategoriesSection, "Multiply Body Parts", false,
             new ConfigDescription(
-                "On: blood, flesh, fat, skin, bone and skull dropped during body preparation get multiplied. Off: vanilla. Only the listed body parts are touched — organs and other specialised parts are always left alone.",
+                "On: blood, flesh, fat, skin, bone and skull dropped during body preparation get multiplied. Off: vanilla. Only the listed body parts are touched - organs and other specialised parts are always left alone.",
                 null,
                 new ConfigurationManagerAttributes {Order = 92}));
 
         // ── 4. Crafting ──
         CraftOutputMultiplier = Config.Bind(CraftingSection, "Craft Output Multiplier", 1f,
             new ConfigDescription(
-                "Multiplies the quantity of items produced by crafts — for example, setting this to 5 makes one log yield five times as many billets at the sawhorse. 1 = vanilla. Research-point outputs (red/green/blue) are never touched; the Tech Point Multipliers handle those separately.",
+                "Multiplies the quantity of items produced by crafts - for example, setting this to 5 makes one log yield five times as many billets at the sawhorse. 1 = vanilla. Research-point outputs (red/green/blue) are never touched; the Tech Point Multipliers handle those separately.",
                 new AcceptableValueRange<float>(0.1f, 50f),
                 new ConfigurationManagerAttributes {Order = 100}));
 

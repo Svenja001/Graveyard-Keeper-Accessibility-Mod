@@ -80,7 +80,7 @@ public static class Patches
                 var key = $"{wgoId}|{craftId}|repair-skip";
                 if (key != _lastCraftDoActionKey)
                 {
-                    Helpers.Log($"[RepairSkip] {wgoId} craft={craftId} — multiplier not applied (protects repair energy cost)");
+                    Helpers.Log($"[RepairSkip] {wgoId} craft={craftId} - multiplier not applied (protects repair energy cost)");
                     _lastCraftDoActionKey = key;
                 }
             }
@@ -94,7 +94,7 @@ public static class Patches
                 var key = $"{wgoId}|{craftId}|excluded";
                 if (key != _lastCraftDoActionKey)
                 {
-                    Helpers.Log($"[Excluded] {wgoId} craft={craftId} — workbench matches Exclude list, no speed change");
+                    Helpers.Log($"[Excluded] {wgoId} craft={craftId} - workbench matches Exclude list, no speed change");
                     _lastCraftDoActionKey = key;
                 }
             }
@@ -106,7 +106,7 @@ public static class Patches
             var key = $"{wgoId}|{craftId}|craft-x{Plugin.CraftSpeedMultiplier.Value}";
             if (key != _lastCraftDoActionKey)
             {
-                Helpers.Log($"[Craft] {wgoId} craft={craftId} — applying x{Plugin.CraftSpeedMultiplier.Value}");
+                Helpers.Log($"[Craft] {wgoId} craft={craftId} - applying x{Plugin.CraftSpeedMultiplier.Value}");
                 _lastCraftDoActionKey = key;
             }
         }
@@ -129,7 +129,7 @@ public static class Patches
         if (craftId != null && craftId.Contains(":r:"))
         {
             LogReallyUpdate(wgoId, craftId, "repair-skip",
-                $"[RepairSkip] {wgoId} craft={craftId} — multiplier not applied (protects repair energy cost)");
+                $"[RepairSkip] {wgoId} craft={craftId} - multiplier not applied (protects repair energy cost)");
             return;
         }
 
@@ -137,7 +137,7 @@ public static class Patches
         {
             delta_time *= Plugin.CompostSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"compost-x{Plugin.CompostSpeedMultiplier.Value}",
-                $"[Compost] {wgoId} craft={craftId} — applying x{Plugin.CompostSpeedMultiplier.Value}");
+                $"[Compost] {wgoId} craft={craftId} - applying x{Plugin.CompostSpeedMultiplier.Value}");
             return;
         }
 
@@ -145,7 +145,7 @@ public static class Patches
         {
             delta_time *= Plugin.ZombieMinesSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"zmine-x{Plugin.ZombieMinesSpeedMultiplier.Value}",
-                $"[ZombieMine] {wgoId} craft={craftId} — applying x{Plugin.ZombieMinesSpeedMultiplier.Value}");
+                $"[ZombieMine] {wgoId} craft={craftId} - applying x{Plugin.ZombieMinesSpeedMultiplier.Value}");
             return;
         }
 
@@ -153,7 +153,7 @@ public static class Patches
         {
             delta_time *= Plugin.ZombieSawmillSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"zsawmill-x{Plugin.ZombieSawmillSpeedMultiplier.Value}",
-                $"[ZombieSawmill] {wgoId} craft={craftId} — applying x{Plugin.ZombieSawmillSpeedMultiplier.Value}");
+                $"[ZombieSawmill] {wgoId} craft={craftId} - applying x{Plugin.ZombieSawmillSpeedMultiplier.Value}");
             return;
         }
 
@@ -161,7 +161,7 @@ public static class Patches
         {
             delta_time *= Plugin.PlayerGardenSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"pgarden-x{Plugin.PlayerGardenSpeedMultiplier.Value}",
-                $"[PlayerGarden] {wgoId} craft={craftId} — applying x{Plugin.PlayerGardenSpeedMultiplier.Value}");
+                $"[PlayerGarden] {wgoId} craft={craftId} - applying x{Plugin.PlayerGardenSpeedMultiplier.Value}");
             return;
         }
 
@@ -169,7 +169,7 @@ public static class Patches
         {
             delta_time *= Plugin.RefugeeGardenSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"rgarden-x{Plugin.RefugeeGardenSpeedMultiplier.Value}",
-                $"[RefugeeGarden] {wgoId} craft={craftId} — applying x{Plugin.RefugeeGardenSpeedMultiplier.Value}");
+                $"[RefugeeGarden] {wgoId} craft={craftId} - applying x{Plugin.RefugeeGardenSpeedMultiplier.Value}");
             return;
         }
 
@@ -177,7 +177,7 @@ public static class Patches
         {
             delta_time *= Plugin.ZombieGardenSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"zgarden-x{Plugin.ZombieGardenSpeedMultiplier.Value}",
-                $"[ZombieGarden] {wgoId} craft={craftId} — applying x{Plugin.ZombieGardenSpeedMultiplier.Value}");
+                $"[ZombieGarden] {wgoId} craft={craftId} - applying x{Plugin.ZombieGardenSpeedMultiplier.Value}");
             return;
         }
 
@@ -185,7 +185,7 @@ public static class Patches
         {
             delta_time *= Plugin.ZombieVineyardSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"zvineyard-x{Plugin.ZombieVineyardSpeedMultiplier.Value}",
-                $"[ZombieVineyard] {wgoId} craft={craftId} — applying x{Plugin.ZombieVineyardSpeedMultiplier.Value}");
+                $"[ZombieVineyard] {wgoId} craft={craftId} - applying x{Plugin.ZombieVineyardSpeedMultiplier.Value}");
             return;
         }
 
@@ -193,7 +193,7 @@ public static class Patches
         {
             delta_time *= Plugin.ZombieBrewerySpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"zbrewery-x{Plugin.ZombieBrewerySpeedMultiplier.Value}",
-                $"[ZombieBrewery] {wgoId} craft={craftId} — applying x{Plugin.ZombieBrewerySpeedMultiplier.Value}");
+                $"[ZombieBrewery] {wgoId} craft={craftId} - applying x{Plugin.ZombieBrewerySpeedMultiplier.Value}");
             return;
         }
 
@@ -201,7 +201,7 @@ public static class Patches
         {
             delta_time *= Plugin.ZombieWinemakingSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"zwine-x{Plugin.ZombieWinemakingSpeedMultiplier.Value}",
-                $"[ZombieWinemaking] {wgoId} craft={craftId} — applying x{Plugin.ZombieWinemakingSpeedMultiplier.Value}");
+                $"[ZombieWinemaking] {wgoId} craft={craftId} - applying x{Plugin.ZombieWinemakingSpeedMultiplier.Value}");
             return;
         }
 
@@ -209,7 +209,7 @@ public static class Patches
         {
             delta_time *= Plugin.ZombieCraftingTableSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"zcraft-x{Plugin.ZombieCraftingTableSpeedMultiplier.Value}",
-                $"[ZombieCraftingTable] {wgoId} craft={craftId} — applying x{Plugin.ZombieCraftingTableSpeedMultiplier.Value}");
+                $"[ZombieCraftingTable] {wgoId} craft={craftId} - applying x{Plugin.ZombieCraftingTableSpeedMultiplier.Value}");
             return;
         }
 
@@ -217,20 +217,20 @@ public static class Patches
         {
             delta_time *= Plugin.WaterPumpSpeedMultiplier.Value;
             LogReallyUpdate(wgoId, craftId, $"wpump-x{Plugin.WaterPumpSpeedMultiplier.Value}",
-                $"[WaterPump] {wgoId} craft={craftId} — applying x{Plugin.WaterPumpSpeedMultiplier.Value}");
+                $"[WaterPump] {wgoId} craft={craftId} - applying x{Plugin.WaterPumpSpeedMultiplier.Value}");
             return;
         }
 
         if (Exclude.Any(wgoId.ToLowerInvariant().Contains))
         {
             LogReallyUpdate(wgoId, craftId, "excluded",
-                $"[Excluded] {wgoId} craft={craftId} — workbench matches Exclude list, no speed change");
+                $"[Excluded] {wgoId} craft={craftId} - workbench matches Exclude list, no speed change");
             return;
         }
 
         delta_time *= Plugin.CraftSpeedMultiplier.Value;
         LogReallyUpdate(wgoId, craftId, $"craft-x{Plugin.CraftSpeedMultiplier.Value}",
-            $"[Craft] {wgoId} craft={craftId} — applying x{Plugin.CraftSpeedMultiplier.Value}");
+            $"[Craft] {wgoId} craft={craftId} - applying x{Plugin.CraftSpeedMultiplier.Value}");
     }
 
     // Shared de-spam helper for CraftComponent_ReallyUpdateComponent: skips the formatted log

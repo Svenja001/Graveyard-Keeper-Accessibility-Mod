@@ -84,7 +84,7 @@ public static class Patches
     {
         if (Intro.need_show_first_intro && Plugin.SkipIntroVideoOnNewGameConfig.Value)
         {
-            if (Plugin.DebugEnabled) Helpers.Log("[Intro] need_show_first_intro=true and Skip Intro is on — cancelling intro.");
+            if (Plugin.DebugEnabled) Helpers.Log("[Intro] need_show_first_intro=true and Skip Intro is on - cancelling intro.");
             Intro.need_show_first_intro = false;
         }
     }
@@ -100,7 +100,7 @@ public static class Patches
 
         if (__instance.last_craft_id.Equals("set_grave_bot_wd_1"))
         {
-            if (Plugin.DebugEnabled) Helpers.Log("[KitsuneKito] Wooden grave fence placed — dropping 1 blue XP orb.");
+            if (Plugin.DebugEnabled) Helpers.Log("[KitsuneKito] Wooden grave fence placed - dropping 1 blue XP orb.");
             TechPointsDrop.Drop(MainGame.me.player.pos3, 0, 0, 1);
         }
     }
@@ -111,7 +111,7 @@ public static class Patches
     {
         if (Plugin.QuietMusicInGuiConfig.Value)
         {
-            if (Plugin.DebugEnabled) Helpers.Log("[Music] GameGUI opened — enabling dull music mode.");
+            if (Plugin.DebugEnabled) Helpers.Log("[Music] GameGUI opened - enabling dull music mode.");
             SmartAudioEngine.me.SetDullMusicMode();
         }
     }
@@ -183,7 +183,7 @@ public static class Patches
     {
         if (Plugin.QuietMusicInGuiConfig.Value)
         {
-            if (Plugin.DebugEnabled) Helpers.Log("[Music] GameGUI hidden — restoring normal music volume.");
+            if (Plugin.DebugEnabled) Helpers.Log("[Music] GameGUI hidden - restoring normal music volume.");
             SmartAudioEngine.me.SetDullMusicMode(false);
         }
     }

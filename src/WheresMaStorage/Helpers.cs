@@ -163,9 +163,6 @@ public static class Helpers
 
     private static void RestoreInventorySizes()
     {
-        // Player size is owned by ApplyPlayerInventorySize() — never write a hard 20 here, since the
-        // backed-up vanilla value lives in OriginalInventorySizes and the live inventory may have
-        // more items than the vanilla size (those would otherwise be hidden until the next frame).
         ApplyPlayerInventorySize();
 
         foreach (var od in GameBalance.me.objs_data.Where(a => a.interaction_type == ObjectDefinition.InteractionType.Chest))
@@ -198,9 +195,6 @@ public static class Helpers
 
         if (!Plugin.ModifyInventorySize.Value) return;
 
-        // Chest TYPE definitions only — per-instance writes happen via ApplyShrinkPlan when the user
-        // actively shrinks. Bumping od here means newly-spawned chests get the bigger size, and the
-        // game's AddToInventory auto-grow (WorldGameObject.cs:658-659) lifts existing chests on next add.
         foreach (var od in GameBalance.me.objs_data.Where(od => od.interaction_type == ObjectDefinition.InteractionType.Chest && IsValidStorage(od.inventory_size)))
         {
             if (!OriginalInventorySizes.TryGetValue(od.id, out var originalSize)) continue;
@@ -215,13 +209,9 @@ public static class Helpers
         return size is 20 or 25 or 5;
     }
 
-    // ---- Inventory-size helpers (no hardcoded sizes; everything sourced from OriginalInventorySizes) ----
-
-    // Player vanilla size is HARDCODED by the game (GameSave.InitPlayersInventory at game_code/GameSave.cs:271
-    // calls SetInventorySize(20) unconditionally). We don't rely on OriginalInventorySizes for the player
-    // because the WorldGameObject_InitNewObject postfix backs up data.inventory_size at WGO init time —
-    // for a saved player that already has a WMS-modified size baked in, the backup would capture 40 (or
-    // whatever the save had) instead of the true vanilla 20.
+    // The game hardcodes the player's vanilla inventory to 20 in GameSave.InitPlayersInventory.
+    // Don't read OriginalInventorySizes for the player: a save with a WMS-modified size baked in
+    // would back up the modified value, not the true vanilla 20.
     internal const int PlayerVanillaSize = 20;
 
     internal static int GetVanillaSizeForWgo(WorldGameObject wgo)
@@ -235,9 +225,6 @@ public static class Helpers
         return 0;
     }
 
-    // Returns the size this WGO's data.inventory_size SHOULD be right now per current WMS settings.
-    // Returns null for WGOs WMS does not manage (no backup, or chest with non-IsValidStorage vanilla size).
-    // Player and containers each have their own slider so the two can diverge.
     internal static int? GetRequestedSize(WorldGameObject wgo)
     {
         if (wgo == null) return null;
@@ -267,8 +254,7 @@ public static class Helpers
             : PlayerVanillaSize;
     }
 
-    // Used by load/refresh paths and per-frame in Plugin.Update. Never loses items —
-    // widens size up to inventory.Count if the requested value would hide some.
+    // Widens the requested size up to inventory.Count so nothing visible gets hidden.
     internal static void ApplyPlayerInventorySize()
     {
         if (!MainGame.game_started || MainGame.me.player == null) return;
@@ -282,8 +268,6 @@ public static class Helpers
         }
     }
 
-    // Snapshot of what would happen on a user-initiated shrink. Built once when the
-    // settings dirty flag drains; fed to the dialog and to ApplyShrinkPlan / SnapConfigToCurrentSizes.
     internal class ShrinkPlan
     {
         public int PlayerOverflow;
@@ -297,10 +281,6 @@ public static class Helpers
 
     internal static ShrinkPlan PlanShrink()
     {
-        // Despite the legacy name, this plan covers BOTH directions: chests/players whose current
-        // size is below the requested size (grow) and those above (shrink). Overflow is only ever
-        // possible on the shrink side (count > requested). The dialog only fires when there's
-        // overflow; pure grows and shrinks-that-fit apply silently in ApplyShrinkPlan.
         var plan = new ShrinkPlan();
         if (WorldMap._objs == null) return plan;
 
@@ -311,7 +291,7 @@ public static class Helpers
             if (requested == null) continue;
             var data = wgo.data;
             if (data?.inventory == null) continue;
-            if (data.inventory_size == requested.Value) continue; // already at target — nothing to do
+            if (data.inventory_size == requested.Value) continue;
 
             plan.ContainersToShrink.Add((wgo, requested.Value));
             var overflow = data.inventory.Count - requested.Value;
@@ -409,8 +389,6 @@ public static class Helpers
         // (because we just sized the slider(s) to cover everything) and applies silently. No loop.
     }
 
-    // Called from Plugin.Update when InventorySizesDirty drains. Returns once it's done,
-    // either after applying silently or after opening the confirmation dialog.
     internal static void HandleInventorySizesDirty()
     {
         if (Fields.ShrinkDialogOpen) return; // dialog already open; let user answer first
@@ -418,7 +396,7 @@ public static class Helpers
         var plan = PlanShrink();
         if (!plan.HasOverflow)
         {
-            // Nothing would be hidden — apply the new sizes silently.
+            // Nothing would be hidden, apply the new sizes silently.
             ApplyShrinkPlan(plan);
             return;
         }
@@ -456,10 +434,8 @@ public static class Helpers
             plan.TotalChestOverflow, plan.ChestOverflows.Count);
     }
 
-    // Soft-dependency hook for BepInEx ConfigurationManager. We can't reference its DLL directly
-    // because users may not have it installed; CM exposes a public bool DisplayingWindow property
-    // we can flip to false via reflection. Lookup is lazy because plugin load order isn't
-    // guaranteed — at WMS Awake time CM may not yet have populated its Instance.
+    // BepInEx ConfigurationManager isn't a hard dependency. Use reflection to flip its
+    // DisplayingWindow property when CM is present.
     private const string CmGuid = "com.bepis.bepinex.configurationmanager";
     private static object _cmInstance;
     private static PropertyInfo _cmDisplayingWindow;
@@ -491,13 +467,11 @@ public static class Helpers
     // Meditation spot near the graveyard gate, used as the overflow dump in CollectToInventory mode.
     private static readonly Vector3 MeditationSpotPosition = new(3708.6f, 214.6f, 0.0f);
 
-    // Outdoor drop spot next to the Keeper's house — captured in-game via the tag-scan tool.
+    // Outdoor drop spot next to the Keeper's house, captured in-game via the tag-scan tool.
     private static readonly Vector3 NearHouseDropSpot = new(4601.0f, 290.6f, 0.0f);
 
-    // Skip drops the game considers important or scripted — quest items, keys, story pieces
-    // (`player_cant_throw_out`), and items with an `run_script_after_drop` hook that may still
-    // need to fire at their original position. Moving/vacuuming these could break quests or
-    // leave the player unable to recover an item vanilla wouldn't let them drop.
+    // Skip quest items, undroppable items, and anything with a run_script_after_drop that
+    // needs to fire at the original spot.
     private static bool IsProtectedDrop(DropResGameObject drop)
     {
         var def = drop?.res?.definition;
@@ -526,9 +500,8 @@ public static class Helpers
                 break;
         }
 
-        // Snapshot — tp.Collect() removes itself from TechPointDrop._all, which would invalidate
-        // the live enumerator and throw "Collection was modified". The throw skipped the
-        // DropsCleaned/InventoriesLoaded resets below, leaving the mod in a permanent retry loop.
+        // Copy first because tp.Collect() removes itself from TechPointDrop._all and would
+        // throw "Collection was modified" during enumeration.
         foreach (var tp in TechPointDrop.all.ToArray())
         {
             tp.Collect();
@@ -601,8 +574,8 @@ public static class Helpers
 
     private static void MoveDropsNearKeepersHouse(DropResGameObject[] drops)
     {
-        // Skip drops already sitting inside the dump zone — avoids re-scattering and re-merging items
-        // the mod already relocated on a previous load.
+        // Skip drops already sitting inside the dump zone to avoid re-scattering items the
+        // mod already relocated on a previous load.
         var dumpZoneRadiusWorld = Plugin.NearHouseDumpZoneRadius.Value * 96f;
         var dumpZoneRadiusSq = dumpZoneRadiusWorld * dumpZoneRadiusWorld;
 
@@ -623,7 +596,7 @@ public static class Helpers
             var distSq = ((Vector2) drop.transform.position - (Vector2) NearHouseDropSpot).sqrMagnitude;
             if (distSq <= dumpZoneRadiusSq)
             {
-                if (Plugin.DebugEnabled) Log($"Skipping '{drop.res.id}' in '{drop.zone_id}' — already in the dump zone.");
+                if (Plugin.DebugEnabled) Log($"Skipping '{drop.res.id}' in '{drop.zone_id}' - already in the dump zone.");
                 continue;
             }
 

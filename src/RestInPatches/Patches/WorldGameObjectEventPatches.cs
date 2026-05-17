@@ -1,13 +1,7 @@
 namespace RestInPatches.Patches;
 
-// WorldGameObject.UpdateDelayedEvents runs per WGO per frame via CustomUpdateManager.
-// Original: when the delayed-event list is empty (the usual case), it still calls
-//   this.GetComponent<ChunkedGameObject>().active_now_because_of_events = false;
-// which pays a Unity GetComponent roundtrip every frame for every WGO in the world.
-// With hundreds of WGOs registered that's hundreds of no-op component lookups per frame.
-//
-// This patch fully replaces the method: caches the ChunkedGameObject reference per WGO
-// and only writes the flag when it actually changes. Semantics are preserved.
+// Cache the ChunkedGameObject lookup the original makes every frame, and only touch the
+// active_now_because_of_events flag when its value actually flips.
 [Harmony]
 public static class WorldGameObjectEventPatches
 {

@@ -32,7 +32,6 @@ public static class Patches
 
         if (Plugin.DebugEnabled) Helpers.Log($"[DestroyTrees] starting; {Plugin.Trees.Count} tracked tree(s) on record, search distance {Plugin.TreeSearchDistance.Value}");
 
-        // Create a new list to hold the trees that you want to destroy.
         List<WorldGameObject> treesToDestroy = [];
         var scannedCount = 0;
 
@@ -47,11 +46,10 @@ public static class Patches
             }
         }
 
-        // Now you can destroy the trees without modifying the collection you're iterating over.
         foreach (var tree in treesToDestroy)
         {
             if (Plugin.DebugEnabled) Helpers.Log($"[DestroyTrees] removing world object {tree.obj_id} at {tree.pos3}");
-            WorldMap.objs.Remove(tree); // removing the reference from WorldMap.objs
+            WorldMap.objs.Remove(tree);
             UnityEngine.Object.DestroyImmediate(tree);
         }
 
@@ -61,13 +59,6 @@ public static class Patches
     }
 
 
-    // Returns false to skip the original SmartInstantiate body when we want to suppress the
-    // spawn. The previous shape mutated `ref prefab` to null and let the original run, but the
-    // game's SmartInstantiate calls Object.Instantiate(prefab, ...) with no null guard, so
-    // every suppression threw an ArgumentException. With RestInPatches installed its finalizer
-    // swallowed those, but without it the exception killed save-load mid-RestoreScene and the
-    // loading screen hung forever. RedrawPart only dereferences the returned WorldObjectPart
-    // for characters; trees/stumps aren't characters, so a null __result is safe.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(WorldGameObject), nameof(WorldGameObject.SmartInstantiate))]
     public static bool WorldGameObject_SmartInstantiate(WorldGameObject __instance, WorldObjectPart prefab, ref WorldObjectPart __result)
@@ -97,15 +88,11 @@ public static class Patches
         return false;
     }
 
-    // Returns true when the caller should suppress the spawn (skip the original SmartInstantiate).
     private static bool HandleStump(WorldGameObject instance, Vector3 instancePos, WorldObjectPart prefab)
     {
         if (Plugin.DebugEnabled) Helpers.Log($"[HandleStump] entry - instance={instance.obj_id} at {instancePos}, InstantStumpRemoval={Plugin.InstantStumpRemoval.Value}");
 
-        // SmartInstantiate can fire repeatedly for the same stump (zone enter/exit, save reload).
-        // Without this dedup check, every re-fire appended a duplicate Tree entry, which SaveTrees
-        // would then strip and log - producing pages of "Saved/Removed" spam plus a full JSON write
-        // to disk per re-fire. Mirrors the same check already in HandleTree.
+        // Dedup so repeated SmartInstantiate fires for the same stump don't append duplicates.
         var alreadyTracked = Plugin.Trees.Any(tree => Vector3.Distance(tree.location, instancePos) <= Plugin.TreeSearchDistance.Value);
         if (!alreadyTracked)
         {
@@ -134,7 +121,6 @@ public static class Patches
         return prefabName.Contains("tree") && !prefabName.Contains("bees") && !prefabName.Contains("apple");
     }
 
-    // Returns true when the caller should suppress the spawn (skip the original SmartInstantiate).
     private static bool HandleTree(WorldGameObject instance, Vector3 instancePos, WorldObjectPart prefab)
     {
         var treeExists = Plugin.Trees.Any(tree => Vector3.Distance(tree.location, instancePos) <= Plugin.TreeSearchDistance.Value);

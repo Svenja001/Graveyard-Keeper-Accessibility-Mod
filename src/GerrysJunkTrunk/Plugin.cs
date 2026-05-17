@@ -48,9 +48,6 @@ public class Plugin : BaseUnityPlugin
     internal static bool _disableTaxPromptDirty;
     internal static bool _disableTaxDialogOpen;
 
-    // Watchdog upper bound for the gerry routine. Routine is hard-capped at 20s by the
-    // existing safety-net timer; anything past 25s means the timer chain broke (sleep,
-    // save-load, scene unload, NPC dialog stomp) and HUD/control are stranded.
     internal const float CinematicMaxDurationSeconds = 25f;
 
     internal static ObjectCraftDefinition NewItem { get; private set; }
@@ -118,7 +115,7 @@ public class Plugin : BaseUnityPlugin
         Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
 
         EnableGerry = Config.Bind(GerrySection, "Gerry", true,
-            new ConfigDescription("Enable Gerry's buyback service — when on, items left in the shipping box are sold and Gerry arrives to deliver the coin.", null,
+            new ConfigDescription("Enable Gerry's buyback service. When on, items left in the shipping box are sold and Gerry arrives to deliver the coin.", null,
                 new ConfigurationManagerAttributes {Order = 6}));
 
         CinematicMode = Config.Bind(GerrySection, "Cinematic Mode", true,
@@ -126,17 +123,15 @@ public class Plugin : BaseUnityPlugin
                 new ConfigurationManagerAttributes {Order = 5, DispName = "    \u2514 Cinematic Mode"}));
         CinematicMode.SettingChanged += (_, _) =>
         {
-            // Toggling off mid-cinematic should restore the HUD straight away — the user
-            // is most likely flipping it precisely because they're staring at a gone HUD.
             if (!CinematicMode.Value && _cinematicPlaying)
             {
-                if (DebugEnabled) WriteLog("[CinematicMode] toggled off mid-cinematic — restoring HUD now");
+                if (DebugEnabled) WriteLog("[CinematicMode] toggled off mid-cinematic, restoring HUD now");
                 HideCinematic();
             }
         };
 
         ConvenienceTax = Config.Bind(GerrySection, "Convenience Tax", true,
-            new ConfigDescription("When on, Gerry takes a cut of every sale (30% before the Best Friend perk, 20% after). Disable to pay the full vendor value with no cut taken — bypasses the convenience-tax design.", null,
+            new ConfigDescription("When on, Gerry takes a cut of every sale (30% before the Best Friend perk, 20% after). Disable to pay the full vendor value with no cut taken (bypasses the convenience-tax design).", null,
                 new ConfigurationManagerAttributes {Order = 4, DispName = "    └ Convenience Tax"}));
         ConvenienceTax.SettingChanged += (_, _) =>
         {
@@ -181,10 +176,6 @@ public class Plugin : BaseUnityPlugin
     internal static void ShowCinematic(Transform transform)
     {
         if (_cinematicPlaying) return;
-        // Cinematic Mode off: Gerry still spawns and speaks, but the game keeps running
-        // around the player — no HUD hide, no player freeze, no camera takeover. The
-        // _cinematicPlaying flag stays false so HideCinematic also skips, and the watchdog
-        // never fires (nothing to recover).
         if (!CinematicMode.Value) return;
         _cinematicPlaying = true;
         _cinematicCameraTarget = transform;
@@ -203,9 +194,7 @@ public class Plugin : BaseUnityPlugin
         }
         GS.AddCameraTarget(MainGame.me.player.transform);
         GS.SetPlayerEnable(true, true);
-        // Flip the flag last so a partial-failure restore (NRE on player.transform during
-        // a scene transition, etc.) leaves _cinematicPlaying=true and the 25s watchdog in
-        // Patches.MainGame_Update can retry instead of silently losing the HUD.
+        // Flip the flag last so the safety timer can retry if the restore above throws.
         _cinematicPlaying = false;
     }
 
@@ -303,10 +292,7 @@ public class Plugin : BaseUnityPlugin
         }
     }
 
-    // Soft-dependency hook for BepInEx ConfigurationManager. Mirrors the pattern in
-    // WheresMaStorage/Helpers.cs so toggling Disable Tax pops the in-game dialog into focus
-    // instead of leaving it hidden behind the CM overlay. Lookup is lazy because plugin load
-    // order isn't guaranteed.
+    // Closes the ConfigurationManager window if it's installed, so the tax dialog isn't hidden behind it.
     private const string CmGuid = "com.bepis.bepinex.configurationmanager";
     private static object _cmInstance;
     private static PropertyInfo _cmDisplayingWindow;
@@ -341,10 +327,7 @@ public class Plugin : BaseUnityPlugin
         var noSales = num <= 0;
         var money = Trading.FormatMoney(num, true);
         var gerry = SpawnGerry(_shippingBox.transform, _shippingBox.pos3);
-        // Empty-trunk path: skip the cinematic entirely. Nothing to focus the camera on,
-        // and the immediate Show→Hide pair this used to do could strand the HUD if any
-        // step of the restore failed. Gerry still pops up, says "Nothing!", and gets
-        // cleaned up by DestroyGerryWithDelay.
+        // Skip the cinematic when there's nothing sold - no point taking over the camera.
         if (!noSales) ShowCinematic(gerry.transform);
         GJTimer.AddTimer(2f,
             delegate
@@ -396,11 +379,7 @@ public class Plugin : BaseUnityPlugin
         return gerry;
     }
 
-    // Gerry spawns 43px above the trunk so he doesn't collide with it in flight, but his
-    // collider still occupies a tile on the placement grid. Killing colliders keeps him off
-    // the grid; also hardens against the orphan case (if a save-load leaves him behind he's
-    // a pure visual, not a tile blocker). Matches the game's own idiom in
-    // WorldGameObject.UpdateGraphics.
+    // Keep Gerry's collider off the placement grid while he floats over the trunk.
     private static void DisableColliders(WorldGameObject wgo)
     {
         foreach (var c in wgo.GetComponentsInChildren<Collider2D>(true))
@@ -409,15 +388,12 @@ public class Plugin : BaseUnityPlugin
         }
     }
 
-    // Destroys any world objects tagged as mod-spawned Gerrys. Called on load (via
-    // FindJunkTrunk) and on the first morning tick each in-game day, so an orphan from an
-    // interrupted midnight routine is cleaned up even without a save-load.
     internal static void SweepOrphanGerrys(string source)
     {
         var orphans = WorldMap.GetWorldGameObjectsByCustomTag(ModGerryTag);
         if (orphans == null || orphans.Count == 0) return;
 
-        if (DebugEnabled) WriteLog($"[{source}] found {orphans.Count} orphaned Gerry WGO(s) — destroying");
+        if (DebugEnabled) WriteLog($"[{source}] found {orphans.Count} orphaned Gerry WGO(s), destroying");
         foreach (var g in orphans.Where(g => g))
         {
             g.DestroyMe();

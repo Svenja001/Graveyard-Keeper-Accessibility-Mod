@@ -21,14 +21,9 @@ public static class Helpers
     private static bool _captured;
     private static int _nonLiteralMaxFallbacks;
 
-    // Reads the current upper bound on a seed-drop max_value without invoking
-    // SmartExpression's WGO-aware evaluator. The vanilla seed-drop max is almost
-    // always a numeric literal — for those, FromString sets _simplified=true and
-    // _simpified_float to the parsed value, so we get the same number EvaluateFloat
-    // would have returned. For non-literal expressions (perk-driven yield bonuses
-    // referencing WGOpar/@-syntax), evaluation at GameBalance load has no WGO and
-    // would log "WGO is null while evaluating expression" once per item, so we
-    // fall back to the floor and write a deterministic boost on top.
+    // Read the current upper bound on a seed-drop max without firing the WGO-aware
+    // evaluator at GameBalance-load time (no WGO context yet). Use the parsed literal
+    // when there is one, otherwise fall back to the floor.
     private static float ReadMaxBefore(SmartExpression expr, float floor, string itemId)
     {
         if (expr is null)
@@ -125,7 +120,7 @@ public static class Helpers
             }
             if (Plugin.DebugEnabled)
             {
-                Log($"[ModifyOutput/Obj] '{output.id}' before — min='{output.min_value?._expression}', max='{output.max_value?._expression}'");
+                Log($"[ModifyOutput/Obj] '{output.id}' before - min='{output.min_value?._expression}', max='{output.max_value?._expression}'");
             }
             output.min_value = SmartExpression.ParseExpression(minValue.ToString(CultureInfo.InvariantCulture));
 
@@ -155,7 +150,7 @@ public static class Helpers
             var minValue = craft.needs[0].value;
             if (Plugin.DebugEnabled)
             {
-                Log($"[ModifyOutput/Craft] '{output.id}' before — min='{output.min_value?._expression}', max='{output.max_value?._expression}'");
+                Log($"[ModifyOutput/Craft] '{output.id}' before - min='{output.min_value?._expression}', max='{output.max_value?._expression}'");
             }
             output.min_value = SmartExpression.ParseExpression(minValue.ToString(CultureInfo.InvariantCulture));
 
@@ -172,9 +167,6 @@ public static class Helpers
         }
     }
 
-    // Initial run after GameBalance loads. Snapshots originals, then applies the mutations
-    // that the current config calls for. Snapshots are kept so toggling a setting later can
-    // revert the affected items to their originals before re-applying.
     internal static void CaptureAndApply()
     {
         Plugin.Log.LogInfo("Running SeedEqualizer GameBalanceLoad as GameBalance has been loaded.");
@@ -190,8 +182,6 @@ public static class Helpers
         _captured = true;
     }
 
-    // Called from ConfigEntry.SettingChanged. Reverts every previously-applied mutation,
-    // then re-applies based on the new config. No-op until the first CaptureAndApply has run.
     internal static void Reconcile()
     {
         if (!_captured)
@@ -200,7 +190,7 @@ public static class Helpers
         }
         if (Plugin.DebugEnabled)
         {
-            Log("[Reconcile] config changed — reverting + reapplying");
+            Log("[Reconcile] config changed - reverting + reapplying");
         }
         Revert();
         Apply();
@@ -277,7 +267,7 @@ public static class Helpers
 
         if (Plugin.DebugEnabled)
         {
-            Log($"[Apply] config snapshot — playerGardens={Plugin.ModifyPlayerGardens.Value}, zombieGardens={Plugin.ModifyZombieGardens.Value}, zombieVineyards={Plugin.ModifyZombieVineyards.Value}, refugeeGardens={Plugin.ModifyRefugeeGardens.Value}, wasteToZGardens={Plugin.AddWasteToZombieGardens.Value}, wasteToZVineyards={Plugin.AddWasteToZombieVineyards.Value}, boostSeed={Plugin.BoostPotentialSeedOutput.Value}, rainGrowth={Plugin.BoostGrowSpeedWhenRaining.Value}");
+            Log($"[Apply] config snapshot - playerGardens={Plugin.ModifyPlayerGardens.Value}, zombieGardens={Plugin.ModifyZombieGardens.Value}, zombieVineyards={Plugin.ModifyZombieVineyards.Value}, refugeeGardens={Plugin.ModifyRefugeeGardens.Value}, wasteToZGardens={Plugin.AddWasteToZombieGardens.Value}, wasteToZVineyards={Plugin.AddWasteToZombieVineyards.Value}, boostSeed={Plugin.BoostPotentialSeedOutput.Value}, rainGrowth={Plugin.BoostGrowSpeedWhenRaining.Value}");
         }
 
         var playerGardenCandidates = GameBalance.me.objs_data
@@ -385,7 +375,7 @@ public static class Helpers
             {
                 if (Plugin.DebugEnabled)
                 {
-                    Log($"[Apply/Waste] vineyard craft '{craft.id}' already drops crop_waste — skipping add");
+                    Log($"[Apply/Waste] vineyard craft '{craft.id}' already drops crop_waste - skipping add");
                 }
             }
 
@@ -409,14 +399,14 @@ public static class Helpers
             {
                 if (Plugin.DebugEnabled)
                 {
-                    Log($"[Apply/Waste] garden craft '{craft.id}' already drops crop_waste — skipping add");
+                    Log($"[Apply/Waste] garden craft '{craft.id}' already drops crop_waste - skipping add");
                 }
             }
         }
 
         if (Plugin.DebugEnabled)
         {
-            Log($"[Apply] done — zombieGardens={zombieModified}, zombieVineyards={vineyardModified}, refugeeGardens={refugeeModified}, wasteAdded(vineyards)={wasteVineyardAdded}, wasteAdded(gardens)={wasteGardenAdded}, nonLiteralMaxFallbacks={_nonLiteralMaxFallbacks}");
+            Log($"[Apply] done - zombieGardens={zombieModified}, zombieVineyards={vineyardModified}, refugeeGardens={refugeeModified}, wasteAdded(vineyards)={wasteVineyardAdded}, wasteAdded(gardens)={wasteGardenAdded}, nonLiteralMaxFallbacks={_nonLiteralMaxFallbacks}");
         }
     }
 }

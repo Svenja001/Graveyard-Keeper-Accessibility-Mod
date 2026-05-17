@@ -6,9 +6,7 @@ using UnityEngine;
 
 namespace Shared;
 
-// Holds cross-mod debug-warning registrations on a single named GameObject so every mod's
-// linked copy of this file sees the same registry. Without this the statics would be
-// per-assembly and the "one dialog for all mods" behaviour wouldn't work.
+// Shared GameObject so every mod's copy of this file sees the same registry.
 internal class DebugWarningRegistry : MonoBehaviour
 {
     private const string HostObjectName = "~DebugWarningRegistry";
@@ -34,9 +32,6 @@ internal class DebugWarningRegistry : MonoBehaviour
     }
 }
 
-// Call DebugWarningDialog.Register(MyPluginInfo.PLUGIN_NAME, () => DebugEnabled) in Awake.
-// The first mod's copy of this file to be loaded creates the shared registry GameObject;
-// every mod shares it at runtime via GameObject.Find.
 public static class DebugWarningDialog
 {
     public static void Register(string pluginName, Func<bool> isDebugEnabled)
@@ -49,9 +44,7 @@ public static class DebugWarningDialog
 [Harmony]
 internal static class DebugWarningDialogPatch
 {
-    // Inline translations rather than JSON files so the shared source drop-in keeps zero
-    // filesystem coupling. Falls back to English on any unrecognised language code.
-    // {0} is substituted with the bulleted list of mod names.
+    // Inline so the file stays drop-in with no JSON dependency. {0} is the mod-name list.
     private static readonly Dictionary<string, (string Title, string Template)> Translations = new()
     {
         ["en"] = ("Debug Logging",

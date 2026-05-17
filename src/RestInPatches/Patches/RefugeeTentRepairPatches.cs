@@ -2,17 +2,9 @@ using DLCRefugees;
 
 namespace RestInPatches.Patches;
 
-// Repairs corrupted refugee-tent occupancy state on save load. Vanilla tracks tent vacancies via
-// two inventory items per tent (refugee_tent_place_available_item + refugee_tent_place_busy_item),
-// where avail + busy is supposed to equal the tent's can_insert_items_limit. A save can land with
-// the busy count drifted above capacity (reported on Nexus: tent_4 with 12 busy items vs capacity
-// of 2), which makes GetVacantTentForRefugee log "Wrong vacant places count in tent: -10" and
-// breaks every downstream refugee spawn.
-//
-// The canonical truth is engine.Data.active_refugee_list — each refugee's home_gd_point_tag
-// names the gd-point of its assigned tent. We map each tent to its nearest gd-point (using the
-// engine's own GetHomeGDPointForTent so geometry matches vanilla), count the refugees per tent,
-// and reset (available, busy) to (capacity - refugees, refugees) when the values disagree.
+// Fix corrupted refugee-tent occupancy on save load (busy count drifts above the tent's
+// capacity and breaks new refugee spawns). Recount from the active refugee list and rewrite
+// the available/busy inventory tokens so they match.
 [Harmony]
 public static class RefugeeTentRepairPatches
 {
@@ -76,9 +68,8 @@ public static class RefugeeTentRepairPatches
             if (capacity <= 0) continue;
 
             var wantAvail = Math.Max(0, capacity - wantBusy);
-            // If a save somehow has more refugees pointing at this tent than capacity allows,
-            // clamp to capacity rather than over-add busy tokens — keeps the engine math sane
-            // even though one refugee ends up homeless until the player rebuilds something.
+            // If more refugees point at this tent than capacity allows, clamp so the engine
+            // math stays sane. One refugee ends up homeless until the player rebuilds.
             if (wantBusy > capacity) wantBusy = capacity;
 
             var currentAvail = tent.data?.GetItemsCount(AvailableItem) ?? 0;

@@ -1,4 +1,4 @@
-﻿namespace WheresMaVeggies;
+namespace WheresMaVeggies;
 
 [Harmony]
 public static class Patches
@@ -100,7 +100,7 @@ public static class Patches
 
         if (Plugin.DebugEnabled)
         {
-            Plugin.WriteLog($"[DoPreZeroHPActivity] seed '{__instance.obj_id}' harvested — scanning for same-crop neighbours.");
+            Plugin.WriteLog($"[DoPreZeroHPActivity] seed '{__instance.obj_id}' harvested - scanning for same-crop neighbours.");
         }
 
         var objects = Helpers.FindNearbyObjectsByVector(__instance);
@@ -124,7 +124,7 @@ public static class Patches
 
         if (Plugin.DebugEnabled)
         {
-            Plugin.WriteLog($"[DoPreZeroHPActivity] cascade finished — {harvested} neighbour(s) harvested alongside seed '{__instance.obj_id}'.");
+            Plugin.WriteLog($"[DoPreZeroHPActivity] cascade finished - {harvested} neighbour(s) harvested alongside seed '{__instance.obj_id}'.");
         }
     }
 

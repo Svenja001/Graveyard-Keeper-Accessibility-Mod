@@ -17,9 +17,6 @@ public class Plugin : BaseUnityPlugin
 {
     private const string ModGerryTag = "mod_gerry";
 
-    // Section names. New scheme: ── Foo ── (alphabetical sort in CM).
-    // Legacy section names get rewritten to these by MigrateRenamedSections() on first launch
-    // of the new version, so existing user customisations are preserved.
     private const string AdvancedSection      = "── Advanced ──";
     private const string SavingSection        = "── Saving ──";
     private const string UISection            = "── UI ──";
@@ -28,9 +25,6 @@ public class Plugin : BaseUnityPlugin
     private const string ExitingSection       = "── Exiting ──";
     private const string UpdatesSection       = "── Updates ──";
 
-    // Migrates legacy section names (both the pre-2.5.10 numbered format and the interim
-    // "── N. Name ──" form) to the plain "── Name ──" headers so existing user values
-    // survive the rename. Idempotent.
     private static readonly Dictionary<string, string> SectionRenames = new()
     {
         ["00. Advanced"]           = AdvancedSection,
@@ -85,11 +79,8 @@ public class Plugin : BaseUnityPlugin
             if (!MainGame.me || !MainGame.me.dungeon_root) return false;
             if (!MainGame.me.dungeon_root.dungeon_is_loaded_now) return false;
 
-            // A teleport stone moves the player out via Flow_TeleportToWGO, which never
-            // calls DestroyTiles() — the one place dungeon_is_loaded_now is ever cleared.
-            // So the flag can stay true after the player is back on the surface.
-            // Surface zones live under world_root; dungeons have no WorldZone. If the
-            // player has a current_zone, they're physically outside the dungeon.
+            // A teleport stone can leave dungeon_is_loaded_now true after the player is
+            // back on the surface. Use current_zone instead - dungeons have no WorldZone.
             var pc = MainGame.me.player_component;
             if (pc != null && pc.current_zone != null) return false;
 
@@ -135,9 +126,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites old "[01. Saving]" style headers to "[── Saving ──]" in the .cfg file
-    // so existing user values survive the section rename. Idempotent — re-running on an
-    // already-migrated file is a no-op (no old headers left to find).
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;

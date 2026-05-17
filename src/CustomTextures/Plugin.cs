@@ -1,4 +1,4 @@
-﻿using BepInEx;
+using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
 using System.Collections.Generic;
@@ -51,7 +51,7 @@ namespace CustomTextures
                 var key = Path.GetFileNameWithoutExtension(file).ToLowerInvariant();
                 if (LoadedCustomTextures.ContainsKey(key))
                 {
-                    Log.LogWarning($"Duplicate texture name '{key}' — skipping {file}");
+                    Log.LogWarning($"Duplicate texture name '{key}' - skipping {file}");
                     continue;
                 }
                 LoadedCustomTextures.Add(key, file);

@@ -7,14 +7,8 @@ namespace Shared;
 
 internal class UpdateLabelPositioner : MonoBehaviour
 {
-    // GYK's NGUI UIRoot is in Flexible mode with activeHeight = Screen.height,
-    // so widget-space localPosition maps 1:1 with screen pixels offset from the
-    // panel center. Instead of positioning at the top-right corner minus a small
-    // margin (which lands tight against pc2 banner territory), we place the
-    // label midway between center and the top-right corner — specifically at
-    // 49.5% of the half-extent. This was user-calibrated against (850, 355) at
-    // Screen 3440x1440 (activeHeight 1440) and scales proportionally to any
-    // resolution or aspect ratio.
+    // 49.5% of the half-extent. Calibrated against (850, 355) at 3440x1440;
+    // scales with any resolution because NGUI is in Flexible mode.
     private const float PositionRatio = 0.495f;
 
     private UIRoot _root;
@@ -50,9 +44,6 @@ internal static class UpdateCheckerUI
         Render(__instance);
     }
 
-    // Called by UpdateCheckerCoordinator when a fetch completes after the menu is
-    // already showing (avoids the user missing the label if they reach the menu
-    // before the HTTP fetch returns).
     internal static void RefreshIfMenuOpen()
     {
         if (!GUIElements.me) return;
@@ -73,8 +64,6 @@ internal static class UpdateCheckerUI
             return;
         }
 
-        // Rebuild from scratch each Render. Tiny cost (≤10 labels) and
-        // eliminates stale-child / count-mismatch edge cases.
         if (existing)
         {
             UnityEngine.Object.DestroyImmediate(existing.gameObject);
@@ -88,7 +77,7 @@ internal static class UpdateCheckerUI
         var reference = mainMenu.version_txt;
         if (!reference)
         {
-            Log.LogWarning("version_txt missing — cannot build update label");
+            Log.LogWarning("version_txt missing - cannot build update label");
             return;
         }
 
@@ -117,8 +106,6 @@ internal static class UpdateCheckerUI
 
             if (!string.IsNullOrEmpty(e.NexusUrl))
             {
-                // Whole-widget collider + closure-captured URL: the entire entry
-                // label is the click target, not just glyphs inside a [url=] span.
                 NGUITools.AddWidgetCollider(entry.gameObject);
                 var url = e.NexusUrl;
                 UIEventListener.Get(entry.gameObject).onClick = _ => Application.OpenURL(url);
@@ -129,7 +116,7 @@ internal static class UpdateCheckerUI
 
         if (outdated.Count > MaxVisibleEntries)
         {
-            var more = CreateChildLabel(container, reference, "[707070]+ " + (outdated.Count - visible) + " more \u2014 see BepInEx log[-]", reference.depth + 2);
+            var more = CreateChildLabel(container, reference, "[707070]+ " + (outdated.Count - visible) + " more - see BepInEx log[-]", reference.depth + 2);
             more.transform.localPosition = new Vector3(0f, y, 0f);
             more.MakePixelPerfect();
         }

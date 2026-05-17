@@ -1,11 +1,7 @@
 namespace RestInPatches.Patches;
 
-// Timber/ore stockpiles use the generic SmartDrawer (SmartDrawer.cs) whose atoms
-// evaluate bounded conditions like ConcreteItemsBetween(N, M). When a capacity-
-// inflating mod lets inventory exceed M, every bounded atom falls false and the
-// pile disappears. This postfix force-activates the highest-threshold atom in
-// each group when count exceeds it, so the visual clamps at "full" instead of
-// vanishing. No-op on vanilla.
+// Stop timber/ore piles from vanishing when a capacity mod pushes the inventory past
+// the largest visual tier. Falls back to showing the "full" mesh instead of nothing.
 [Harmony]
 public static class StockpilePatches
 {

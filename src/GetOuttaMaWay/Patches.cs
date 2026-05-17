@@ -12,10 +12,7 @@ public static class Patches
         Plugin.GameStartedPlaying();
     }
 
-    // Option 1: when a heavy is spawned with Direction.ToPlayer (the default for crafts/harvests that
-    // return drops to the player), redirect it to Direction.None so it scatters near the origin
-    // instead of flying at the player's feet. The vanilla None-path still applies kick physics and
-    // a small randomised offset, so logs still tumble — they just don't home in.
+    // Stop heavies from flying at the player on drop. They still scatter with a kick.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(DropResGameObject), nameof(DropResGameObject.Drop),
         [typeof(Vector3), typeof(Item), typeof(Transform), typeof(Direction),
@@ -51,9 +48,7 @@ public static class Patches
         direction = Direction.None;
     }
 
-    // Option 2: after DoDrop finishes wiring up the heavy (res item + CapsuleCollider2D enabled),
-    // briefly ignore collision between the heavy and the player so the drop can't interrupt
-    // the animation. A coroutine restores normal collision after the configured window.
+    // Ignore collision between player and a freshly dropped heavy for a short window.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(DropResGameObject), nameof(DropResGameObject.DoDrop),
         [typeof(Item), typeof(int), typeof(bool)])]
@@ -119,7 +114,7 @@ public static class Patches
         yield return new WaitForSeconds(seconds);
         if (heavy == null)
         {
-            if (Plugin.DebugEnabled) Plugin.Log.LogInfo($"[RestoreGrace] heavy '{heavyId}' already destroyed — nothing to restore");
+            if (Plugin.DebugEnabled) Plugin.Log.LogInfo($"[RestoreGrace] heavy '{heavyId}' already destroyed, nothing to restore");
             yield break;
         }
         if (player == null)

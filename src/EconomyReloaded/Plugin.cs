@@ -67,9 +67,7 @@ public class Plugin : BaseUnityPlugin
         return result;
     }
 
-    // Scans the INI content line-by-line, captures the boolean value of the target key
-    // if present, and removes both the key line and any preceding comment block that
-    // BepInEx auto-wrote for it.
+    // Reads a boolean value out of the INI text and removes both the key and its auto-generated comment block.
     private static bool? ExtractAndStripBoolEntry(ref string content, string key, ref bool modified)
     {
         var normalised = content.Replace("\r\n", "\n");
@@ -163,8 +161,7 @@ public class Plugin : BaseUnityPlugin
             new ConfigurationManagerAttributes { Order = 0 }));
     }
 
-    // Carries over values from the pre-1.4 two-boolean config so an existing install
-    // keeps behaving the same way after the upgrade.
+    // Ports old Inflation/Deflation settings onto the new sliders so existing installs behave the same after upgrade.
     private void ApplyLegacyMigration(LegacyConfigValues legacy)
     {
         var changed = false;
@@ -177,8 +174,7 @@ public class Plugin : BaseUnityPlugin
 
         if (legacy.Deflation.HasValue)
         {
-            // Old "Deflation = true"  = vanilla dynamic sell with the 0.75 markdown
-            // Old "Deflation = false" = flat sell at 1.0x base (no markdown, no scaling)
+            // true matches the old dynamic 0.75 sell behaviour; false matches the old flat 1.0x sell.
             DynamicSellPricing.Value = legacy.Deflation.Value;
             SellPriceMultiplier.Value = legacy.Deflation.Value ? 0.75f : 1.0f;
             changed = true;

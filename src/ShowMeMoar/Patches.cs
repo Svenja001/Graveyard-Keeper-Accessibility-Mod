@@ -1,4 +1,4 @@
-﻿namespace ShowMeMoar;
+namespace ShowMeMoar;
 
 [Harmony]
 public static class Patches
@@ -199,7 +199,7 @@ public static class Patches
         var borderXField = AccessTools.Field(typeof(FogObject), nameof(FogObject.BORDER_X));
         var replaced = false;
 
-        // Find the first ldsfld BORDER_X — this anchors us to the X wrapping check:
+        // Find the first ldsfld BORDER_X - this anchors us to the X wrapping check:
         //   (double) tile_pos.x > 6.0 - (double) BORDER_X
         // The constant 6 appears a few instructions before as ldc.i4.6, ldc.r4, or ldc.r8
         // depending on compiler. Walk backward to find it.
@@ -216,7 +216,7 @@ public static class Patches
                 codes[j].operand = getColumns;
 
                 // GetFogColumns() returns double. If the original was ldc.i4.6 or ldc.r4,
-                // there's a conv.r8 between the load and ldsfld BORDER_X — nop it.
+                // there's a conv.r8 between the load and ldsfld BORDER_X - nop it.
                 if (!wasDouble)
                 {
                     for (var k = j + 1; k < i; k++)
@@ -295,7 +295,7 @@ public static class Patches
                 null,
                 () =>
                 {
-                    // User said No — do nothing this session. Prompt will re-appear on the next launch
+                    // User said No - do nothing this session. Prompt will re-appear on the next launch
                     // unless they turn off "Offer the fix at startup".
                 });
         }

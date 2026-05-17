@@ -5,13 +5,8 @@ using BepInEx.Configuration;
 
 namespace Shared;
 
-// Helpers for migrating BepInEx config INI files when a mod renames a config section
-// header or a config key. Without this, renaming a Bind() argument silently orphans
-// the user's saved value and resets to the new default.
-//
-// Each mod DLL compiles its own copy of this file — there are no cross-mod statics.
-// Call from Plugin.Awake BEFORE InitConfiguration so the new Bind() picks up the
-// migrated value on first read.
+// Rewrites a mod's BepInEx config INI so renamed sections/keys keep the user's saved value.
+// Call before the new Bind() so the migrated value is what gets read.
 internal static class ConfigMigration
 {
     internal sealed class KeyRename
@@ -30,7 +25,7 @@ internal static class ConfigMigration
         }
     }
 
-    // Section header rename: "[Old Section]" → "[New Section]". Idempotent.
+    // Section header rename: "[Old Section]" -> "[New Section]". Safe to run every launch.
     internal static void MigrateRenamedSections(ConfigFile cfg, TimestampedLogger log, IDictionary<string, string> renames)
     {
         if (renames == null || renames.Count == 0) return;
@@ -74,8 +69,7 @@ internal static class ConfigMigration
     }
 
     // Key rename inside a known section. Optional value transform for polarity flips
-    // (e.g. invert a bool when "Disable Foo" becomes "Foo"). Idempotent — if the new
-    // key is already present and the old key isn't, the file isn't touched.
+    // (e.g. invert a bool when "Disable Foo" becomes "Foo").
     internal static void MigrateRenamedKeys(ConfigFile cfg, TimestampedLogger log, params KeyRename[] renames)
     {
         if (renames == null || renames.Length == 0) return;

@@ -34,7 +34,6 @@ namespace AlchemyResearchRedux
         private static string SavePath => Path.Combine(Application.persistentDataPath, "AlchemyRecipes.json");
 
 
-        // Serialization Methods
         public static void SaveRecipesToFile()
         {
             var json = JsonConvert.SerializeObject(KnownRecipes, Formatting.Indented);
@@ -46,7 +45,7 @@ namespace AlchemyResearchRedux
         {
             if (!File.Exists(SavePath))
             {
-                KnownRecipes = []; // Return an empty list if the file doesn't exist
+                KnownRecipes = [];
                 return;
             }
 

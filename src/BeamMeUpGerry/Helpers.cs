@@ -64,10 +64,8 @@ public static class Helpers
         const float maximumFee = 5f;
         var playerMoney = MainGame.me.player.data.money;
 
-        // Calculate dynamic fee based on player's money
         var dynamicFee = (float)Math.Max(minimumFee, Math.Min(maximumFee, Math.Round(0.1f * playerMoney / 100f, 2)));
 
-        // Logging for debugging or information purposes
         if (Plugin.DebugEnabled) Log($"[Fee]: {Trading.FormatMoney(dynamicFee, true)}\nMoney: {Trading.FormatMoney(playerMoney, true)}, Minimum: {Trading.FormatMoney(minimumFee, true)}");
 
         return dynamicFee;
@@ -78,19 +76,13 @@ public static class Helpers
     {
         if (!Plugin.GerryCharges.Value) return;
 
-        // Adjust the vector's y-coordinate
         vector.y += 125f;
 
-        // Calculate the fee to be paid
         var feeToPay = GenerateFee();
-
-        // Deduct the fee from the player's money
         MainGame.me.player.data.money -= feeToPay;
 
-        // Play the coin sound effect at the modified vector position
         Sounds.PlaySound("coins_sound", vector, true);
 
-        // Show the effect bubble for the fee deduction
         var formattedFee = Trading.FormatMoney(feeToPay, true);
         EffectBubblesManager.ShowImmediately(vector, $"-{formattedFee}", EffectBubblesManager.BubbleColor.Red, true, 3f);
     }

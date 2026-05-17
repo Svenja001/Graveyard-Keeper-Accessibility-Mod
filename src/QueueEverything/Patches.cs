@@ -71,10 +71,7 @@ public static class Patches
 
         Plugin.CraftsStarted = true;
 
-        // The first ApplyCraftMutations pass (during FillCraftsList_Postfix) ran without knowing
-        // about these benches — queue a selective reapply for just the discovered bench types so
-        // those crafts get restored to vanilla on the next frame, without touching the other ~1000
-        // unrelated craft definitions.
+        // Queue a reapply for the freshly-discovered zombie benches so their crafts go back to vanilla.
         if (Plugin.ZombieOccupiedBenches.Count > 0)
         {
             foreach (var benchId in Plugin.ZombieOccupiedBenches)
@@ -107,9 +104,7 @@ public static class Patches
             if (Plugin.DebugEnabled) Plugin.WriteLog($"Exhaust-less! detected, using its config.");
         }
 
-        // Per-save state must clear between loads. Without this, going Main Menu → Load Save B
-        // after a session on Save A leaves Save A's WGO references in CurrentlyCrafting and
-        // Save A's bench types in ZombieOccupiedBenches, both of which would mis-drive Save B.
+        // Clear per-save state so loading a different save doesn't see the previous save's WGOs.
         Plugin.CurrentlyCrafting.Clear();
         Plugin.ZombieOccupiedBenches.Clear();
         Plugin.CraftsStarted = false;
@@ -169,11 +164,7 @@ public static class Patches
         }
     }
 
-    // Reactive update for ZombieOccupiedBenches when the player assigns or unassigns a worker.
-    // The initial scan in MainGame_Update covers what's loaded from save; this covers everything
-    // after, so reassigning a zombie mid-session no longer needs a save/reload to take effect.
-    // Gated on Plugin.CraftsStarted so the linked_worker writes the game does during world load
-    // are ignored — those are already aggregated into the initial scan.
+    // Catch zombie assign/unassign after load so mid-session changes don't need a save/reload.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(WorldGameObject), nameof(WorldGameObject.linked_worker), MethodType.Setter)]
     public static void WorldGameObject_linked_worker_Setter_Postfix(WorldGameObject __instance)
@@ -199,9 +190,7 @@ public static class Patches
 
         if (!Plugin.ZombieOccupiedBenches.Contains(benchId)) return;
 
-        // The instance just lost its zombie. The TYPE only leaves the set if no peer instance
-        // of the same obj_def.id still has a zombie linked — otherwise we'd unblock auto-craft
-        // on a craft that's still being run by a zombie elsewhere.
+        // Only drop the bench type if no other instance still has a zombie linked.
         foreach (var wgo in WorldMap._objs)
         {
             if (wgo == null || wgo == __instance) continue;
@@ -241,9 +230,6 @@ public static class CraftComponentPatches
         public Dictionary<int, int> FireNeedValues;
         public Dictionary<int, int> ResearchOutputValues;
 
-        // IsUnsafe is recomputed per apply via Plugin.IsUnsafeDefinition(craft) — the zombie-bench
-        // set is populated AFTER this snapshot is captured, so caching the value here would lock
-        // in the wrong answer for the second apply pass.
         public CraftCategory Category;
         public SmartExpression CachedAutoCraftTime;
     }
@@ -252,14 +238,6 @@ public static class CraftComponentPatches
     private static readonly HashSet<string> WarnedUncategorized = new(StringComparer.Ordinal);
     private static readonly SmartExpression ZeroEnergyExpr = SmartExpression.ParseExpression("0");
 
-    // Two-state reapply queue:
-    //  - PendingFullReapply: a config change happened, every craft's mutation state must be
-    //    re-evaluated. Wins over PendingBenchReapply.
-    //  - PendingBenchReapply: bench obj_def.ids whose zombie-occupancy flipped. Only the crafts
-    //    that reference one of these benches need re-evaluating; the rest are unchanged. ~1ms
-    //    instead of ~5ms across the ~1000 craft definitions.
-    // The drain in MainGame_Update postfix runs at most once per frame regardless of how many
-    // triggers fire — natural debouncing for rapid zombie reassignments.
     internal static bool PendingFullReapply;
     internal static readonly HashSet<string> PendingBenchReapply = new(StringComparer.Ordinal);
 
@@ -341,11 +319,7 @@ public static class CraftComponentPatches
             $"[ApplyCraftMutations] elapsed={elapsedMs:F2}ms visited={visited} converted={counters.Converted} halved={counters.Halved} fireAdjusted={counters.FireAdjusted} forcedMulti={counters.ForcedMulti} skipped(alreadyAuto={counters.SkippedAutoAlready}, unsafe={counters.SkippedUnsafe}, categoryOff={counters.SkippedCategoryOff})");
     }
 
-    // Selective variant: revisits only the crafts whose craft_in references one of the supplied
-    // bench obj_def.ids. Used when a zombie attaches/detaches — most craft definitions don't care
-    // about that bench, so paying the full ~1000-craft loop wastes ~5ms of frame time. Restoring
-    // from snapshot first means a craft that was previously auto-converted (because the bench
-    // wasn't yet known to be zombie-occupied) gets correctly reverted to vanilla on detach.
+    // Revisits only crafts that reference one of these benches, instead of all ~1000 crafts.
     internal static void ApplyCraftMutationsForBenches(IReadOnlyCollection<string> benchIds)
     {
         if (!Plugin.CcAlreadyRun) return;
@@ -726,10 +700,7 @@ public static class CraftGUIPatches
         Plugin.AlreadyRun = false;
     }
 
-    // Singular +1 / -1 buttons in the expanded multi-quality view. Vanilla never
-    // wired amount controls into full_detailed_go; QE owns these because QE's
-    // multi-qual features are what make that view actually adjustable. Min/Max
-    // in the same view are owned by MaxButtonsRedux — see ExpandViewAmountButtons.cs.
+    // +1 / -1 buttons in the expanded multi-quality view. Min/Max in the same view live in MaxButtonsRedux.
     [HarmonyAfter("p1xel8ted.gyk.restinpatches")]
     [HarmonyPostfix, HarmonyPatch(typeof(CraftGUI), nameof(CraftGUI.Open),
         typeof(WorldGameObject), typeof(CraftsInventory), typeof(string))]

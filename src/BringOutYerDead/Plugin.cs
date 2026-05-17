@@ -51,7 +51,7 @@ public class Plugin : BaseUnityPlugin
     {
         Debug = Config.Bind(AdvancedSection, "Debug Logging", false,
             new ConfigDescription(
-                "Write detailed delivery-scheduling diagnostics to the BepInEx console — phase transitions, donkey state, carrot checks, and retry reasons. Turn this on when reporting bugs so the log shows what the mod is actually seeing. Leave off for normal play.",
+                "Write detailed delivery-scheduling diagnostics to the BepInEx console - phase transitions, donkey state, carrot checks, and retry reasons. Turn this on when reporting bugs so the log shows what the mod is actually seeing. Leave off for normal play.",
                 null,
                 new ConfigurationManagerAttributes {Order = 1}));
         DebugEnabled = Debug.Value;
@@ -65,7 +65,7 @@ public class Plugin : BaseUnityPlugin
 
         DayDelivery = Config.Bind(DeliveryTimesSection, "Day Delivery", false,
             new ConfigDescription(
-                "Trigger a body delivery at the start of the daytime phase (around midday). Default: off — turn on if you want an extra mid-day delivery on top of the morning/evening ones.",
+                "Trigger a body delivery at the start of the daytime phase (around midday). Default: off - turn on if you want an extra mid-day delivery on top of the morning/evening ones.",
                 null,
                 new ConfigurationManagerAttributes {Order = 5}));
 
@@ -77,7 +77,7 @@ public class Plugin : BaseUnityPlugin
 
         NightDelivery = Config.Bind(DeliveryTimesSection, "Night Delivery", false,
             new ConfigDescription(
-                "Trigger a body delivery at the start of the night phase (after sunset). Default: off — the donkey would otherwise arrive right as you're heading to bed.",
+                "Trigger a body delivery at the start of the night phase (after sunset). Default: off - the donkey would otherwise arrive right as you're heading to bed.",
                 null,
                 new ConfigurationManagerAttributes {Order = 3}));
 

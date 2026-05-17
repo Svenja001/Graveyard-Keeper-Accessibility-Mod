@@ -2,16 +2,8 @@ using Newtonsoft.Json;
 
 namespace TheSeedEqualizer;
 
-// Per-crop seed ledger. Counts seeds spent on planting and seeds returned on
-// harvest, aggregated by crop. Stored as ledger.json next to the plugin DLL.
-//
-// Independent counters: SeedsIn is incremented at every spend event,
-// SeedsOut at every harvest event. Net is the difference. This avoids the
-// fragility of trying to pair individual plant→harvest cycles, which breaks
-// down on auto-cycling refugee/zombie gardens at high craft speeds.
-//
-// All file I/O is best-effort and non-blocking — the ledger is observability
-// only, never block plant/harvest if writing fails.
+// Per-crop seed ledger written to ledger.json next to the plugin DLL. Tracks
+// seeds-in vs seeds-out per crop for observability; writes are best-effort.
 public static class Ledger
 {
     public sealed class CropTotals
@@ -85,7 +77,7 @@ public static class Ledger
                 }
                 else
                 {
-                    LogHelper.Info($"[Ledger] Existing ledger.json is schema {loaded?.Schema ?? 0}, expected 2. Starting fresh — old file will be overwritten on next save.");
+                    LogHelper.Info($"[Ledger] Existing ledger.json is schema {loaded?.Schema ?? 0}, expected 2. Starting fresh - old file will be overwritten on next save.");
                     _file = new LedgerFile();
                 }
             }
@@ -124,16 +116,8 @@ public static class Ledger
         return string.Format(CultureInfo.InvariantCulture, "{0:F1},{1:F1}", p.x, p.y);
     }
 
-    // Pulls the crop name out of any of the planting/growing/ready id patterns
-    // by skipping known structural tokens. Examples:
-    //   garden_wheat_planting_1            → wheat
-    //   garden_wheat_growing               → wheat
-    //   garden_wheat_ready_1               → wheat
-    //   garden_wheat_grow_desk_planting    → wheat
-    //   grow_desk_planting_carrot_2        → carrot
-    //   grow_vineyard_planting_grapes_3    → grapes
-    //   refugee_garden_grow_beet           → beet
-    //   refugee_garden_cabbage_grow_desk_planting → cabbage
+    // Pull the crop name out of any planting/growing/ready id by skipping the
+    // known structural tokens.
     public static string CropTypeFromId(string id)
     {
         if (string.IsNullOrEmpty(id)) return id;

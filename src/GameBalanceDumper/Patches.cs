@@ -4,9 +4,7 @@ namespace GameBalanceDumper;
 [HarmonyWrapSafe]
 public static class Patches
 {
-    // Priority.First runs before unmarked postfixes (Normal = 400), so we capture the
-    // pristine GameBalance state before EconomyReloaded / FasterCraftReloaded /
-    // GiveMeMoar / AlchemyResearchRedux / GraveChangesRedux mutate it.
+    // Run before other mods' postfixes so we dump the untouched balance.
     [HarmonyPostfix]
     [HarmonyPriority(Priority.First)]
     [HarmonyPatch(typeof(GameBalance), nameof(GameBalance.LoadGameBalance))]

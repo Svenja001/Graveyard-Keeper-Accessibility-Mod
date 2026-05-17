@@ -73,9 +73,6 @@ public class Plugin : BaseUnityPlugin
 
     private static void OnSeedSettingChanged(object sender, EventArgs e) => Helpers.Reconcile();
 
-    // Rewrites old "[0X. Name]" headers to the "[── N. Name ──]" form so existing
-    // user values survive the section rename. Idempotent — once migrated there are
-    // no old headers left for the next launch to match.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -128,7 +125,7 @@ public class Plugin : BaseUnityPlugin
 
         // ── 2. Player Gardens ──
         ModifyPlayerGardens = Config.Bind(PlayerGardensSection, "Modify Player Gardens", false,
-            new ConfigDescription("On: your own garden plots drop a fairer amount of seeds — at minimum the same number you planted, plus a bonus. Off: vanilla seed yields apply to your gardens.", null,
+            new ConfigDescription("On: your own garden plots drop a fairer amount of seeds - at minimum the same number you planted, plus a bonus. Off: vanilla seed yields apply to your gardens.", null,
                 new ConfigurationManagerAttributes {Order = 100}));
 
         // ── 3. Zombie Gardens ──
@@ -165,7 +162,7 @@ public class Plugin : BaseUnityPlugin
 
         // ── 7. Tracking ──
         TrackPlantCycles = Config.Bind(TrackingSection, "Track Plant Cycles", true,
-            new ConfigDescription("On: every plant and harvest is recorded to BepInEx/plugins/TheSeedEqualizer/ledger.json — one entry per bed showing seeds in vs seeds returned, plus running totals per crop. Off: no tracking. Existing ledger file is preserved either way.", null,
+            new ConfigDescription("On: every plant and harvest is recorded to BepInEx/plugins/TheSeedEqualizer/ledger.json - one entry per bed showing seeds in vs seeds returned, plus running totals per crop. Off: no tracking. Existing ledger file is preserved either way.", null,
                 new ConfigurationManagerAttributes {Order = 100}));
 
         DebugTracking = Config.Bind(TrackingSection, "Verbose Tracking Logs", false,

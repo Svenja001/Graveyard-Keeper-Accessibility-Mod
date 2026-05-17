@@ -1,13 +1,7 @@
 namespace RestInPatches.Patches;
 
-// ObjectDynamicShadowsManager.Update runs every frame while shadows are being
-// initialised (which happens in bursts during scene load / zone entry). The original
-// uses LINQ's Enumerable.First() to pull the next item out of a Dictionary<Action, Action>
-// up to four times per frame. First() on IEnumerable<T> allocates a boxed enumerator.
-//
-// This patch replaces the method body: Dictionary<TKey, TValue>.GetEnumerator() is a
-// struct; iterating it with foreach+break is zero-alloc. Semantics (pull up to four
-// entries per frame and fire them) are preserved.
+// Drop the LINQ First() call the original uses to peek the shadow-init queue, since it
+// allocates four times a frame during scene loads.
 [Harmony]
 public static class ShadowQueuePatches
 {

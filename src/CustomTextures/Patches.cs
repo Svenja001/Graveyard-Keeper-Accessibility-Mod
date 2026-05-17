@@ -42,12 +42,12 @@ public static class Patches
                 Vector2 normalizedPivot;
                 if (Mathf.Abs(tex.width - originalRect.width) <= 1 && Mathf.Abs(tex.height - originalRect.height) <= 1)
                 {
-                    // Full-size replacement — pivot maps directly
+                    // Full-size replacement - pivot maps directly
                     normalizedPivot = new Vector2(sprite.pivot.x / originalRect.width, sprite.pivot.y / originalRect.height);
                 }
                 else
                 {
-                    // Trimmed-size replacement — pivot must account for the content offset
+                    // Trimmed-size replacement - pivot must account for the content offset
                     var pivotInContent = new Vector2(sprite.pivot.x - offset.x, sprite.pivot.y - offset.y);
                     normalizedPivot = new Vector2(pivotInContent.x / tex.width, pivotInContent.y / tex.height);
                 }

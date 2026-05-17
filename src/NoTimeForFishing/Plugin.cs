@@ -21,13 +21,13 @@ public class Plugin : BaseUnityPlugin
         Log = new TimestampedLogger(Logger);
         RareFishRate = Config.Bind("── Catch Rates ──", "Rare Fish Catch Rate", RareFishCatchRate.Vanilla,
             new ConfigDescription(
-                "How often you reel in rare fish — the gold fish, gold-tier salmon, gold-tier sturgeon, and gold-tier crucian. " +
+                "How often you reel in rare fish - the gold fish, gold-tier salmon, gold-tier sturgeon, and gold-tier crucian. " +
                 "Percentages assume the best rod, gem lure, distance 3, and daytime fishing; other rods or spots will feel similar.\n\n" +
-                "• Vanilla — about 1 rare in 20 casts (around 5%, the default game rate).\n" +
-                "• Slightly Increased — about 1 in 9 casts (around 11%).\n" +
-                "• Increased — about 1 in 5 casts (around 20%).\n" +
-                "• Greatly Increased — about 1 in 3 casts (around 33%).\n" +
-                "• Very Common — about every other cast (around 50%).",
+                "• Vanilla - about 1 rare in 20 casts (around 5%, the default game rate).\n" +
+                "• Slightly Increased - about 1 in 9 casts (around 11%).\n" +
+                "• Increased - about 1 in 5 casts (around 20%).\n" +
+                "• Greatly Increased - about 1 in 3 casts (around 33%).\n" +
+                "• Very Common - about every other cast (around 50%).",
                 null,
                 new ConfigurationManagerAttributes { Order = 1 }));
         CheckForUpdates = Config.Bind("── Updates ──", "Check for Updates", true,

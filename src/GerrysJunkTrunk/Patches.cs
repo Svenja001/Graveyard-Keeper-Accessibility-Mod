@@ -7,9 +7,7 @@ public static class Patches
     [HarmonyPatch(typeof(MainGame), nameof(MainGame.Update))]
     public static void MainGame_Update()
     {
-        // Drain the Disable Tax confirmation BEFORE the game_started guard so the popup
-        // also fires when the player toggles the option from the main menu (where the
-        // dialog system is already alive but no save is loaded).
+        // Stays above the game_started guard so toggling the option at the main menu still pops the dialog.
         if (Plugin._disableTaxPromptDirty && !Plugin._disableTaxDialogOpen)
         {
             Plugin._disableTaxPromptDirty = false;
@@ -19,22 +17,14 @@ public static class Patches
 
         if (!MainGame.game_started) return;
 
-        // Cinematic watchdog. The 20s GJTimer safety-net inside StartGerryRoutine can be
-        // destroyed by scene unloads, paused indefinitely by Time.timeScale=0, or skipped
-        // entirely if a Say callback never fires. If _cinematicPlaying gets stranded true,
-        // HUD/control stay disabled forever (or until fast-travel coincidentally re-enables
-        // them via the load sequence). Force a recovery once we exceed the routine's
-        // expected upper bound.
+        // Safety net: if the cinematic timer broke, force the HUD back on.
         if (Plugin._cinematicPlaying && Time.time - Plugin._cinematicStartedAt > Plugin.CinematicMaxDurationSeconds)
         {
-            if (Plugin.DebugEnabled) Plugin.WriteLog($"[Watchdog] cinematic exceeded {Plugin.CinematicMaxDurationSeconds}s — forcing HideCinematic()");
+            if (Plugin.DebugEnabled) Plugin.WriteLog($"[Watchdog] cinematic exceeded {Plugin.CinematicMaxDurationSeconds}s, forcing HideCinematic()");
             Plugin.HideCinematic();
         }
 
-        // Morning safety sweep: Gerry's midnight routine caps at 20s, so by the time the
-        // sun is up he should be long gone. If he's still around, a timer broke somewhere
-        // (GJTimer destroyed by scene unload, Say callback never fired, etc.) and he's
-        // been orphaned mid-play — clean him up. Fires once per in-game day.
+        // Once per morning, clean up any Gerry left floating from the night before.
         var tod = TimeOfDay.me;
         if (tod != null && tod.time_of_day_enum == TimeOfDay.TimeOfDayEnum.Morning)
         {
@@ -123,11 +113,7 @@ public static class Patches
         }
     }
 
-    // Tag the floating placeholder's custom_tag directly so the marker travels with the
-    // wobj through placement (StopCurrentFloating keeps the gameObject alive) and craft
-    // completion (ReplaceWithObject changes obj_id but leaves custom_tag untouched). If
-    // the player cancels without placing, StopCurrentFloating destroys the gameObject and
-    // the tag disappears with it — no leaked flag to falsely tag the next wooden storage.
+    // Tag the floating placeholder so the marker survives placement and craft completion.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(BuildModeLogics), nameof(BuildModeLogics.OnBuildCraftSelected))]
     public static void BuildModeLogics_OnBuildCraftSelected_Postfix()
@@ -206,11 +192,7 @@ public static class Patches
         if (container == null || container.tooltip == null || !container.tooltip.has_info)
             return;
 
-        // Dedup against the tooltip itself, not a side-channel list. The previous
-        // approach used a static AlreadyDone list cleared on every InventoryPanelGUI.Open,
-        // but opening a bag popup re-fires Open on its panel and clears the list while
-        // the parent panel's item_gui tooltips still hold our entries — the next hover
-        // on a parent item then duplicated the data.
+        // Dedup against the tooltip itself so bag popups don't duplicate the price row.
         var marker = Lang.Get("GerrysPrice");
         foreach (var d in container.tooltip.data.data_list)
         {
@@ -539,35 +521,17 @@ public static class Patches
     [HarmonyPatch(typeof(GameSave), nameof(GameSave.GlobalEventsCheck))]
     private static void FindJunkTrunk()
     {
-        // _oldTechCount is a static, so it carries the previous save's tech count across save
-        // switches. If the player loads a save with fewer unlocked techs than the previous one,
-        // MainGame_Update's `_techCount > _oldTechCount` comparison stays false and
-        // CheckShippingBox never fires on the new save — leaving the trunk hidden in the build
-        // menu even when Wood Processing is unlocked. Resetting to 0 forces one re-sync on the
-        // first tick of the new save.
+        // Reset on load so save switches re-sync the trunk state.
         Plugin._oldTechCount = 0;
 
-        // _cinematicPlaying is a static; if a previous play session ended (save-load) mid-
-        // cinematic the flag persists and the next ShowCinematic returns early forever.
-        // Force a recovery on every load so HUD/control are guaranteed restored.
         if (Plugin._cinematicPlaying)
         {
-            if (Plugin.DebugEnabled) Plugin.WriteLog("[FindJunkTrunk] _cinematicPlaying=true on load → forcing HideCinematic()");
+            if (Plugin.DebugEnabled) Plugin.WriteLog("[FindJunkTrunk] _cinematicPlaying=true on load, forcing HideCinematic()");
             Plugin.HideCinematic();
         }
 
-        // DestroyGerryWithDelay runs on a GJTimer callback — if the game saved mid-routine
-        // (exit-to-main-menu during the midnight visit is a reported trigger) the timers die
-        // and Gerry is never destroyed, leaving an orphan talking_skull on top of the trunk.
-        // Sweep any leftover tagged Gerrys on load so the trunk tile is clean.
         Plugin.SweepOrphanGerrys("FindJunkTrunk");
 
-        // sbCraft is a static reference to the one trunk CD in GameBalance — shared across
-        // saves. Its `hidden` field is a runtime mutation, not save-bound, so it inherits the
-        // previous save's value. Both branches below reset it to match the loaded save's
-        // actual world state, mirroring what the on-tick self-heal at MainGame_Update lines
-        // 65-77 does — but covering the case the self-heal can't reach (saves without Wood
-        // Processing, where the line-63 gate keeps the self-heal from running at all).
         var trunks = WorldMap.GetWorldGameObjectsByCustomTag(Plugin.ShippingBoxTag);
         var sbCraft = GameBalance.me.GetData<ObjectCraftDefinition>(Plugin.ShippingBoxId);
         if (trunks.Count > 0)

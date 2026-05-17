@@ -1,8 +1,6 @@
 namespace RestInPatches.Patches;
 
-// MultiInventory.GetTotalCount logs "#BAG# Found bag in multiinventory: ..."
-// for every bag encountered while iterating the inventory list. Pure dev-debug
-// spam. Redirect the lone Debug.Log(object) call in this method to a no-op.
+// Silence the "#BAG# Found bag in multiinventory" log spam.
 [Harmony]
 public static class MultiInventoryPatches
 {

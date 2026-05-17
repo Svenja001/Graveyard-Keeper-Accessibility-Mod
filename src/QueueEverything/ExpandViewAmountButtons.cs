@@ -1,12 +1,7 @@
 namespace QueueEverything;
 
-// Installs singular +1 / -1 buttons under CraftItemGUI.full_detailed_go (the vanilla
-// expanded multi-quality view). Vanilla never put amount controls there; QE's
-// multi-quality features (ForceMultiCraft, AutoMaxMultiQualCrafts, the auto-max in
-// Redraw) make those crafts adjustable, so the view needs +1/-1 to be useful.
-//
-// Min/Max in this view are owned by MaxButtonsRedux — different child names
-// ("amount btn min" / "amount btn max"), so the two mods coexist without conflict.
+// Adds +1 / -1 buttons to the expanded multi-quality view, where vanilla had none.
+// MaxButtonsRedux installs Min/Max under different child names alongside these.
 public static class ExpandViewAmountButtons
 {
     public static void Install(CraftItemGUI craftItemGUI)

@@ -5,8 +5,7 @@ public static class Patches
 {
     private const string ProgressCreditKey = "er_progress_credit";
 
-    // Replaces the vanilla buy-price calculation so we can honour the user's
-    // Dynamic Buy Pricing toggle and Buy Price Multiplier slider in one place.
+    // Buy price, honouring the Dynamic Buy Pricing toggle and Buy Price Multiplier.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(Trading), nameof(Trading.GetSingleItemCostInTraderInventory), typeof(Item), typeof(int))]
     public static bool Trading_GetSingleItemCostInTraderInventory(Trading __instance, Item item, int count_modificator, ref float __result)
@@ -34,9 +33,7 @@ public static class Patches
         return false;
     }
 
-    // Replaces the vanilla sell-price calculation. Vanilla bakes in a 0.75
-    // markdown and caps at base_price; both are now expressed through the
-    // Sell Price Multiplier so the user can freely adjust them.
+    // Sell price. The vanilla 0.75 markdown and base_price cap both move into the Sell Price Multiplier.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(Trading), nameof(Trading.GetSingleItemCostInPlayerInventory), typeof(Item), typeof(int))]
     public static bool Trading_GetSingleItemCostInPlayerInventory(Trading __instance, Item item, int count_modificator, ref float __result)
@@ -68,10 +65,7 @@ public static class Patches
         return false;
     }
 
-    // Capture the pre-trade balance difference between vanilla (dynamic) and mod
-    // (flat) pricing. The postfix applies this premium to the vendor's tier
-    // progression so the level-up bar keeps moving even though the player paid
-    // flat prices.
+    // Record how much the mod price differs from vanilla so the postfix can credit it to vendor tier progress.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(Trading), nameof(Trading.DoAcceptOffer))]
     public static void Trading_DoAcceptOffer_Prefix(Trading __instance, ref TradeSnapshot __state)
@@ -104,8 +98,7 @@ public static class Patches
         var trader = __instance.trader;
         if (trader?.vendor_data == null || trader.cur_offer == null) return;
 
-        // DoAcceptOffer clears both offer inventories on a successful trade.
-        // If the trader offer is still populated, the trade bailed out early.
+        // Bail if the trader offer is still populated; the trade didn't actually go through.
         if (__state.CurOfferCount > 0 && trader.cur_offer.inventory.Count == __state.CurOfferCount) return;
 
         var existing = trader.vendor_data.GetParam(ProgressCreditKey);
@@ -120,10 +113,7 @@ public static class Patches
         __result += __instance.vendor_data.GetParam(ProgressCreditKey);
     }
 
-    // Mirrors Trading.GetTotalBalance but routes through Vendor.GetSingleItemPrice
-    // (which is unpatched) to get the vanilla dynamic price. Used to compute how
-    // much the real trade diverged from vanilla so the difference can be credited
-    // to the vendor's tier-progress bar.
+    // Recomputes the trade balance at vanilla prices via the unpatched Vendor.GetSingleItemPrice.
     private static float ComputeVanillaTotalBalance(Trading t)
     {
         var trader = t.trader;

@@ -6,7 +6,6 @@ namespace WheresMaStorage;
 [HarmonyPriority(0)]
 public static class Patches
 {
-    // Replaces Actions.GameStartedPlaying += Helpers.RunWmsTasks
     [HarmonyPostfix]
     [HarmonyPatch(typeof(GameSave), nameof(GameSave.GlobalEventsCheck))]
     public static void GameSave_GlobalEventsCheck()
@@ -14,7 +13,6 @@ public static class Patches
         Helpers.RunWmsTasks();
     }
 
-    // Replaces Actions.GameBalanceLoad += Helpers.GameBalanceLoad
     [HarmonyPostfix]
     [HarmonyPatch(typeof(GameBalance), nameof(GameBalance.LoadGameBalance))]
     public static void GameBalance_LoadGameBalance()
@@ -22,7 +20,6 @@ public static class Patches
         Helpers.GameBalanceLoad();
     }
 
-    // Replaces GYKHelper Actions.WorldGameObject_Interact — sets interaction state flags
     [HarmonyPrefix]
     [HarmonyPatch(typeof(WorldGameObject), nameof(WorldGameObject.Interact), typeof(WorldGameObject), typeof(bool), typeof(float))]
     public static void WorldGameObject_Interact_Prefix(WorldGameObject __instance, WorldGameObject other_obj)
@@ -56,7 +53,6 @@ public static class Patches
         }
     }
 
-    // Replaces GYKHelper Patches.BaseGuiHidePostfix — resets interaction flags when all GUIs close
     [HarmonyPostfix]
     [HarmonyPatch(typeof(BaseGUI), nameof(BaseGUI.Hide), typeof(bool))]
     public static void BaseGUI_Hide_Postfix()
@@ -144,10 +140,6 @@ public static class Patches
             return true;
         }
 
-        // When opening a vendor with ShowOnlyPersonalInventory on, skip the shared-pool build entirely.
-        // Trading.cs:30 calls player.GetMultiInventory() synchronously — iterating Fields.Mi + WildernessInventories
-        // here is the source of the vendor-open stall. Vanilla returns the personal MultiInventory, which is all
-        // the user asked to see anyway.
         if (__instance.is_player && Fields.IsVendor && Plugin.ShowOnlyPersonalInventory.Value)
         {
             if (Plugin.DebugEnabled) Helpers.Log("[GetMultiInventory] vendor + ShowOnlyPersonal → passing through to vanilla");
@@ -162,12 +154,6 @@ public static class Patches
         var isZombieMill = worldZoneId.Contains("zombie_mill");
         var isBuilder = __instance.obj_def.interaction_type == ObjectDefinition.InteractionType.Builder;
 
-        // Build desks (apiary, mining, garden, etc.) must always receive the shared pool when the
-        // SKIP MATCH IS ON THE OBJ_ID (e.g. apiary's id contains "bee"). But a zone-level match
-        // (e.g. refugees_camp) signals an isolated zone whose contents must NOT leak into the
-        // shared pool — and refugee-camp builds need refugee-only items that vanilla's
-        // force_world_zone lookup returns. So the builder bypass only covers obj/def-substring
-        // noise, never zone isolation.
         var objOrDefMatchesSkip = Fields.AlwaysSkipInventories.Any(s => objId.Contains(s) || objDefId.Contains(s));
         var zoneMatchesSkip = Fields.AlwaysSkipInventories.Any(s => worldZoneId.Contains(s));
         if (zoneMatchesSkip || (!isBuilder && objOrDefMatchesSkip))
@@ -234,10 +220,6 @@ public static class Patches
         log_if_not_found = false;
     }
 
-    // Diagnostic: report whether the multi-inventory the game just queried actually contains
-    // the requested item, and which inventory holds it. Catches cases where the shared pool
-    // is injected but the source the user expects (e.g. Vineyard Trunk for cross-zone grape
-    // pulls at the Zombie Winery) isn't actually in the pool.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(MultiInventory), nameof(MultiInventory.IsEnoughItem))]
     public static void MultiInventory_IsEnoughItem(
@@ -274,8 +256,6 @@ public static class Patches
         Helpers.Log(sb.ToString());
     }
 
-    // Snapshot per-inventory counts before the pull so the postfix can subtract and show
-    // which inventory or inventories actually supplied the items.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(MultiInventory), nameof(MultiInventory.RemoveItem),
         typeof(Item), typeof(int), typeof(MultiInventory.DestinationType))]
@@ -363,7 +343,7 @@ public static class Patches
         ResetFlags();
     }
 
-    // Some crafting objects re-acquire the inventories when starting a craft, overwriting our multi. This stops that.
+    // Some crafting objects re-acquire the inventories when starting a craft, overwriting our multi.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(BaseCraftGUI), nameof(BaseCraftGUI.multi_inventory), MethodType.Getter)]
     public static void BaseCraftGUI_multi_inventory(BaseCraftGUI __instance, ref MultiInventory __result)
@@ -381,8 +361,6 @@ public static class Patches
         var crafteryWzId = crafteryWGO.GetMyWorldZoneId();
         var isBuilder = crafteryWGO.obj_def.interaction_type == ObjectDefinition.InteractionType.Builder;
 
-        // Same split as WorldGameObject_GetMultiInventory: builder bypass for obj/def-substring
-        // collisions only, NEVER for zone-isolation entries like refugees_camp.
         var objOrDefMatchesSkip = Fields.AlwaysSkipInventories.Any(a => crafteryObjId.Contains(a) || crafteryObjDefId.Contains(a));
         var zoneMatchesSkip = Fields.AlwaysSkipInventories.Any(a => crafteryWzId.Contains(a));
         if (zoneMatchesSkip || (!isBuilder && objOrDefMatchesSkip))
@@ -483,8 +461,6 @@ public static class Patches
             return;
         }
 
-        // Universal "show hidden items" safety net. Widen-only — never shrinks. Recovers items
-        // hidden by any prior bug or other mod that wrote a too-small inventory_size.
         foreach (var inv in multi_inventory.all)
         {
             if (inv?.data?.inventory == null) continue;
@@ -494,9 +470,6 @@ public static class Patches
             }
         }
 
-        // The toolbelt has its own dedicated slot strip (ToolbeltItemGUI reads
-        // secondary_inventory directly), so listing it as an inventory panel widget
-        // is a pure duplicate. Fields.Mi still holds it for shared-inventory crafting.
         multi_inventory.all.RemoveAll(a => a.name == "Tools" || a.data.id is "Tools" or "Toolbelt");
 
         __instance.dont_show_empty_rows = Plugin.DontShowEmptyRowsInInventory.Value;
@@ -542,11 +515,8 @@ public static class Patches
             multi_inventory = onlyMineInventory;
         }
 
-        // Bags remain in Fields.Mi so shared-inventory crafting still reads items inside them —
-        // this only hides the inline BagInventoryWidget rows from the panel UI. Skip when
-        // Fields.UsingBag is true (set by InventoryGUI.OpenBag prefix): otherwise the bag's
-        // own popup panel — which is also an InventoryPanelGUI whose multi_inventory contains
-        // the bag inventory we're meant to display — gets stripped and renders empty.
+        // Hide inline bag widget rows from the panel UI. Skip when Fields.UsingBag is true,
+        // otherwise the bag's own popup panel renders empty.
         if (Plugin.HideBagWidgets.Value && !Fields.UsingBag)
         {
             multi_inventory.all.RemoveAll(a => a?.data?.is_bag == true);
@@ -646,24 +616,19 @@ public static class Patches
         Fields.UsingBag = true;
     }
 
-    // Player-only magnet range override. Transpiler swaps the hardcoded 1.8² tile threshold
-    // in ProcessDropCollectorRangeCheck for a value that's player-aware — zombies/workers keep
-    // vanilla behaviour, only the player gets the extended range from config.
+    // Extend the magnet pickup range for the player only. Zombies and workers keep vanilla.
     [HarmonyTranspiler]
     [HarmonyPatch(typeof(DropResGameObject), nameof(DropResGameObject.ProcessDropCollectorRangeCheck))]
     public static IEnumerable<CodeInstruction> DropResGameObject_ProcessDropCollectorRangeCheck(
         IEnumerable<CodeInstruction> instructions)
     {
-        // The game's IL stores 3.24 as ldc.r4 (single-precision float), not ldc.r8.
-        // The C# decompiler renders the comparison as (double)num > 3.2399997711181641
-        // for readability, but the actual comparison happens at float precision.
         var matcher = new CodeMatcher(instructions);
         var vanillaThreshold = matcher.MatchForward(false,
             new CodeMatch(i => i.opcode == OpCodes.Ldc_R4 && i.operand is float f && Math.Abs(f - 3.24f) < 1e-5f));
 
         if (!vanillaThreshold.IsValid)
         {
-            Plugin.Log.LogWarning("[MagnetRange] Could not find vanilla 3.24 threshold in ProcessDropCollectorRangeCheck — skipping transpile.");
+            Plugin.Log.LogWarning("[MagnetRange] Could not find vanilla 3.24 threshold in ProcessDropCollectorRangeCheck - skipping transpile.");
             return instructions;
         }
 
@@ -687,9 +652,7 @@ public static class Patches
         return r * r;
     }
 
-    // Bag widgets default to the bag's definitional bag_size_x (often 3), which looks out of
-    // place next to the regular 5-column inventory widgets. Force bags to the same 5-column
-    // layout and recompute the widget's height based on the new row count.
+    // Force bags onto the same 5-column layout as regular inventory widgets.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(BagInventoryWidget), nameof(BagInventoryWidget.RecalculatWidgetSizeAndPosition))]
     public static void BagInventoryWidget_RecalculatWidgetSizeAndPosition(BagInventoryWidget __instance)
@@ -767,9 +730,7 @@ public static class Patches
     [HarmonyPatch(typeof(InventoryPanelGUI), nameof(InventoryPanelGUI.SetGrayToNotMainWidgets))]
     public static bool InventoryPanelGUI_SetGrayToNotMainWidgets()
     {
-        // At a vendor, if the shared inventory is visible, dimming everything that isn't in the
-        // personal inventory buries most of what the player can trade — force no-dim regardless
-        // of the user's setting.
+        // Don't dim shared inventories at a vendor, or most of what's tradeable disappears.
         if (Fields.IsVendor && !Plugin.ShowOnlyPersonalInventory.Value)
         {
             return false;
@@ -857,10 +818,6 @@ public static class Patches
     [HarmonyPatch(typeof(GameSave), nameof(GameSave.InitPlayersInventory))]
     public static void GameSave_InitPlayersInventory(GameSave __instance)
     {
-        // Fires on NEW GAME setup before MainGame.me.player is fully wired, so route through
-        // the helper which falls back to PlayerVanillaFallback when OriginalInventorySizes
-        // doesn't yet have an entry. Clamp to current item count for safety even though new game
-        // inventory should be empty.
         var requested = Helpers.GetRequestedPlayerInventorySize();
         var clamped = Math.Max(requested, __instance._inventory.inventory.Count);
         __instance._inventory.SetInventorySize(clamped);
@@ -873,9 +830,8 @@ public static class Patches
     {
         if (__instance.is_player)
         {
-            // Don't TryAdd for the player — its data.inventory_size at this moment is the SAVED value
-            // (already WMS-modified by a previous session), not the game's true vanilla 20.
-            // Helpers.GetRequestedSize special-cases is_player and uses the hardcoded PlayerVanillaSize.
+            // Skip backing up the player's size here. It's already WMS-modified from the saved
+            // value, not vanilla 20, so capturing it would poison OriginalInventorySizes.
             Helpers.ApplyPlayerInventorySize();
             return;
         }

@@ -3,10 +3,6 @@ namespace MiscBitsAndBobs;
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 public class Plugin : BaseUnityPlugin
 {
-    // Section names: plain "── Name ──" style. CM renders sections in Config.Bind call order,
-    // so Advanced appears first by virtue of Debug being the first bind below. Legacy section
-    // names get rewritten to these by MigrateRenamedSections() on first launch so existing
-    // user customisations survive the rename.
     private const string AdvancedSection = "── Advanced ──";
     private const string AudioSection    = "── Audio ──";
     private const string UISection       = "── UI ──";
@@ -71,9 +67,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites old "[04. Gameplay]" style headers to "[── 4. Gameplay ──]" in the .cfg
-    // file so existing user values survive the section rename. Idempotent — re-running
-    // on an already-migrated file is a no-op (no old headers left to find).
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -258,7 +251,7 @@ public class Plugin : BaseUnityPlugin
 
             if (visitor.is_removed)
             {
-                if (DebugEnabled) Helpers.Log($"[Evict] Skipping {visitor.obj_id} — already marked removed.");
+                if (DebugEnabled) Helpers.Log($"[Evict] Skipping {visitor.obj_id} - already marked removed.");
                 continue;
             }
 

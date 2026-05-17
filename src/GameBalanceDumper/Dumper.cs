@@ -30,7 +30,7 @@ internal static class Dumper
         var gb = GameBalance.me;
         if (gb == null)
         {
-            LogHelper.Warning("[Dumper] GameBalance.me is null — nothing to dump.");
+            LogHelper.Warning("[Dumper] GameBalance.me is null - nothing to dump.");
             return;
         }
 
@@ -58,13 +58,7 @@ internal static class Dumper
         var fields = typeof(GameBalance).GetFields(BindingFlags.Public | BindingFlags.Instance);
         var dumped = 0;
 
-        // Reflectively serializing GameBalance walks every public property on every
-        // definition. Some getters have side effects — most notably
-        // ItemDefinition.linked_craft does GameBalance.GetData<CraftDefinition>("pray:" + id)
-        // and Debug.LogErrors when the lookup misses, which fires for every item without
-        // a sermon variant (thousands of "Craft for sermon not found" lines per dump).
-        // Suppress Unity's logger for the duration; the errors are spurious here because
-        // the dumper hits the getter on items the game itself never would.
+        // Serialization touches getters that spam Debug.LogError for missing sermon crafts. Mute the log for the dump.
         var prevLoggerEnabled = Debug.unityLogger.logEnabled;
         Debug.unityLogger.logEnabled = false;
         try

@@ -8,11 +8,7 @@ internal static class Lang
 {
     private static Dictionary<string, string> _translations = new();
     private static Dictionary<string, string> _fallback = new();
-    // normalized lang code ("pt_br", "zh_cn", "en") → absolute file path on disk.
-    // Lets us match a user's file regardless of how they cased it or whether they
-    // used `-` or `_` as the separator — the game's _cur_lng is normalized the
-    // same way before lookup, so all four permutations of e.g. "pt-br" resolve
-    // to the same file.
+    // Normalized lang code -> file path, so "pt-br", "pt_BR" etc. all resolve to one file.
     private static Dictionary<string, string> _langFiles = new();
     private static string _langDir;
     private static string _prefix;
@@ -30,7 +26,7 @@ internal static class Lang
         _fallback = LoadLang("en");
         if (_fallback.Count == 0)
         {
-            _log?.LogWarning($"[Lang] No English fallback loaded — translations will return raw keys");
+            _log?.LogWarning($"[Lang] No English fallback loaded - translations will return raw keys");
         }
 
         Reload();
@@ -47,8 +43,6 @@ internal static class Lang
 
     internal static string Get(string key)
     {
-        // BepInEx plugins Awake() before the game assigns GameSettings._cur_lng,
-        // so re-check on first lookup (and on any mid-game language change).
         var current = GameSettings._cur_lng;
         if (string.IsNullOrEmpty(current)) current = "en";
         if (_currentLang != current) Reload();
@@ -59,10 +53,7 @@ internal static class Lang
         return key;
     }
 
-    // Scan the lang dir once; build the normalized-code → path table. Called once at
-    // Init so a mid-session file drop won't be picked up, matching the previous
-    // behaviour. Duplicate normalized keys (e.g. both pt-br.json and pt_BR.json on
-    // a case-sensitive FS) keep the first one found and log a warning.
+    // Duplicate normalized keys (e.g. pt-br.json and pt_BR.json) keep the first one found.
     private static void IndexLangFiles()
     {
         _langFiles.Clear();
@@ -105,7 +96,7 @@ internal static class Lang
             var dict = new Dictionary<string, string>();
             var json = File.ReadAllText(path);
 
-            // Minimal JSON parser for flat key-value objects — no dependencies needed
+            // Minimal JSON parser for flat key-value objects - no dependencies needed
             var i = json.IndexOf('{') + 1;
             while (i < json.Length)
             {

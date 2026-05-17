@@ -9,9 +9,6 @@ public class Plugin : BaseUnityPlugin
     internal const string Column = "column";
     internal const string Church = "CHURCH";
 
-    // Section names: plain "── Name ──" style, rendered in CM in bind-call order (Advanced first).
-    // Legacy section names get rewritten to these by MigrateConfig() on first launch
-    // so existing user customisations are preserved.
     private const string AdvancedSection = "── Advanced ──";
     private const string CandlesSection  = "── Candles & Incenses ──";
     private const string ChurchSection   = "── Church ──";
@@ -31,8 +28,6 @@ public class Plugin : BaseUnityPlugin
         ["── 5. Updates ──"]  = UpdatesSection,
     };
 
-    // Key-name renames inside [── Controls ──]. Old name on the left of a "key = value"
-    // line gets rewritten to the new name so the user's value survives the rename.
     private static readonly Dictionary<string, string> ControlKeyRenames = new()
     {
         ["Extinguish Keybind"]           = "Extinguish Candle Keybind",
@@ -70,10 +65,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites legacy section headers (e.g. "[01. Distance]" → "[── Candles & Incenses ──]")
-    // and renames legacy key names in [── Controls ──] (e.g. "Extinguish Keybind" →
-    // "Extinguish Candle Keybind") so existing user values survive. Idempotent — re-running
-    // on an already-migrated file is a no-op.
     private void MigrateConfig()
     {
         var path = Config.ConfigFilePath;
@@ -162,7 +153,7 @@ public class Plugin : BaseUnityPlugin
         };
 
         DirectionalArrow = Config.Bind(CandlesSection, "Directional Arrow", true,
-            new ConfigDescription("On: when a lit candle is nearby but out of reach, a pointer arrow appears above it to guide you in. Off: no arrow — you'll only see a speech bubble when you're too far.", null,
+            new ConfigDescription("On: when a lit candle is nearby but out of reach, a pointer arrow appears above it to guide you in. Off: no arrow, you'll only see a speech bubble when you're too far.", null,
                 new ConfigurationManagerAttributes {Order = 99}));
         DirectionalArrow.SettingChanged += (_, _) => Patches.ResetArrow();
 
@@ -184,12 +175,12 @@ public class Plugin : BaseUnityPlugin
                 new ConfigurationManagerAttributes {Order = 99}));
 
         ExtinguishIncenseKeyBind = Config.Bind(ControlsSection, "Extinguish Incense Keybind", new KeyboardShortcut(KeyCode.None),
-            new ConfigDescription("Keyboard key you press to extinguish the nearest lit incense when you're in range. Unbound by default — set a key here if you want to extinguish incenses. Leave unbound to only extinguish candles.", null,
+            new ConfigDescription("Keyboard key you press to extinguish the nearest lit incense when you're in range. Unbound by default: set a key here if you want to extinguish incenses. Leave unbound to only extinguish candles.", null,
                 new ConfigurationManagerAttributes {Order = 98}));
 
         ExtinguishIncenseControllerButton = Config.Bind(ControlsSection, "Extinguish Incense Controller Button",
             Enum.GetName(typeof(GamePadButton), GamePadButton.None),
-            new ConfigDescription("Controller button you press to extinguish the nearest lit incense when you're in range. Unbound by default — set a button here if you want to extinguish incenses on a controller.",
+            new ConfigDescription("Controller button you press to extinguish the nearest lit incense when you're in range. Unbound by default: set a button here if you want to extinguish incenses on a controller.",
                 new AcceptableValueList<string>(Enum.GetNames(typeof(GamePadButton))),
                 new ConfigurationManagerAttributes {Order = 97}));
 

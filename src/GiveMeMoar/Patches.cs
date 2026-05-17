@@ -69,10 +69,7 @@ public static class Patches
         // losing billets/planks/beams/flitches.
     };
 
-    // Craft definitions whose IDs contain any of these substrings get automatically skipped
-    // when the user leaves "Exclude Progression Crafts" on. Mirrors QueueEverything's
-    // UnSafeCraftDefPartials so progression mechanics (tier upgrades, object placement,
-    // repair, body quality, etc.) keep their vanilla quantities.
+    // Crafts containing these substrings are skipped when "Exclude Progression Crafts" is on.
     private static readonly string[] ProgressionCraftPartials =
     [
         "0_to_1", "1_to_2", "2_to_3", "3_to_4", "4_to_5", "upgr_to", "_to_lantern_",
@@ -82,13 +79,10 @@ public static class Patches
         "repair_", "place_tent", "find_zombie"
     ];
 
-    // Snapshot of each craft's pre-mutation output values, keyed by "craft.id|output-index".
-    // Used to restore vanilla values before re-applying when the user changes a craft setting.
+    // Vanilla craft output values, kept so settings changes can be re-applied cleanly.
     private static readonly Dictionary<string, int> CraftOutputSnapshots = new(StringComparer.Ordinal);
 
-    // Separate snapshot for water entries in craft.output_to_wgo (water_pumping etc.), keyed by
-    // "craft.id|wgo|output-index". Scoped to the WaterOutputMultiplier feature — vanilla
-    // CraftOutputMultiplier doesn't touch output_to_wgo, so it has no snapshot store of its own.
+    // Vanilla water values from output_to_wgo (water pump etc.), kept for the water multiplier.
     private static readonly Dictionary<string, int> CraftWaterToWgoSnapshots = new(StringComparer.Ordinal);
     private static bool _craftOutputApplied;
 
@@ -122,7 +116,7 @@ public static class Patches
             {
                 var output = craft.output[i];
                 if (output == null || string.IsNullOrEmpty(output.id)) continue;
-                // r/g/b are research-point outputs — never touched by the craft multiplier.
+                // r/g/b are research-point outputs, never touched by the craft multiplier.
                 if (output.id is "r" or "g" or "b") continue;
                 CraftOutputSnapshots[$"{craft.id}|{i}"] = output.value;
             }
@@ -185,7 +179,7 @@ public static class Patches
             _craftOutputApplied = true;
             if (Plugin.DebugEnabled)
             {
-                Helpers.Log("[CraftApply] global=1.0 and water=1.0 — nothing to multiply");
+                Helpers.Log("[CraftApply] global=1.0 and water=1.0, nothing to multiply");
             }
             return;
         }
@@ -362,9 +356,7 @@ public static class Patches
             Helpers.Log($"[Drop] Incoming id='{id}', type={drop_item.definition.type}, qty={drop_item.value}");
         }
 
-        // Body-part items are only multiplied when the user opted in AND the ID is one of the
-        // six common ones (blood/flesh/fat/skin/bone/skull). Organs and other specialised
-        // body-part-typed items are always left alone to avoid overpowering the morgue loop.
+        // Only the six common body parts (blood/flesh/fat/skin/bone/skull) get multiplied.
         if (isBodyPartType)
         {
             if (Plugin.MultiplyBodyParts.Value && BodyParts.Contains(id))
@@ -393,15 +385,12 @@ public static class Patches
             }
             else if (Plugin.DebugEnabled)
             {
-                Helpers.Log($"[Drop] SinShard multi={sinMulti} — no change");
+                Helpers.Log($"[Drop] SinShard multi={sinMulti}, no change");
             }
             return;
         }
 
-        // Water has a dedicated multiplier (WaterOutputMultiplier) so users can dial up wells
-        // and breweries without flipping the broader Misc category (which also covers alcohol,
-        // eggs, milk, etc.). Catches hand-pumped water from basic and upgraded wells; auto-pump
-        // output (output_to_wgo) is already scaled at GameBalance.LoadGameBalance time.
+        // Water has its own multiplier so wells and breweries don't ride the Misc setting.
         if (id == "water")
         {
             var waterMulti = Plugin.WaterOutputMultiplier.Value;
@@ -419,10 +408,7 @@ public static class Patches
             // gets scaled by ResourceMultiplier as before for backward compat.
         }
 
-        // Gold nuggets get their own dedicated multiplier so users can boost just gold
-        // without scaling iron/stone/marble/sulfur etc. through the Ores category. The Ores
-        // category often produces way more of the other items than the player needs while
-        // gold stays scarce, so this gives gold an independent knob.
+        // Gold nuggets have their own multiplier so they don't ride the Ores setting.
         if (id == "nugget_gold")
         {
             var goldMulti = Plugin.NuggetGoldMultiplier.Value;
@@ -440,8 +426,7 @@ public static class Patches
             // gets scaled by ResourceMultiplier as before.
         }
 
-        // Sticks have their own dedicated toggle — keeps the "exclude sticks so they don't
-        // flood inventory" option independent from the broader Logs category.
+        // Sticks have their own toggle so users can keep them out of the Logs multiplier.
         if (id.Contains("stick"))
         {
             if (Plugin.MultiplySticks.Value)
@@ -465,7 +450,7 @@ public static class Patches
 
         if (Plugin.DebugEnabled)
         {
-            Helpers.Log($"[Drop] '{id}' did not match any enabled category — no multiplier applied");
+            Helpers.Log($"[Drop] '{id}' did not match any enabled category, no multiplier applied");
         }
     }
 
@@ -476,7 +461,7 @@ public static class Patches
         {
             if (Plugin.DebugEnabled)
             {
-                Helpers.Log($"[Drop] {tag} '{item.id}' — Resource Multiplier={multi}, no change");
+                Helpers.Log($"[Drop] {tag} '{item.id}', Resource Multiplier={multi}, no change");
             }
             return;
         }

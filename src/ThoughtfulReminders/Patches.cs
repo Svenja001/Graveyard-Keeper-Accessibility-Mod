@@ -19,7 +19,7 @@ public static class Patches
         {
             if (Plugin.DebugEnabled && PendingReminder)
             {
-                Helpers.Log($"[Update] reminder suppressed — player is dead (day {newDayOfWeek}).");
+                Helpers.Log($"[Update] reminder suppressed - player is dead (day {newDayOfWeek}).");
             }
             return;
         }
@@ -62,7 +62,7 @@ public static class Patches
         {
             if (Plugin.DebugEnabled)
             {
-                Helpers.Log($"[Update] reminder held back — wake-up delay (waited {waited:0.00}s of {Plugin.WakeUpDelay.Value:0.0}s).");
+                Helpers.Log($"[Update] reminder held back - wake-up delay (waited {waited:0.00}s of {Plugin.WakeUpDelay.Value:0.0}s).");
             }
             return;
         }
@@ -72,7 +72,7 @@ public static class Patches
         var daysOnly = Plugin.DaysOnlyConfig.Value || !Plugin.EnableEventMessages.Value;
         if (Plugin.DebugEnabled)
         {
-            Helpers.Log($"[Update] firing reminder — day={newDayOfWeek}, daysOnly={daysOnly} (DaysOnlyConfig={Plugin.DaysOnlyConfig.Value}, EnableEventMessages={Plugin.EnableEventMessages.Value}).");
+            Helpers.Log($"[Update] firing reminder - day={newDayOfWeek}, daysOnly={daysOnly} (DaysOnlyConfig={Plugin.DaysOnlyConfig.Value}, EnableEventMessages={Plugin.EnableEventMessages.Value}).");
         }
 
         if (daysOnly)
@@ -106,7 +106,7 @@ public static class Patches
                 default:
                     if (Plugin.DebugEnabled)
                     {
-                        Helpers.Log($"[Update] unexpected day_of_week {newDayOfWeek} — falling back to 'default' translation key.");
+                        Helpers.Log($"[Update] unexpected day_of_week {newDayOfWeek} - falling back to 'default' translation key.");
                     }
                     Helpers.SayMessage(Lang.Get("default"));
                     break;
@@ -124,7 +124,7 @@ public static class Patches
                     var hasPreacher = MainGame.me.save.unlocked_perks.Contains("p_preacher");
                     if (Plugin.DebugEnabled)
                     {
-                        Helpers.Log($"[Update] Pride day — preacher perk={hasPreacher}, picking {(hasPreacher ? "dhPrideSermon" : "dhPride")}.");
+                        Helpers.Log($"[Update] Pride day - preacher perk={hasPreacher}, picking {(hasPreacher ? "dhPrideSermon" : "dhPride")}.");
                     }
                     Helpers.SayMessage(hasPreacher
                         ? Lang.Get("dhPrideSermon")
@@ -150,7 +150,7 @@ public static class Patches
                 default:
                     if (Plugin.DebugEnabled)
                     {
-                        Helpers.Log($"[Update] unexpected day_of_week {newDayOfWeek} — falling back to 'default' translation key.");
+                        Helpers.Log($"[Update] unexpected day_of_week {newDayOfWeek} - falling back to 'default' translation key.");
                     }
                     Helpers.SayMessage(Lang.Get("default"));
                     break;
@@ -162,7 +162,7 @@ public static class Patches
 
         if (Plugin.DebugEnabled)
         {
-            Helpers.Log($"[Update] reminder delivered — PrevDayOfWeek={PrevDayOfWeek}, queue cleared.");
+            Helpers.Log($"[Update] reminder delivered - PrevDayOfWeek={PrevDayOfWeek}, queue cleared.");
         }
     }
 }

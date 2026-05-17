@@ -39,9 +39,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites the legacy "[01. General]" header to the new "[── 2. Reminders ──]" form on
-    // first launch of the new version so existing user values survive the section rename.
-    // Idempotent — once migrated there are no old headers left to match next launch.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -94,7 +91,7 @@ public class Plugin : BaseUnityPlugin
 
         // ── 2. Reminders ──
         EnableEventMessages = Config.Bind(RemindersSection, "Event Messages", true,
-            new ConfigDescription("On: reminders include the week's featured event alongside the day name (for example 'Lust day — you could drop by the tavern'). Off: only the day name is shown, so reminders stay lore-light.", null,
+            new ConfigDescription("On: reminders include the week's featured event alongside the day name (for example 'Lust day - you could drop by the tavern'). Off: only the day name is shown, so reminders stay lore-light.", null,
                 new ConfigurationManagerAttributes {Order = 100}));
 
         DaysOnlyConfig = Config.Bind(RemindersSection, "Days Only", false,

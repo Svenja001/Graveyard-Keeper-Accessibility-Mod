@@ -1,13 +1,7 @@
 namespace RestInPatches.Patches;
 
-// PlayerComponent.Update writes player_material.SetColor("_AdditionalColour", ...) every
-// frame with a string key. The string lookup hashes into Shader's property table each
-// call, and the native material write fires even when the colour hasn't changed. Most
-// of the time player_additional_color stays at Color.black for the whole session.
-//
-// This patch transpiles the SetColor call site: replace the string-keyed overload with
-// the int-keyed overload using a cached Shader.PropertyToID, and skip the write when the
-// value matches what we wrote last.
+// Swap the per-frame string-keyed SetColor on the player material for a cached int ID,
+// and skip the write entirely when the colour is unchanged.
 [Harmony]
 public static class PlayerMaterialPatches
 {
@@ -32,10 +26,6 @@ public static class PlayerMaterialPatches
         {
             if (code.Calls(setColorStr))
             {
-                // Stack entering the original call: [Material, string "_AdditionalColour", Color].
-                // Our replacement signature is (Material, string, Color) -> ignores the string arg
-                // and uses the cached property ID. This keeps the transpiler minimally invasive —
-                // we accept the string push that the original emits and just drop it in the helper.
                 yield return new CodeInstruction(OpCodes.Call, replacement);
             }
             else

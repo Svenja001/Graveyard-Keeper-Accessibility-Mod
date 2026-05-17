@@ -84,9 +84,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites old "[3. Inventory]" style headers to "[── Inventory ──]" in the .cfg file
-    // so existing user values survive the section rename. Idempotent — re-running on an
-    // already-migrated file is a no-op (no old headers left to find).
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -193,7 +190,7 @@ public class Plugin : BaseUnityPlugin
 
         SortByDistanceFromCrafter = Config.Bind(InventorySection, "Sort By Distance From Crafter", true,
             new ConfigDescription(
-                "When on, crafts pull ingredients from the closest storage first. When off, ordering follows the game's zone discovery order and per-object priority — which can mean a far chest gets drained before a nearby one.",
+                "When on, crafts pull ingredients from the closest storage first. When off, ordering follows the game's zone discovery order and per-object priority - which can mean a far chest gets drained before a nearby one.",
                 null,
                 new ConfigurationManagerAttributes {Order = 95, DispName = "    └ Sort By Distance From Crafter"}));
 
@@ -226,10 +223,10 @@ public class Plugin : BaseUnityPlugin
             Fields.InventoriesLoaded = false;
         };
 
-        // Legacy single slider — kept bound so it loads from existing .cfg files for migration.
+        // Legacy single slider - kept bound so it loads from existing .cfg files for migration.
         // Hidden from CM. Once MigrateLegacySlider has run, this value is unused.
         LegacyAdditionalInventorySpace = Config.Bind(InventorySection, "Additional Inventory Space", 20,
-            new ConfigDescription("Legacy single slider — superseded by the Player and Container sliders above. Kept for one-time migration of existing user values.",
+            new ConfigDescription("Legacy single slider - superseded by the Player and Container sliders above. Kept for one-time migration of existing user values.",
                 new AcceptableValueRange<int>(0, 500),
                 new ConfigurationManagerAttributes {Browsable = false, IsAdvanced = true, HideDefaultButton = true, ReadOnly = true}));
 
@@ -317,7 +314,7 @@ public class Plugin : BaseUnityPlugin
 
         DropHandlingOnGameLoad = Config.Bind(GameplaySection, "Drop Handling On Game Load", DropHandlingMode.CollectToInventory,
             new ConfigDescription(
-                "Where scattered loot goes when you load a save. 'CollectToInventory' pulls everything straight into your pockets (anything that doesn't fit ends up by the meditation spot, same as before). 'MoveNearKeepersHouse' leaves your inventory alone and piles every loose item — small and large — next to your house so you can sort it yourself.",
+                "Where scattered loot goes when you load a save. 'CollectToInventory' pulls everything straight into your pockets (anything that doesn't fit ends up by the meditation spot, same as before). 'MoveNearKeepersHouse' leaves your inventory alone and piles every loose item - small and large - next to your house so you can sort it yourself.",
                 null,
                 new ConfigurationManagerAttributes {Order = 98, DispName = "    └ Drop Handling"}));
 
@@ -329,7 +326,7 @@ public class Plugin : BaseUnityPlugin
 
         PlayerLootMagnetRange = Config.Bind(GameplaySection, "Player Loot Magnet Range", 2.0f,
             new ConfigDescription(
-                "How close you have to be (in tiles) for nearby loot to fly toward you and auto-pickup. Vanilla is 1.8 tiles — slide upward in 0.25-tile steps to sweep up drops from further away.",
+                "How close you have to be (in tiles) for nearby loot to fly toward you and auto-pickup. Vanilla is 1.8 tiles - slide upward in 0.25-tile steps to sweep up drops from further away.",
                 new AcceptableValueRange<float>(2.0f, 20f),
                 new ConfigurationManagerAttributes {Order = 95, DispName = "Player Loot Magnet Range (tiles)"}));
         // Snap the slider to a 0.25-tile grid. The guard prevents the assignment
@@ -383,7 +380,7 @@ public class Plugin : BaseUnityPlugin
 
         if (Fields.InventorySizesDirty && !Fields.ShrinkDialogOpen)
         {
-            // Drain only when no shrink dialog is on screen — otherwise we'd queue up another
+            // Drain only when no shrink dialog is on screen - otherwise we'd queue up another
             // plan against the user's pending answer. The dialog's callbacks clear ShrinkDialogOpen.
             Fields.InventorySizesDirty = false;
             Helpers.UpdateInventorySizes();

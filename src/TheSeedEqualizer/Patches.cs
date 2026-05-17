@@ -40,19 +40,8 @@ public static class Patches
         }
     }
 
-    // ── Seed ledger hooks ───────────────────────────────────────────────────
-    //
-    // Counting strategy:
-    //   • SPEND: hook CraftReally — reads craft.needs (the seed amount the game
-    //     is actually about to consume, multiplied by the craft amount).
-    //   • HARVEST: hook DropItems — reads the *actual* dropped items, whose
-    //     `value` field holds the rolled count (Random.Range(min, max+1) from
-    //     ResModificator.ProcessItemsListBeforeDrop). craft.output[i].value
-    //     would be the un-rolled template (vanilla number) and would
-    //     under-count the boost.
-    //   • DropItems harvest source: if the wgo has a current_craft that is a
-    //     tracked plant craft, the drops belong to that craft. Otherwise, if
-    //     the wgo is a player-garden ready bed, the drops belong to that bed.
+    // Seed ledger: spend on CraftReally (uses needs[]), harvest on DropItems (uses the
+    // rolled item values rather than craft.output template values).
 
     internal static bool IsTrackedPlantCraft(string craftId)
     {
@@ -113,12 +102,6 @@ public static class Patches
         var harvested = SumSeedQty(items, out var harvestSeedId);
         if (harvested == 0) return;
 
-        // Determine the source of this drop:
-        //  (a) Inside ProcessFinishedCraft, the wgo's CraftComponent still
-        //      points at the just-finished craft. If it's a tracked plant
-        //      craft, attribute the drop to that craft's id.
-        //  (b) Otherwise, a player-garden ready bed dropping its harvest on
-        //      interaction. obj_id matches "garden_X_ready[_N]".
         string sourceId = null;
         var currentCraftId = __instance.components?.craft?.current_craft?.id;
         if (!string.IsNullOrEmpty(currentCraftId) && IsTrackedPlantCraft(currentCraftId))

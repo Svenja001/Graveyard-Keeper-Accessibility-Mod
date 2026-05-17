@@ -10,7 +10,6 @@ public class KnownZoneUpdater : MonoBehaviour
         _zoneConstant = zoneConstant;
         _zoneWorldGameObject = GetComponent<WorldGameObject>();
 
-        //Check if the zone is already known
         if (MainGame.me.save.known_world_zones.Contains(_zoneConstant))
         {
             Destroy(this);

@@ -8,12 +8,8 @@ public static class CraftArrowFixPatches
     private const string ArrowSpr = "arrow spr";
     private const string Arr = "arr";
 
-    // Both MBR and QE clone the vanilla L/R amount buttons into the craft GUI; if their
-    // postfixes run before this one, they capture the broken arrow sprites and propagate
-    // them to every clone. Declaring the order from both sides (HarmonyAfter on theirs,
-    // HarmonyBefore here) is belt-and-suspenders — Harmony only needs one side, but the
-    // explicit pair survives any future patch-order regressions caused by load order or
-    // assembly trimming.
+    // Run before MaxButtonsRedux and QueueEverything so they clone working arrow sprites
+    // instead of the broken ones.
     [HarmonyPostfix]
     [HarmonyBefore(MaxButtonGuid, QueueEverythingGuid)]
     [HarmonyPatch(typeof(CraftGUI), nameof(CraftGUI.Open), typeof(WorldGameObject), typeof(CraftsInventory), typeof(string))]

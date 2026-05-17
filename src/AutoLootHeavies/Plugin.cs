@@ -54,8 +54,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites old numbered section headers to the new "── Name ──" style so existing
-    // user values survive the rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -411,7 +409,7 @@ public class Plugin : BaseUnityPlugin
         SortedStockpiles.AddRange(fresh);
 
         sw.Stop();
-        if (DebugEnabled) WriteLog($"[ALH]: Scan complete — {fresh.Count} stockpiles, {sw.ElapsedMilliseconds}ms wall time.");
+        if (DebugEnabled) WriteLog($"[ALH]: Scan complete - {fresh.Count} stockpiles, {sw.ElapsedMilliseconds}ms wall time.");
 
         ActiveScan = null;
     }

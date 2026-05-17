@@ -4,10 +4,8 @@ using Microsoft.Win32;
 
 namespace ShowMeMoar;
 
-// Applies (and removes) the Windows high-DPI compatibility fix for Graveyard Keeper.exe.
-// Two layers, both best-effort — succeeds if either one lands:
-//   1. HKCU AppCompatFlags\Layers entry ("~ HIGHDPIAWARE") — no admin needed
-//   2. Sidecar Graveyard Keeper.exe.manifest — only effective if the game has no embedded manifest
+// Applies and removes the Windows high-DPI compatibility fix for Graveyard Keeper.exe
+// via an HKCU AppCompatFlags entry and a sidecar exe.manifest.
 internal static class HighDpiFix
 {
     private const string LayersKeyPath = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
@@ -46,9 +44,9 @@ internal static class HighDpiFix
 
     internal enum Host
     {
-        Windows,          // real Windows — fix applies
-        WineProton,       // Windows build running under Wine/Proton — fix is no-op
-        NativeNonWindows  // native Linux or macOS Unity build — fix is no-op
+        Windows,
+        WineProton,
+        NativeNonWindows
     }
 
     internal static Host DetectHost()
@@ -77,7 +75,7 @@ internal static class HighDpiFix
         }
         catch
         {
-            // Pre-1607 Windows — fall back to the desktop DC's pixel density.
+            // Pre-1607 Windows: fall back to the desktop DC's pixel density.
             try
             {
                 var hdc = GetDC(IntPtr.Zero);

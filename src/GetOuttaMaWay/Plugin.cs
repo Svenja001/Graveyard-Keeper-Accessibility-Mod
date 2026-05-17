@@ -65,8 +65,6 @@ public class Plugin : BaseUnityPlugin
         SceneManager.sceneLoaded += (_, _) => GameStartedPlaying();
     }
 
-    // Rewrites old numbered section headers to the new "── Name ──" style so existing
-    // user values survive the rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -124,9 +122,7 @@ public class Plugin : BaseUnityPlugin
 
         foreach (var npc in allNpc)
         {
-            // WorldMap._npcs can hold destroyed entries; Unity's overloaded == catches
-            // both real null and fake-null (destroyed native object) so member access
-            // doesn't throw NRE on get_name().
+            // _npcs can hold destroyed entries; the Unity null check skips them safely.
             if (!npc) continue;
             var name = npc.name;
             if (name.StartsWith(NpcPrefix))

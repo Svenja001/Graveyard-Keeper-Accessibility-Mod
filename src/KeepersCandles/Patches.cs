@@ -83,7 +83,7 @@ public static class Patches
             {
                 if (Plugin.DebugEnabled)
                 {
-                    Helpers.Log($"[Extinguish:{typeLabel}] too far — pointing arrow at {closest.obj_id} ({closestDistance:F2} > {Plugin.ExtinguishDistance.Value})");
+                    Helpers.Log($"[Extinguish:{typeLabel}] too far - pointing arrow at {closest.obj_id} ({closestDistance:F2} > {Plugin.ExtinguishDistance.Value})");
                 }
                 SetArrow(closest);
                 MainGame.me.player.Say(Lang.Get(tooFarLangKey), null, false, SpeechBubbleGUI.SpeechBubbleType.Think, SmartSpeechEngine.VoiceID.None, true);
@@ -127,7 +127,7 @@ public static class Patches
         {
             if (Plugin.DebugEnabled)
             {
-                Helpers.Log("[SetArrow] skipped — DirectionalArrow disabled");
+                Helpers.Log("[SetArrow] skipped - DirectionalArrow disabled");
             }
             ResetArrow();
             return;
@@ -169,7 +169,7 @@ public static class Patches
 
             if (Plugin.DebugEnabled)
             {
-                Helpers.Log($"[OnGameBalanceLoaded] candelabrum/incense updates — crafts={craftUpdates}, obj_defs={defUpdates}, live wgos={wgoUpdates}");
+                Helpers.Log($"[OnGameBalanceLoaded] candelabrum/incense updates - crafts={craftUpdates}, obj_defs={defUpdates}, live wgos={wgoUpdates}");
             }
 
             FixCandles();

@@ -12,8 +12,6 @@ public class Plugin : BaseUnityPlugin
     private const string CustomLocationsSection = "── Custom Locations ──";
     private const string UpdatesSection         = "── Updates ──";
 
-    // Old section names get rewritten to the new "── Name ──" style on first launch so
-    // existing user customisations are preserved. Idempotent.
     private static readonly Dictionary<string, string> SectionRenames = new()
     {
         ["00. Debug"]              = AdvancedSection,
@@ -72,9 +70,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites old numbered "[00. Debug]" / "[01. Features]" headers to "[── Name ──]" in the .cfg
-    // so existing user values survive the section rename. Idempotent — re-running on an
-    // already-migrated file is a no-op.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;

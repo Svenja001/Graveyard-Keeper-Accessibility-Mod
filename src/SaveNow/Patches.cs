@@ -7,7 +7,7 @@ public static class Patches
     [HarmonyPatch(typeof(GameSave), nameof(GameSave.GlobalEventsCheck))]
     public static void GameSave_GlobalEventsCheck()
     {
-        if (Plugin.DebugEnabled) Plugin.WriteLog("[SaveNow] Player spawned — restoring location and starting timers");
+        if (Plugin.DebugEnabled) Plugin.WriteLog("[SaveNow] Player spawned - restoring location and starting timers");
         Plugin.RestoreLocation();
     }
 
@@ -235,7 +235,7 @@ public static class Patches
         {
             if (!BaseGUI.all_guis_closed)
             {
-                if (Plugin.DebugEnabled) Plugin.WriteLog("[SaveNow] Manual save suppressed — GUI open (prevents LT conflict with tech tree / trade / transfer menus)");
+                if (Plugin.DebugEnabled) Plugin.WriteLog("[SaveNow] Manual save suppressed - GUI open (prevents LT conflict with tech tree / trade / transfer menus)");
                 return;
             }
 

@@ -10,8 +10,6 @@ public static class Patches
     private static bool _strikeDone;
     internal static LogicData Ld;
 
-    // Transition-tracking so per-frame logs don't spam the BepInEx console. Each holds
-    // the last-logged value for its topic; we log only when the value changes.
     private static TimeOfDay.TimeOfDayEnum? _lastPhaseLogged;
     private static bool? _lastTutLogged;
     private static bool? _lastStrikeLogged;
@@ -59,9 +57,9 @@ public static class Patches
 
             if (dataGetParam < Plugin.DonkeySpeed.Value || getParam < Plugin.DonkeySpeed.Value)
             {
-                if (Plugin.DebugEnabled) Helpers.Log($"[Speed] Donkey old speeds — dataGetParam: {dataGetParam}, getParam: {getParam}, target: {Plugin.DonkeySpeed.Value}");
+                if (Plugin.DebugEnabled) Helpers.Log($"[Speed] Donkey old speeds - dataGetParam: {dataGetParam}, getParam: {getParam}, target: {Plugin.DonkeySpeed.Value}");
                 Plugin.Donkey.components.character.SetSpeed(Plugin.DonkeySpeed.Value);
-                if (Plugin.DebugEnabled) Helpers.Log($"[Speed] Donkey new speeds — dataGetParam: {Plugin.Donkey.data.GetParam("speed")}, getParam: {Plugin.Donkey.GetParam("speed")}");
+                if (Plugin.DebugEnabled) Helpers.Log($"[Speed] Donkey new speeds - dataGetParam: {Plugin.Donkey.data.GetParam("speed")}, getParam: {Plugin.Donkey.GetParam("speed")}");
             }
 
             if (!_strikeDone)
@@ -79,7 +77,7 @@ public static class Patches
         {
             if (!Plugin.PrideDayLogged)
             {
-                if (Plugin.DebugEnabled) Helpers.Log($"[PrideDay] day_of_week==1 (Pride/Sunday); skipping donkey — vanilla donkey doesn't deliver this day anyway.");
+                if (Plugin.DebugEnabled) Helpers.Log($"[PrideDay] day_of_week==1 (Pride/Sunday); skipping donkey - vanilla donkey doesn't deliver this day anyway.");
                 Plugin.PrideDayLogged = true;
             }
 
@@ -199,7 +197,7 @@ public static class Patches
         if (EnvironmentEngine.me == null) return;
         if (Plugin.DebugEnabled)
         {
-            Helpers.Log($"[EoD] Day ending; pre-reset flags — Night={Plugin.InternalNightDelivery.Value} Morning={Plugin.InternalMorningDelivery.Value} Day={Plugin.InternalDayDelivery.Value} Evening={Plugin.InternalEveningDelivery.Value} | DonkeySpawned={Plugin.InternalDonkeySpawned.Value} Ld={(Ld == null ? "null" : "active")}");
+            Helpers.Log($"[EoD] Day ending; pre-reset flags - Night={Plugin.InternalNightDelivery.Value} Morning={Plugin.InternalMorningDelivery.Value} Day={Plugin.InternalDayDelivery.Value} Evening={Plugin.InternalEveningDelivery.Value} | DonkeySpawned={Plugin.InternalDonkeySpawned.Value} Ld={(Ld == null ? "null" : "active")}");
         }
         Plugin.InternalMorningDelivery.Value = false;
         Plugin.InternalDayDelivery.Value = false;
@@ -217,21 +215,21 @@ public static class Patches
             donkey = WorldMap.GetWorldGameObjectByCustomTag("donkey", true);
             if (donkey == null)
             {
-                if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail — donkey WGO not found by custom_tag 'donkey'.");
+                if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - donkey WGO not found by custom_tag 'donkey'.");
                 return false;
             }
         }
 
         if (!Helpers.TutorialDone())
         {
-            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail — TutorialDone()==false. Reason: {Helpers.TutorialDoneReason()}");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - TutorialDone()==false. Reason: {Helpers.TutorialDoneReason()}");
             return false;
         }
 
         _strikeDone = donkey.GetParam("strike_completed") > 0f;
         if (!_strikeDone)
         {
-            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail — strike_completed==0 (pay donkey 10 carrots first).");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - strike_completed==0 (pay donkey 10 carrots first).");
             return false;
         }
 
@@ -239,7 +237,7 @@ public static class Patches
 
         if (_carrotBox == null)
         {
-            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail — no carrot_box WGO in world.");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - no carrot_box WGO in world.");
             return false;
         }
 
@@ -255,13 +253,13 @@ public static class Patches
         if (Plugin.DebugEnabled) Helpers.Log($"[Force] carrot_box inventory[0]={_carrotCount}");
         if (_carrotCount <= 0)
         {
-            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail — carrot count <=0; player needs to restock the carrot box.");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - carrot count <=0; player needs to restock the carrot box.");
             return false;
         }
 
         var gameTimeNow = MainGame.game_time;
         var sinceLast = _lastDeliveryGameTime >= 0f ? gameTimeNow - _lastDeliveryGameTime : -1f;
-        if (Plugin.DebugEnabled) Helpers.Log($"[Force] Triggering delivery — game_time={gameTimeNow:F4} sinceLast={(sinceLast < 0 ? "n/a" : sinceLast.ToString("F4"))} previousLd={(Ld == null ? "null" : $"active(executing={Ld._executing},started={Ld._started})")}");
+        if (Plugin.DebugEnabled) Helpers.Log($"[Force] Triggering delivery - game_time={gameTimeNow:F4} sinceLast={(sinceLast < 0 ? "n/a" : sinceLast.ToString("F4"))} previousLd={(Ld == null ? "null" : $"active(executing={Ld._executing},started={Ld._started})")}");
         _lastDeliveryGameTime = gameTimeNow;
 
         _donkey = WorldMap.GetWorldGameObjectByCustomTag("donkey", true);
@@ -273,14 +271,14 @@ public static class Patches
         if (_donkey != null)
         {
             Plugin.InternalDonkeySpawned.Value = true;
-            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Donkey found post-force — pos={_donkey.pos3}, speed(data)={_donkey.data.GetParam("speed")}, custom_interaction_events={_donkey.custom_interaction_events?.Count ?? -1}");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Donkey found post-force - pos={_donkey.pos3}, speed(data)={_donkey.data.GetParam("speed")}, custom_interaction_events={_donkey.custom_interaction_events?.Count ?? -1}");
             _donkey.components.character.SetSpeed(Plugin.DonkeySpeed.Value);
             if (Plugin.DebugEnabled) Helpers.Log($"[Force] Set donkey speed to target {Plugin.DonkeySpeed.Value} (data.speed now {_donkey.data.GetParam("speed")})");
 
             return true;
         }
 
-        if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail — donkey disappeared after ForceExecute; returning false.");
+        if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - donkey disappeared after ForceExecute; returning false.");
         return false;
     }
 
@@ -296,7 +294,7 @@ public static class Patches
         _donkey = WorldMap.GetWorldGameObjectByCustomTag("donkey", true);
         if (_donkey != null)
         {
-            if (Plugin.DebugEnabled) Helpers.Log($"[Delivery] Body arrived — donkey heading home. pos={_donkey.pos3}, speed(data)={_donkey.data.GetParam("speed")}, target={Plugin.DonkeySpeed.Value}");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Delivery] Body arrived - donkey heading home. pos={_donkey.pos3}, speed(data)={_donkey.data.GetParam("speed")}, target={Plugin.DonkeySpeed.Value}");
             _donkey.components.character.SetSpeed(Plugin.DonkeySpeed.Value);
         }
 
@@ -357,7 +355,7 @@ public static class Patches
 
         if (__instance.custom_tag.Equals("donkey"))
         {
-            if (Plugin.DebugEnabled) Helpers.Log($"[Home] Donkey teleported to GD point — trip complete. phase={TimeOfDay.me.time_of_day_enum} game_time={MainGame.game_time:F4}");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Home] Donkey teleported to GD point - trip complete. phase={TimeOfDay.me.time_of_day_enum} game_time={MainGame.game_time:F4}");
             Plugin.InternalDonkeySpawned.Value = false;
             Ld = null;
         }

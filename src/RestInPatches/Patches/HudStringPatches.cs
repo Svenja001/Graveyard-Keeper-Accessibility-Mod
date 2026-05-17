@@ -1,19 +1,7 @@
 namespace RestInPatches.Patches;
 
-// HUD.Update runs every frame. The original reassigns UILabel.text for day/r/g/b/hint_x
-// using freshly-allocated strings from "day " + N.ToString() and N.ToString() — even when
-// the underlying int hasn't changed. NGUI's UILabel setter short-circuits on content
-// equality, but the string allocation happens before the setter is called, so the garbage
-// is already produced.
-//
-// This patch fully replaces HUD.Update: it tracks the last-seen values in a per-HUD
-// side table and only rebuilds the label text when the value actually changed. The
-// bar_hp / bar_energy / bar_sanity / RedrawTime calls are preserved verbatim so the
-// HP/energy/sanity sliders and the clock still tick every frame.
-//
-// Note: ResiliencePatches already attaches a [HarmonyFinalizer] to HUD.Update for
-// IndexOutOfRangeException swallowing — finalizers still run after a Prefix that returns
-// false, so that safety net is preserved.
+// Only rebuild the day/r/g/b/hint labels when the value actually changed, instead of
+// allocating fresh strings for them every frame.
 [Harmony]
 public static class HudStringPatches
 {

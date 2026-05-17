@@ -47,8 +47,6 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
-    // Rewrites old numbered section headers to the new "── Name ──" style so existing
-    // user values survive the rename. Idempotent.
     private void MigrateRenamedSections()
     {
         var path = Config.ConfigFilePath;
@@ -116,7 +114,7 @@ public class Plugin : BaseUnityPlugin
                 new ConfigurationManagerAttributes {Order = 5}));
 
         IncludeWorldBerryBushes = Config.Bind(WorldEnvironmentSection, "Include World Berry Bushes", false,
-            new ConfigDescription("Apply the mod's fixes to wild berry bushes out in the world, not just garden-planted ones. Not recommended without Where's Ma' Storage — world bushes produce large amounts of loose items.", null,
+            new ConfigDescription("Apply the mod's fixes to wild berry bushes out in the world, not just garden-planted ones. Not recommended without Where's Ma' Storage - world bushes produce large amounts of loose items.", null,
                 new ConfigurationManagerAttributes {Order = 4}));
 
         BeeKeeperBuyback = Config.Bind(EconomySection, "Bee Keeper Buyback", false,

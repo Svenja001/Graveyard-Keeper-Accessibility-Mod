@@ -8,8 +8,6 @@ public static class Invents
 
         Fields.Mi = new MultiInventory();
 
-        // Snapshot every WGO's world position keyed by its Item. Inventory._data is that same Item
-        // instance, so SortByDistance can later recover the owning WGO's position by Item lookup.
         Fields.InventoryPositions.Clear();
         foreach (var wgo in WorldMap._objs)
         {
@@ -60,7 +58,7 @@ public static class Invents
 
         foreach (var zone in zones)
         {
-            // BUG 1 FIX: was a.Contains(zone.id) — backwards. Now zone.id.Contains(a) so "refugees_camp".Contains("refugees") = true
+            // BUG 1 FIX: argument order was reversed so the substring check never matched.
             if (Fields.AlwaysSkipZones.Any(a => zone.id.ToLowerInvariant().Contains(a)))
             {
                 zonesSkipped++;
@@ -206,7 +204,7 @@ public static class Invents
         var textInfo = cultureInfo.TextInfo;
         wzLabel = textInfo.ToTitleCase(wzLabel);
 
-        // BUG 3 FIX: was creating a full deep-copy via MakeInventoryCopy() just to read size and count
+        // BUG 3 FIX: read size and count directly instead of building a deep copy.
         var cap = inventoryWidget.inventory_data.inventory_size;
         var used = inventoryWidget.inventory_data.inventory.Count;
 
@@ -249,9 +247,6 @@ public static class Invents
 
         if (requester.Contains("refugee_builddesk") || requester.Contains("storage_builddesk") || requesterInQuarry)
         {
-            // Gate on the same in-flight/freshness invariant Helpers.RunWmsTasks uses. Without
-            // this, a quarry-zoned worker (e.g. a stone-cutter zombie) re-spawns LoadInventories
-            // every craft tick, walking WorldMap._objs from scratch each time.
             if (!Fields.InventoriesLoaded && Fields.LoadInventoriesCoroutine == null)
             {
                 if (Plugin.DebugEnabled) Helpers.Log($"[GetMiInventory] triggering reload (requester={requester} zone={zone})");
@@ -260,9 +255,6 @@ public static class Invents
             }
         }
 
-        // Lazy-merge wilderness into the shared cache. LoadWildernessInventories runs
-        // concurrently with LoadInventories so wilderness may arrive after the first build.
-        // This is idempotent (Contains check) and strictly additive — safe to mutate Fields.Mi.
         var wildAdded = 0;
         foreach (var inv in Fields.WildernessInventories.Where(inv => !Fields.Mi.all.Contains(inv)))
         {
@@ -270,10 +262,8 @@ public static class Invents
             wildAdded++;
         }
 
-        // Build a per-requester filtered view. Do NOT mutate Fields.Mi for exclusions —
-        // doing so would permanently drop quarry/zombie-mill entries from the shared cache,
-        // so a later quarry crafter would lose access to its own zone's containers until
-        // the next full LoadInventories rebuild.
+        // Filter into a per-requester view. Don't mutate Fields.Mi or quarry/zombie-mill
+        // entries will be dropped from the shared cache until the next full rebuild.
         var view = new MultiInventory();
         var quarryFiltered = 0;
         var zombieMillFiltered = 0;
@@ -305,11 +295,8 @@ public static class Invents
         return view;
     }
 
-    // Reorders the view's tail (everything past player + toolbelt at indices 0/1) by Vector3
-    // distance from the crafter, keeping each container's bag entries adjacent to their parent.
-    // Player + toolbelt stay locked at the front because neither has a usable WGO position
-    // and the player's pocket inventory must remain the first source consumed.
-    // Returns the number of groups that were sorted (for debug logging).
+    // Sort the view's tail by distance from the crafter, keeping each container's bags next
+    // to their parent. Player and toolbelt stay locked at indices 0/1.
     private static int SortByDistance(MultiInventory view, Vector3 crafterPos)
     {
         var all = view.all;
@@ -324,16 +311,12 @@ public static class Invents
                 continue;
             }
 
-            // sentinel: inventory we have no WGO position for (player/toolbelt synthetics, or a
-            // container missed by the LoadInventories snapshot) — sink to the end of the order
             var distSq = Fields.InventoryPositions.TryGetValue(inv.data, out var pos)
                 ? (pos - crafterPos).sqrMagnitude
                 : float.MaxValue;
             groups.Add((inv, new List<Inventory>(), distSq));
         }
 
-        // OrderBy is stable, so equidistant groups keep the priority order baked in by
-        // WorldZone.SortWGOSByPriority during LoadInventories.
         var sorted = groups.OrderBy(g => g.distSq).ToList();
 
         var rebuilt = new List<Inventory>(all.Count) { all[0], all[1] };
@@ -346,7 +329,6 @@ public static class Invents
         return sorted.Count;
     }
 
-    // This method gets inserted into the CraftReally method using the transpiler below, overwriting any inventory the game sets during crafting
     public static MultiInventory GetMi(CraftDefinition craft, MultiInventory orig, WorldGameObject otherGameObject)
     {
         if (!Plugin.SharedInventory.Value)
@@ -370,9 +352,8 @@ public static class Invents
 
         var isBuilder = otherGameObject.obj_def.interaction_type == ObjectDefinition.InteractionType.Builder;
 
-        // Builder bypass only forgives obj_id substring collisions (e.g. apiary contains "bee").
-        // Zone-level matches (refugees_camp) signal an isolated zone whose items must NOT be
-        // replaced by the shared pool — let vanilla's force_world_zone-restricted inventory through.
+        // Let vanilla's force_world_zone-restricted inventory through for isolated zones
+        // like refugees_camp. The builder bypass only forgives obj_id collisions (e.g. apiary).
         var objMatchesSkip = Fields.AlwaysSkipZones.Any(a => objId.Contains(a));
         var zoneMatchesSkip = Fields.AlwaysSkipZones.Any(a => worldZoneId.Contains(a));
         if (zoneMatchesSkip || (!isBuilder && objMatchesSkip))
