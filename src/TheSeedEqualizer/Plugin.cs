@@ -24,6 +24,10 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> ModifyRefugeeGardens { get; private set; }
     internal static ConfigEntry<bool> AddWasteToZombieGardens { get; private set; }
     internal static ConfigEntry<bool> AddWasteToZombieVineyards { get; private set; }
+    internal static ConfigEntry<bool> BreakEvenPlayerGardens { get; private set; }
+    internal static ConfigEntry<bool> BreakEvenZombieGardens { get; private set; }
+    internal static ConfigEntry<bool> BreakEvenZombieVineyards { get; private set; }
+    internal static ConfigEntry<bool> BreakEvenRefugeeGardens { get; private set; }
     internal static ConfigEntry<bool> BoostPotentialSeedOutput { get; private set; }
     internal static ConfigEntry<bool> BoostGrowSpeedWhenRaining { get; private set; }
     internal static ConfigEntry<bool> TrackPlantCycles { get; private set; }
@@ -47,6 +51,10 @@ public class Plugin : BaseUnityPlugin
         ModifyRefugeeGardens.SettingChanged      += OnSeedSettingChanged;
         AddWasteToZombieGardens.SettingChanged   += OnSeedSettingChanged;
         AddWasteToZombieVineyards.SettingChanged += OnSeedSettingChanged;
+        BreakEvenPlayerGardens.SettingChanged    += OnSeedSettingChanged;
+        BreakEvenZombieGardens.SettingChanged    += OnSeedSettingChanged;
+        BreakEvenZombieVineyards.SettingChanged  += OnSeedSettingChanged;
+        BreakEvenRefugeeGardens.SettingChanged   += OnSeedSettingChanged;
         BoostPotentialSeedOutput.SettingChanged  += OnSeedSettingChanged;
     }
 
@@ -59,11 +67,15 @@ public class Plugin : BaseUnityPlugin
         Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
 
         ModifyPlayerGardens = LocalizedConfig.Bind(Config, PlayerGardensSection, "Modify Player Gardens", false, "modify_player_gardens", order: 100);
+        BreakEvenPlayerGardens = LocalizedConfig.Bind(Config, PlayerGardensSection, "Player Gardens Break Even", false, "break_even_player_gardens", order: 99);
 
         ModifyZombieGardens = LocalizedConfig.Bind(Config, ZombieGardensSection, "Modify Zombie Gardens", true, "modify_zombie_gardens", order: 100);
-        ModifyZombieVineyards = LocalizedConfig.Bind(Config, ZombieGardensSection, "Modify Zombie Vineyards", true, "modify_zombie_vineyards", order: 99);
+        BreakEvenZombieGardens = LocalizedConfig.Bind(Config, ZombieGardensSection, "Zombie Gardens Break Even", false, "break_even_zombie_gardens", order: 99);
+        ModifyZombieVineyards = LocalizedConfig.Bind(Config, ZombieGardensSection, "Modify Zombie Vineyards", true, "modify_zombie_vineyards", order: 98);
+        BreakEvenZombieVineyards = LocalizedConfig.Bind(Config, ZombieGardensSection, "Zombie Vineyards Break Even", false, "break_even_zombie_vineyards", order: 97);
 
         ModifyRefugeeGardens = LocalizedConfig.Bind(Config, RefugeeGardensSection, "Modify Refugee Gardens", true, "modify_refugee_gardens", order: 100);
+        BreakEvenRefugeeGardens = LocalizedConfig.Bind(Config, RefugeeGardensSection, "Refugee Gardens Break Even", false, "break_even_refugee_gardens", order: 99);
 
         AddWasteToZombieGardens = LocalizedConfig.Bind(Config, WasteSection, "Add Waste To Zombie Gardens", true, "add_waste_to_zombie_gardens", order: 100);
         AddWasteToZombieVineyards = LocalizedConfig.Bind(Config, WasteSection, "Add Waste To Zombie Vineyards", true, "add_waste_to_zombie_vineyards", order: 99);

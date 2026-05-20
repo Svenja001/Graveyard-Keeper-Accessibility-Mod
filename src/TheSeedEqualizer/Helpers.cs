@@ -63,7 +63,7 @@ public static class Helpers
         }
     }
 
-    private static void ModifyOutput(ObjectDefinition obj)
+    private static void ModifyOutput(ObjectDefinition obj, bool breakEven)
     {
         var seedOutputs = obj.drop_items.Where(a => a.id.Contains("seed")).ToList();
         if (Plugin.DebugEnabled)
@@ -125,19 +125,27 @@ public static class Helpers
             output.min_value = SmartExpression.ParseExpression(minValue.ToString(CultureInfo.InvariantCulture));
 
             var maxBefore = ReadMaxBefore(output.max_value, minValue, output.id);
-            var normalBoost = maxBefore + 2;
-            var extraBoost = maxBefore + 4;
-            var boost = Plugin.BoostPotentialSeedOutput.Value ? extraBoost : normalBoost;
+            float boost;
+            if (breakEven)
+            {
+                boost = minValue;
+            }
+            else
+            {
+                var normalBoost = maxBefore + 2;
+                var extraBoost = maxBefore + 4;
+                boost = Plugin.BoostPotentialSeedOutput.Value ? extraBoost : normalBoost;
+            }
             output.max_value = SmartExpression.ParseExpression(boost.ToString(CultureInfo.InvariantCulture));
 
             if (Plugin.DebugEnabled)
             {
-                Log($"[ModifyOutput/Obj] '{output.id}' max_value {maxBefore} → {boost} (boostPotential={Plugin.BoostPotentialSeedOutput.Value})");
+                Log($"[ModifyOutput/Obj] '{output.id}' max_value {maxBefore} → {boost} (breakEven={breakEven}, boostPotential={Plugin.BoostPotentialSeedOutput.Value})");
             }
         }
     }
 
-    private static void ModifyOutput(CraftDefinition craft)
+    private static void ModifyOutput(CraftDefinition craft, bool breakEven)
     {
         var seedOutputs = craft.output.Where(a => a.id.Contains("seed")).ToList();
         if (Plugin.DebugEnabled)
@@ -155,14 +163,22 @@ public static class Helpers
             output.min_value = SmartExpression.ParseExpression(minValue.ToString(CultureInfo.InvariantCulture));
 
             var maxBefore = ReadMaxBefore(output.max_value, minValue, output.id);
-            var normalBoost = maxBefore + 2;
-            var extraBoost = maxBefore + 4;
-            var boost = Plugin.BoostPotentialSeedOutput.Value ? extraBoost : normalBoost;
+            float boost;
+            if (breakEven)
+            {
+                boost = minValue;
+            }
+            else
+            {
+                var normalBoost = maxBefore + 2;
+                var extraBoost = maxBefore + 4;
+                boost = Plugin.BoostPotentialSeedOutput.Value ? extraBoost : normalBoost;
+            }
             output.max_value = SmartExpression.ParseExpression(boost.ToString(CultureInfo.InvariantCulture));
 
             if (Plugin.DebugEnabled)
             {
-                Log($"[ModifyOutput/Craft] '{output.id}' min ← {minValue}, max {maxBefore} → {boost} (boostPotential={Plugin.BoostPotentialSeedOutput.Value})");
+                Log($"[ModifyOutput/Craft] '{output.id}' min ← {minValue}, max {maxBefore} → {boost} (breakEven={breakEven}, boostPotential={Plugin.BoostPotentialSeedOutput.Value})");
             }
         }
     }
@@ -267,7 +283,7 @@ public static class Helpers
 
         if (Plugin.DebugEnabled)
         {
-            Log($"[Apply] config snapshot - playerGardens={Plugin.ModifyPlayerGardens.Value}, zombieGardens={Plugin.ModifyZombieGardens.Value}, zombieVineyards={Plugin.ModifyZombieVineyards.Value}, refugeeGardens={Plugin.ModifyRefugeeGardens.Value}, wasteToZGardens={Plugin.AddWasteToZombieGardens.Value}, wasteToZVineyards={Plugin.AddWasteToZombieVineyards.Value}, boostSeed={Plugin.BoostPotentialSeedOutput.Value}, rainGrowth={Plugin.BoostGrowSpeedWhenRaining.Value}");
+            Log($"[Apply] config snapshot - playerGardens={Plugin.ModifyPlayerGardens.Value}, zombieGardens={Plugin.ModifyZombieGardens.Value}, zombieVineyards={Plugin.ModifyZombieVineyards.Value}, refugeeGardens={Plugin.ModifyRefugeeGardens.Value}, wasteToZGardens={Plugin.AddWasteToZombieGardens.Value}, wasteToZVineyards={Plugin.AddWasteToZombieVineyards.Value}, breakEven(player/zGarden/zVineyard/refugee)={Plugin.BreakEvenPlayerGardens.Value}/{Plugin.BreakEvenZombieGardens.Value}/{Plugin.BreakEvenZombieVineyards.Value}/{Plugin.BreakEvenRefugeeGardens.Value}, boostSeed={Plugin.BoostPotentialSeedOutput.Value}, rainGrowth={Plugin.BoostGrowSpeedWhenRaining.Value}");
         }
 
         var playerGardenCandidates = GameBalance.me.objs_data
@@ -299,7 +315,7 @@ public static class Helpers
             {
                 Log($"[Apply/PlayerGardens] modifying '{obj.id}'");
             }
-            ModifyOutput(obj);
+            ModifyOutput(obj, Plugin.BreakEvenPlayerGardens.Value);
             playerModified++;
         }
 
@@ -331,7 +347,7 @@ public static class Helpers
                 {
                     Log($"[Apply/ZombieGardens] modifying '{craft.id}'");
                 }
-                ModifyOutput(craft);
+                ModifyOutput(craft, Plugin.BreakEvenZombieGardens.Value);
                 zombieModified++;
             }
 
@@ -341,7 +357,7 @@ public static class Helpers
                 {
                     Log($"[Apply/ZombieVineyards] modifying '{craft.id}'");
                 }
-                ModifyOutput(craft);
+                ModifyOutput(craft, Plugin.BreakEvenZombieVineyards.Value);
                 vineyardModified++;
             }
 
@@ -351,7 +367,7 @@ public static class Helpers
                 {
                     Log($"[Apply/RefugeeGardens] modifying '{craft.id}'");
                 }
-                ModifyOutput(craft);
+                ModifyOutput(craft, Plugin.BreakEvenRefugeeGardens.Value);
                 refugeeModified++;
             }
 
