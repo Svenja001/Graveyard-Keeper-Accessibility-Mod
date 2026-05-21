@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.8 | 21 May 2026
+
+- Stacked heavy items (e.g. with Super Strong Mod) now go to your stockpiles when there's room, instead of part of the stack landing at the dump site
+
 ## 3.5.7 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

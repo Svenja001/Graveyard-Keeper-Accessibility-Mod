@@ -4,6 +4,10 @@ namespace AutoLootHeavies;
 [HarmonyPriority(1)]
 public static class Patches
 {
+    // Hard cap so the stash-drain loop can't spin forever if another mod refills the carried
+    // slot without ever clearing it. Far higher than any real stack size.
+    private const int StackDrainLimit = 10000;
+
     [HarmonyPrefix]
     [HarmonyPriority(1)]
     [HarmonyPatch(typeof(BaseCharacterComponent), nameof(BaseCharacterComponent.DropOverheadItem))]
@@ -11,10 +15,7 @@ public static class Patches
     {
         if (!__instance.wgo.is_player || !__instance.has_overhead || !Plugin.OverheadItemIsHeavy(__instance.overhead_item))
             return true;
-        var item = __instance.overhead_item;
-
-        List<Item> insert = [item];
-        var itemId = item.id;
+        var itemId = __instance.overhead_item.id;
 
         Plugin.SortedStockpiles.RemoveAll(pile => pile.Wgo == null);
 
@@ -26,19 +27,31 @@ public static class Patches
 
         Plugin.SortedStockpiles.Sort((x, y) => x.DistanceFromPlayer.CompareTo(y.DistanceFromPlayer));
 
-        var itemDumped = false;
-        foreach (var stockpile in Plugin.SortedStockpiles)
+        var stashedCount = 0;
+        var drained = 0;
+        // Super Strong Mod refills the slot from its stack after each insert, so keep stashing
+        // until the carry empties or every pile is full. A normal single carry runs this once.
+        while (__instance.has_overhead && Plugin.OverheadItemIsHeavy(__instance.overhead_item) && drained++ < StackDrainLimit)
         {
-            if (Plugin.DebugEnabled) Plugin.WriteLog($"[DropOverhead] try {itemId} → {stockpile.Wgo.obj_id} @ {stockpile.DistanceFromPlayer:F1}");
-            var success = Plugin.TryPutToInventoryAndNull(__instance, stockpile.Wgo, insert);
-            if (!success) continue;
-            itemDumped = true;
-            if (Plugin.DebugEnabled) Plugin.WriteLog($"[DropOverhead] inserted {itemId} → {stockpile.Wgo.obj_id} @ {stockpile.DistanceFromPlayer:F1}");
-            Plugin.ShowLootAddedIcon(item);
-            break;
+            var item = __instance.overhead_item;
+            List<Item> insert = [item];
+            var placed = false;
+            foreach (var stockpile in Plugin.SortedStockpiles)
+            {
+                if (Plugin.DebugEnabled) Plugin.WriteLog($"[DropOverhead] try {itemId} → {stockpile.Wgo.obj_id} @ {stockpile.DistanceFromPlayer:F1}");
+                if (!Plugin.TryPutToInventoryAndNull(__instance, stockpile.Wgo, insert)) continue;
+                placed = true;
+                stashedCount += item.value;
+                if (Plugin.DebugEnabled) Plugin.WriteLog($"[DropOverhead] inserted {itemId} → {stockpile.Wgo.obj_id} @ {stockpile.DistanceFromPlayer:F1}");
+                break;
+            }
+
+            if (!placed) break;
         }
 
-        if (__instance.overhead_item != null || !itemDumped)
+        if (stashedCount > 0) Plugin.ShowLootAddedIcon(new Item(itemId) { value = stashedCount });
+
+        if (__instance.overhead_item != null || stashedCount == 0)
         {
             if (Plugin.TeleportToDumpSiteWhenAllStockPilesFull.Value)
             {
