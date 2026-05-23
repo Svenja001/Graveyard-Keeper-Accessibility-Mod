@@ -1085,3 +1085,7 @@ phase3-analysis/
 /nexus-discover-*.csv
 /nexus-thumb-image*.png
 /nexus-thumb-image*.webp
+
+# Local Nexus image working folders (mod page screenshots/assets, staged locally)
+nexus_images/
+nexus_template_images/
