@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.18 | 21 May 2026
+## 2.1.18 | 23 May 2026
 
 - Dead bodies are no longer swept to your dump site on save load
 
