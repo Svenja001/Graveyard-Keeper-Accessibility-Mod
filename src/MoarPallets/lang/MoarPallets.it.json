@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "Al caricamento, le casse libere vanno sul pallet più vicino con spazio. Il resto all'ascensore.",
   "cfg.auto_route_carried_crates.name": "Instrada automaticamente le casse trasportate",
   "cfg.auto_route_carried_crates.desc": "Quando posi una cassa trasportata, va al pallet più vicino con spazio. Il resto all'ascensore.",
+  "cfg.walk_through_pallets.name": "Attraversa i pallet",
+  "cfg.walk_through_pallets.desc": "Attraversa i pallet invece di sbatterci contro. Puoi ancora aprirli e usarli.",
   "cfg.debug_logging.name": "Log di debug",
   "cfg.debug_logging.desc": "Scrive diagnostiche dettagliate su pallet e zone nella console BepInEx. Disattiva per il gioco normale.",
   "cfg.check_for_updates.name": "Controlla aggiornamenti",

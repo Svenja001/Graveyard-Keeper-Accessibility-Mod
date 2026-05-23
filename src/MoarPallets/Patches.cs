@@ -37,6 +37,17 @@ public static class Patches
         }
     }
 
+    // The player's collider is rebuilt on world load and area changes, so re-apply
+    // walk-through to every pallet on those events.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(GameSave), nameof(GameSave.GlobalEventsCheck))]
+    [HarmonyPatch(typeof(WorldMap), nameof(WorldMap.RescanWGOsList))]
+    [HarmonyPatch(typeof(WorldZone), nameof(WorldZone.OnPlayerEnter))]
+    private static void RefreshPalletWalkthrough_Postfix()
+    {
+        PalletCollision.RefreshAll();
+    }
+
     // Carried crates route to nearest pallet on drop; vanilla dumps them on the floor.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(BaseCharacterComponent), nameof(BaseCharacterComponent.DropOverheadItem))]
@@ -333,6 +344,9 @@ public static class Patches
     private static void WorldGameObject_RecalculateZoneBelonging_Postfix(WorldGameObject __instance)
     {
         if (!__instance || __instance.obj_id != "box_pallet") return;
+
+        // A freshly built pallet is walk-through right away, no reload needed.
+        PalletCollision.Apply(__instance);
 
         if (!__instance._zone)
         {

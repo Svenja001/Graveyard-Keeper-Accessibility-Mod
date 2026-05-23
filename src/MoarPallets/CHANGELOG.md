@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 | 23 May 2026
+
+- Walk through your pallets instead of bumping into them (optional, on by default).
+
 ## 0.1.0 | 16 May 2026
 
 - Adds the pallet to the wooden build desk and the cellar build desk, costing 6 flitch and 4 nails.

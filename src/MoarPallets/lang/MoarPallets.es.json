@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "Al cargar, las cajas sueltas van al palet más cercano con espacio. Lo sobrante al ascensor del sótano.",
   "cfg.auto_route_carried_crates.name": "Enrutar cajas que llevas automáticamente",
   "cfg.auto_route_carried_crates.desc": "Al soltar una caja que llevas, va al palet más cercano con espacio. Lo sobrante al ascensor del sótano.",
+  "cfg.walk_through_pallets.name": "Atravesar palets",
+  "cfg.walk_through_pallets.desc": "Atraviesa los palets en vez de chocar con ellos. Puedes seguir abriéndolos y usándolos.",
   "cfg.debug_logging.name": "Registro de depuración",
   "cfg.debug_logging.desc": "Escribe diagnósticos detallados de palets y zonas en la consola de BepInEx. Déjalo desactivado para jugar.",
   "cfg.check_for_updates.name": "Buscar actualizaciones",

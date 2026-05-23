@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "Au chargement, les caisses libres vont à la palette la plus proche avec de la place. Le reste à l'ascenseur de la cave.",
   "cfg.auto_route_carried_crates.name": "Router auto. les caisses portées",
   "cfg.auto_route_carried_crates.desc": "En posant une caisse portée, elle va à la palette la plus proche avec de la place. Le reste à l'ascenseur de la cave.",
+  "cfg.walk_through_pallets.name": "Traverser les palettes",
+  "cfg.walk_through_pallets.desc": "Traverse les palettes au lieu de les heurter. Tu peux toujours les ouvrir et les utiliser.",
   "cfg.debug_logging.name": "Journal de débogage",
   "cfg.debug_logging.desc": "Écrit des diagnostics détaillés sur les palettes et zones dans la console BepInEx. Désactive pour le jeu normal.",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",

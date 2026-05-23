@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "载入时把散落木箱滑到最近有空位的托盘。剩余的去地下室电梯。",
   "cfg.auto_route_carried_crates.name": "自动整理手持木箱",
   "cfg.auto_route_carried_crates.desc": "放下手持木箱时滑到最近有空位的托盘。剩余的去地下室电梯。",
+  "cfg.walk_through_pallets.name": "穿过托盘",
+  "cfg.walk_through_pallets.desc": "直接穿过托盘，不再被它们挡住。仍可正常打开和使用。",
   "cfg.debug_logging.name": "调试日志",
   "cfg.debug_logging.desc": "向 BepInEx 控制台输出托盘和区域的详细诊断信息。普通游玩时请关闭。",
   "cfg.check_for_updates.name": "检查更新",

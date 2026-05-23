@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "Beim Laden wandern lose Kisten auf die nächste freie Palette. Reste landen am Kelleraufzug.",
   "cfg.auto_route_carried_crates.name": "Getragene Kisten automatisch zuweisen",
   "cfg.auto_route_carried_crates.desc": "Beim Ablegen einer getragenen Kiste wandert sie zur nächsten freien Palette. Reste landen am Kelleraufzug.",
+  "cfg.walk_through_pallets.name": "Durch Paletten hindurchgehen",
+  "cfg.walk_through_pallets.desc": "Geh durch Paletten hindurch, statt gegen sie zu stoßen. Du kannst sie weiterhin öffnen und benutzen.",
   "cfg.debug_logging.name": "Debug-Logging",
   "cfg.debug_logging.desc": "Schreibt ausführliche Paletten- und Zonen-Diagnosen in die BepInEx-Konsole. Für normales Spielen ausschalten.",
   "cfg.check_for_updates.name": "Auf Updates prüfen",

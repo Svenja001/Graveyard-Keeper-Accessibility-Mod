@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "Przy ładowaniu luźne skrzynie trafiają na najbliższą paletę z miejscem. Reszta do windy piwnicy.",
   "cfg.auto_route_carried_crates.name": "Automatycznie rozprowadzaj niesione skrzynie",
   "cfg.auto_route_carried_crates.desc": "Po upuszczeniu niesionej skrzyni trafia ona na najbliższą paletę z miejscem. Reszta do windy piwnicy.",
+  "cfg.walk_through_pallets.name": "Przechodź przez palety",
+  "cfg.walk_through_pallets.desc": "Przechodź przez palety, zamiast na nie wpadać. Nadal możesz je otwierać i z nich korzystać.",
   "cfg.debug_logging.name": "Logi debugowania",
   "cfg.debug_logging.desc": "Zapisuje szczegółowe diagnostyki palet i stref w konsoli BepInEx. Wyłącz przy zwykłej grze.",
   "cfg.check_for_updates.name": "Sprawdź aktualizacje",

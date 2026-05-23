@@ -22,6 +22,7 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> ShowConnectedPopup { get; private set; }
     internal static ConfigEntry<bool> AutoRouteLooseCrates { get; private set; }
     internal static ConfigEntry<bool> AutoRouteCarriedCrates { get; private set; }
+    internal static ConfigEntry<bool> WalkThroughPallets { get; private set; }
 
     private void Awake()
     {
@@ -33,6 +34,8 @@ public class Plugin : BaseUnityPlugin
         ShowConnectedPopup = LocalizedConfig.Bind(Config, "── Notifications ──", "Show Pallet Connected Popup", true, "show_pallet_connected_popup", order: 100);
         AutoRouteLooseCrates = LocalizedConfig.Bind(Config, "── Pallet ──", "Auto-Route Loose Crates", true, "auto_route_loose_crates", order: 200);
         AutoRouteCarriedCrates = LocalizedConfig.Bind(Config, "── Pallet ──", "Auto-Route Carried Crates", true, "auto_route_carried_crates", order: 199);
+        WalkThroughPallets = LocalizedConfig.Bind(Config, "── Pallet ──", "Walk Through Pallets", true, "walk_through_pallets", order: 198);
+        WalkThroughPallets.SettingChanged += (_, _) => PalletCollision.RefreshAll();
         Debug = LocalizedConfig.Bind(Config, "── Advanced ──", "Debug Logging", true, "debug_logging", order: 599);
 
         UpdateChecker.Register(Info, CheckForUpdates);

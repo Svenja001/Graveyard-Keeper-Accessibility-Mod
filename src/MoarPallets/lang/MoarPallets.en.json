@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "On game load, slide any loose crate onto the nearest pallet with space. Leftovers go to the cellar elevator.",
   "cfg.auto_route_carried_crates.name": "Auto-Route Carried Crates",
   "cfg.auto_route_carried_crates.desc": "When you drop a carried crate, send it to the nearest pallet with space. Leftovers go to the cellar elevator.",
+  "cfg.walk_through_pallets.name": "Walk Through Pallets",
+  "cfg.walk_through_pallets.desc": "Walk through pallets instead of bumping into them. You can still open and use them.",
   "cfg.debug_logging.name": "Debug Logging",
   "cfg.debug_logging.desc": "Write verbose pallet-and-zone diagnostics to the BepInEx console. Leave off for normal play.",
   "cfg.check_for_updates.name": "Check for Updates",

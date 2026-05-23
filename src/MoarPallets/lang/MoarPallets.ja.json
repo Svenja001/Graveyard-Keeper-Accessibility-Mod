@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "ロード時、ばらの木箱を空きのある最寄りパレットへ。残りは地下室のエレベーターへ。",
   "cfg.auto_route_carried_crates.name": "運んでいる木箱を自動で振り分け",
   "cfg.auto_route_carried_crates.desc": "運んでいる木箱を下ろすと空きのある最寄りパレットへ。残りは地下室のエレベーターへ。",
+  "cfg.walk_through_pallets.name": "パレットをすり抜ける",
+  "cfg.walk_through_pallets.desc": "パレットにぶつからず、すり抜けて歩けます。これまで通り開いて使えます。",
   "cfg.debug_logging.name": "デバッグログ",
   "cfg.debug_logging.desc": "パレットとゾーンの詳細な診断情報を BepInEx コンソールに記録します。通常プレイ時はオフ。",
   "cfg.check_for_updates.name": "アップデートを確認",

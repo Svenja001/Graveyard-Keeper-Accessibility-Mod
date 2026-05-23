@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "게임을 불러올 때 바닥에 놓인 상자를 공간이 있는 가장 가까운 파렛트로 이동시킵니다. 파렛트가 가득 차면 남은 상자는 지하실 엘리베이터로 보냅니다.",
   "cfg.auto_route_carried_crates.name": "들고 있던 상자 자동 경로 지정",
   "cfg.auto_route_carried_crates.desc": "들고 있던 상자를 바닥에 내려놓을 때 공간이 있는 가장 가까운 파렛트로 보냅니다. 파렛트가 가득 차면 남은 상자는 지하실 엘리베이터로 보냅니다.",
+  "cfg.walk_through_pallets.name": "파렛트 통과하기",
+  "cfg.walk_through_pallets.desc": "파렛트에 부딪히지 않고 그대로 통과합니다. 파렛트는 여전히 열어서 사용할 수 있습니다.",
   "cfg.debug_logging.name": "디버그 기록 남기기",
   "cfg.debug_logging.desc": "파렛트 및 구역에 대한 상세한 진단 정보를 BepInEx 콘솔에 기록합니다. 평소 게임 플레이 시에는 끄고 사용하세요.",
   "cfg.check_for_updates.name": "업데이트 확인",

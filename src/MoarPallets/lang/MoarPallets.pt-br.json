@@ -11,6 +11,8 @@
   "cfg.auto_route_loose_crates.desc": "Ao carregar, caixotes soltos vão para o palete mais próximo com espaço. Resto vai ao elevador do porão.",
   "cfg.auto_route_carried_crates.name": "Rotear caixotes carregados automaticamente",
   "cfg.auto_route_carried_crates.desc": "Ao soltar um caixote carregado, vai para o palete mais próximo com espaço. Resto ao elevador do porão.",
+  "cfg.walk_through_pallets.name": "Atravessar paletes",
+  "cfg.walk_through_pallets.desc": "Atravesse os paletes em vez de esbarrar neles. Você ainda pode abri-los e usá-los.",
   "cfg.debug_logging.name": "Log de depuração",
   "cfg.debug_logging.desc": "Escreve diagnósticos detalhados de paletes e zonas no console do BepInEx. Mantenha desativado.",
   "cfg.check_for_updates.name": "Verificar atualizações",
