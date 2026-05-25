@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 | 25 May 2026
+
+- Fixed pump wells not producing any water.
+
 ## 0.1.0 | 10 May 2026
 
 - Adds the basic stone well to the wooden build desk, costing 4 flitch and 4 stone.

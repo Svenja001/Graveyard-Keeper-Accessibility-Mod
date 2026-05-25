@@ -262,6 +262,7 @@ public static class Patches
     {
         if (MainGame.me?.save == null) return;
         LogSaveDiagnostics();
+        EnsurePumpsAreCrafting();
     }
 
     private static void LogSaveDiagnostics()
@@ -281,6 +282,21 @@ public static class Patches
         var wells = WorldMap.GetWorldGameObjectsByObjId("water_well");
         var pumps = WorldMap.GetWorldGameObjectsByObjId("well_pump");
         Plugin.Log.LogInfo($"world: {wells?.Count ?? 0} water wells, {pumps?.Count ?? 0} pumps, {GetUnpumpedWaterWells().Count} eligible for upgrade.");
+    }
+
+    // Pumps placed before the craft-start fix sit idle. Vanilla restarts the village pump's craft
+    // on load; do the same for every pump so old saves recover.
+    private static void EnsurePumpsAreCrafting()
+    {
+        var pumps = WorldMap.GetWorldGameObjectsByObjId("well_pump");
+        if (pumps == null) return;
+        foreach (var pump in pumps)
+        {
+            if (!pump) continue;
+            if (pump.components?.craft == null) continue;
+            if (pump.components.craft.is_crafting) continue;
+            pump.TryStartCraft("water_pumping");
+        }
     }
 
     // ProcessFinishedCraft clears current_craft mid-method, so grab the id before it runs.
@@ -350,7 +366,10 @@ public static class Patches
         }
 
         if (!closest) return;
-        WorldMap.SpawnWGO(MainGame.me.world_root, "well_pump", closest.transform.position);
+        var pump = WorldMap.SpawnWGO(MainGame.me.world_root, "well_pump", closest.transform.position);
+        // A new pump does nothing until water_pumping runs. Vanilla started it from the
+        // placement script we cleared, so start it here.
+        pump.TryStartCraft("water_pumping");
         Plugin.Log.LogInfo($"Spawned well_pump at {closest.transform.position} alongside the water_well.");
         LogWorldWellState();
     }
