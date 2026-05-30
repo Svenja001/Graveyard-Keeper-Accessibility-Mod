@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <BepInExPluginGuid>p1xel8ted.gyk.deadgiveaway</BepInExPluginGuid>
+        <BepInExPluginName>Dead Giveaway!</BepInExPluginName>
+        <NexusGroupId>0</NexusGroupId>
+    </PropertyGroup>
+    <ItemGroup>
+        <Compile Include="..\Shared\StartupLogger.cs" Link="StartupLogger.cs"/>
+        <Compile Include="..\Shared\DebugWarningDialog.cs" Link="DebugWarningDialog.cs"/>
+    </ItemGroup>
+    <ItemGroup>
+        <Reference Include="Rewired_Core">
+            <HintPath>..\..\libs\Rewired_Core.dll</HintPath>
+        </Reference>
+    </ItemGroup>
+</Project>
