@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.4.15 | 30 May 2026
+
+- Fixed Remove Fog, Wind and Rain not clearing the weather, and it returning after you teleport or enter a building
+
 ## 3.4.14 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

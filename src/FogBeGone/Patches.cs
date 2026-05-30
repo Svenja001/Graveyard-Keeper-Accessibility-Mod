@@ -27,6 +27,7 @@ public static class Patches
                 __instance._enabled = false;
                 __instance._cur_amount = 0f;
                 __instance.value = 0f;
+                __instance.controller?.value = 0f;
                 break;
 
             case SmartWeatherState.WeatherType.Wind:
@@ -35,6 +36,7 @@ public static class Patches
                 __instance._enabled = false;
                 __instance._cur_amount = 0f;
                 __instance.value = 0f;
+                __instance.controller?.value = 0f;
                 break;
 
             case SmartWeatherState.WeatherType.Rain:
@@ -43,6 +45,7 @@ public static class Patches
                 __instance._enabled = false;
                 __instance._cur_amount = 0f;
                 __instance.value = 0f;
+                __instance.controller?.value = 0f;
                 break;
         }
     }
