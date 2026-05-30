@@ -4,4 +4,4 @@
 
 - Initial release
 - Shows each zombie's work efficiency over its head, toggled with a key or controller button
-- Pick any mix of percentage, skulls, work speed and the zombie's current job
+- Pick any mix of percentage, skulls and the zombie's current job

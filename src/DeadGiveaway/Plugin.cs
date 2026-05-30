@@ -15,8 +15,8 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> StartEnabled { get; private set; }
     internal static ConfigEntry<bool> ShowPercentage { get; private set; }
     internal static ConfigEntry<bool> ShowSkulls { get; private set; }
-    internal static ConfigEntry<bool> ShowSpeed { get; private set; }
     internal static ConfigEntry<bool> ShowJob { get; private set; }
+    internal static ConfigEntry<string> Separator { get; private set; }
     internal static ConfigEntry<bool> ColourByEfficiency { get; private set; }
     internal static ConfigEntry<float> TextSize { get; private set; }
     internal static ConfigEntry<float> VerticalOffset { get; private set; }
@@ -52,23 +52,31 @@ public class Plugin : BaseUnityPlugin
 
     private void InitConfiguration()
     {
+        Debug = LocalizedConfig.Bind(Config, AdvancedSection, "Debug Logging", false, "debug_logging", order: 100);
+        DebugEnabled = Debug.Value;
+        Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
+
         StartEnabled = LocalizedConfig.Bind(Config, GeneralSection, "Start Enabled", true, "start_enabled", order: 100);
 
         ShowPercentage = LocalizedConfig.Bind(Config, GeneralSection, "Show Percentage", true, "show_percentage", order: 99);
 
         ShowSkulls = LocalizedConfig.Bind(Config, GeneralSection, "Show Skulls", false, "show_skulls", order: 98);
 
-        ShowSpeed = LocalizedConfig.Bind(Config, GeneralSection, "Show Speed", false, "show_speed", order: 97);
-
         ShowJob = LocalizedConfig.Bind(Config, GeneralSection, "Show Job", false, "show_job", order: 96);
 
-        ColourByEfficiency = LocalizedConfig.Bind(Config, GeneralSection, "Colour by Efficiency", true, "colour_by_efficiency", order: 95);
+        Separator = LocalizedConfig.Bind(Config, GeneralSection, "Separator", ",", "separator", order: 95);
 
-        TextSize = LocalizedConfig.Bind(Config, GeneralSection, "Text Size", 1f, "text_size", new AcceptableValueRange<float>(0.5f, 3f), order: 94);
+        ColourByEfficiency = LocalizedConfig.Bind(Config, GeneralSection, "Colour by Efficiency", true, "colour_by_efficiency", order: 94);
 
-        VerticalOffset = LocalizedConfig.Bind(Config, GeneralSection, "Vertical Offset", 30f, "vertical_offset", new AcceptableValueRange<float>(0f, 120f), order: 93);
+        TextSize = LocalizedConfig.Bind(Config, GeneralSection, "Text Size", 1f, "text_size", new AcceptableValueRange<float>(0.5f, 3f), order: 93);
 
-        HorizontalOffset = LocalizedConfig.Bind(Config, GeneralSection, "Horizontal Offset", 0f, "horizontal_offset", new AcceptableValueRange<float>(-120f, 120f), order: 92);
+        VerticalOffset = LocalizedConfig.Bind(Config, GeneralSection, "Vertical Offset", 30f, "vertical_offset", new AcceptableValueRange<float>(0f, 120f), order: 92);
+
+        HorizontalOffset = LocalizedConfig.Bind(Config, GeneralSection, "Horizontal Offset", 0f, "horizontal_offset", new AcceptableValueRange<float>(-120f, 120f), order: 91);
+
+        SnapToTenth(TextSize);
+        SnapToTenth(VerticalOffset);
+        SnapToTenth(HorizontalOffset);
 
         ToggleKeybind = LocalizedConfig.Bind(Config, ControlsSection, "Toggle Overlay Keybind", new KeyboardShortcut(KeyCode.B), "toggle_overlay_keybind", order: 100);
 
@@ -77,10 +85,6 @@ public class Plugin : BaseUnityPlugin
             new AcceptableValueList<string>(Enum.GetNames(typeof(GamePadButton))), order: 100);
         ToggleButton = ParseButton(ToggleControllerButton.Value);
         ToggleControllerButton.SettingChanged += (_, _) => ToggleButton = ParseButton(ToggleControllerButton.Value);
-
-        Debug = LocalizedConfig.Bind(Config, AdvancedSection, "Debug Logging", false, "debug_logging", order: 100);
-        DebugEnabled = Debug.Value;
-        Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
 
         CheckForUpdates = LocalizedConfig.Bind(Config, UpdatesSection, "Check for Updates", true, "check_for_updates", order: 100);
     }
@@ -98,5 +102,21 @@ public class Plugin : BaseUnityPlugin
     private static GamePadButton ParseButton(string name)
     {
         return Enum.TryParse(name, out GamePadButton button) ? button : GamePadButton.None;
+    }
+
+    // The F1 slider is continuous, so snap each change to the nearest 0.1 for clean steps.
+    private static void SnapToTenth(ConfigEntry<float> entry)
+    {
+        void Snap()
+        {
+            var snapped = Mathf.Round(entry.Value * 10f) / 10f;
+            if (!Mathf.Approximately(snapped, entry.Value))
+            {
+                entry.Value = snapped;
+            }
+        }
+
+        Snap();
+        entry.SettingChanged += (_, _) => Snap();
     }
 }

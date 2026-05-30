@@ -118,14 +118,14 @@ internal class ZombieEfficiencyOverlay : MonoBehaviour
         var showJob = Plugin.ShowJob.Value;
         var showPct = Plugin.ShowPercentage.Value;
         var showSkulls = Plugin.ShowSkulls.Value;
-        var showSpeed = Plugin.ShowSpeed.Value;
-        if (!showJob && !showPct && !showSkulls && !showSpeed)
+        if (!showJob && !showPct && !showSkulls)
         {
             HideAll();
             return;
         }
 
         var coloured = Plugin.ColourByEfficiency.Value;
+        var separator = SpacedSeparator(Plugin.Separator.Value);
         var scale = Plugin.TextSize.Value;
         var lift = new Vector3(Plugin.HorizontalOffset.Value, Plugin.VerticalOffset.Value, 0f);
 
@@ -145,7 +145,7 @@ internal class ZombieEfficiencyOverlay : MonoBehaviour
 
             var k = w.data.GetParam("working_k");
             var label = GetLabel(used++);
-            label.text = Compose(w, k, showJob, showPct, showSkulls, showSpeed, coloured);
+            label.text = Compose(w, k, showJob, showPct, showSkulls, coloured, separator);
             label.color = Color.white;
             label.MakePixelPerfect();
             label.transform.localScale = Vector3.one * scale;
@@ -193,47 +193,100 @@ internal class ZombieEfficiencyOverlay : MonoBehaviour
         }
     }
 
-    // Builds the stacked overhead text: job name on top, then each enabled number on its own line.
-    // The numbers carry the efficiency colour via inline NGUI tags; the job line stays plain white
-    // so a station name never reads as a low-efficiency warning. "(skull)" is the game's inline
-    // white-skull sprite. White skulls = round(k * 40), since working_k = white_skulls / 40.
-    private string Compose(WorldGameObject w, float k, bool showJob, bool showPct, bool showSkulls, bool showSpeed, bool coloured)
+    // Builds the overhead text in up to two lines. Top line is the enabled numbers joined by the
+    // separator; bottom line is always the job, when shown. The numbers carry the efficiency colour
+    // via one inline NGUI tag; the job line stays plain white so a station name never reads as a
+    // low-efficiency warning. "(skull)" is the game's inline white-skull sprite. White skulls =
+    // round(k * 40), since working_k = white_skulls / 40.
+    private string Compose(WorldGameObject w, float k, bool showJob, bool showPct, bool showSkulls, bool coloured, string separator)
     {
         _sb.Length = 0;
-        var tag = coloured ? "[" + NGUIText.EncodeColor(Grade(k)) + "]" : null;
 
-        if (showJob)
-        {
-            var bench = w.linked_workbench;
-            AddLine(bench ? GJL.L(bench.obj_id) : Lang.Get("label.idle"), null);
-        }
+        var any = false;
         if (showPct)
         {
-            AddLine(Mathf.RoundToInt(k * 100f) + "%", tag);
+            AppendNumber(ref any, separator, Mathf.RoundToInt(k * 100f) + "%");
         }
         if (showSkulls)
         {
-            AddLine("(skull)" + Mathf.RoundToInt(k * 40f), tag);
+            AppendNumber(ref any, separator, "(skull)" + Mathf.RoundToInt(k * 40f));
         }
-        if (showSpeed)
+
+        // Tint the whole number line at once; every value shares the same efficiency.
+        if (any && coloured)
         {
-            AddLine(k.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + "x", tag);
+            _sb.Insert(0, "[" + NGUIText.EncodeColor(Grade(k)) + "]");
+            _sb.Append("[-]");
+        }
+
+        if (showJob)
+        {
+            if (any) _sb.Append('\n');
+            var bench = w.linked_workbench;
+            _sb.Append(bench ? GJL.L(bench.obj_id) : Lang.Get("label.idle"));
+
+            // Porters: tack on what's in the backpack (or its crate) in brackets.
+            var carried = CarriedSummary(w);
+            if (carried != null)
+            {
+                _sb.Append(" (").Append(carried).Append(')');
+            }
         }
 
         return _sb.ToString();
     }
 
-    private void AddLine(string text, string colourTag)
+    // Names whatever a porter is hauling: the goods loose in its backpack, or the contents of a
+    // crate it's carrying. Returns null for a non-porter or an empty-handed one. Reads the worker's
+    // inventory directly so it never creates a backpack the way Worker.GetBackpack would.
+    private static string CarriedSummary(WorldGameObject w)
     {
-        if (_sb.Length > 0) _sb.Append('\n');
-        if (colourTag != null)
+        var inv = w.data?.inventory;
+        if (inv == null) return null;
+
+        Item backpack = null;
+        for (var i = 0; i < inv.Count; i++)
         {
-            _sb.Append(colourTag).Append(text).Append("[-]");
+            if (inv[i] != null && inv[i].id == Worker.BACKPACK_ID)
+            {
+                backpack = inv[i];
+                break;
+            }
         }
-        else
+        if (backpack?.inventory == null || backpack.inventory.Count == 0) return null;
+
+        // The backpack holds either loose goods or a single crate item. A crate carries no inventory
+        // of its own; its id names the set it hauls (e.g. vegetables), so naming each backpack item
+        // covers both cases. Use the bare name - GetItemName() bakes its own "(xN)" in, which would
+        // clash with the "Nx" count prefix.
+        var carried = backpack.inventory;
+        var result = string.Empty;
+        for (var i = 0; i < carried.Count; i++)
         {
-            _sb.Append(text);
+            var it = carried[i];
+            if (it?.definition == null) continue;
+            if (result.Length > 0) result += ", ";
+            if (it.value > 1) result += it.value + "x ";
+            result += it.definition.GetItemName();
         }
+        return result.Length == 0 ? null : result;
+    }
+
+    private void AppendNumber(ref bool any, string separator, string text)
+    {
+        if (any) _sb.Append(separator);
+        _sb.Append(text);
+        any = true;
+    }
+
+    // The player types just the symbol; the mod owns the spacing. Always a trailing space, plus a
+    // leading one unless it's punctuation that hugs the value before it (comma, full stop, and so on).
+    private static string SpacedSeparator(string raw)
+    {
+        raw = raw.Trim();
+        if (raw.Length == 0) return " ";
+        var leading = raw.Length == 1 && ",.;:!?".IndexOf(raw[0]) >= 0 ? "" : " ";
+        return leading + raw + " ";
     }
 
     // Red at 0%, yellow at 50%, green at 100% and above.
