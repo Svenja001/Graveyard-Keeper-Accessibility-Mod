@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8 | 30 May 2026
+
+- Added a hotkey (default R) to refill an alchemy mixing station with the ingredients you last used there, with an optional auto-fill when you open it
+
 ## 0.1.7 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

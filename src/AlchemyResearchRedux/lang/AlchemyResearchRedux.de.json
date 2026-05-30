@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "Debug-Logging",
   "cfg.debug_logging.desc": "Schreibt ausführliche Diagnoseausgaben zu Alchemierezepten in die BepInEx-Konsole. Für normales Spielen ausgeschaltet lassen.",
   "cfg.check_for_updates.name": "Auf Updates prüfen",
-  "cfg.check_for_updates.desc": "Zeigt im Hauptmenü einen Hinweis an, wenn auf NexusMods eine neuere Version dieses Mods verfügbar ist. Klicke auf den Hinweis, um die Modseite zu öffnen."
+  "cfg.check_for_updates.desc": "Zeigt im Hauptmenü einen Hinweis an, wenn auf NexusMods eine neuere Version dieses Mods verfügbar ist. Klicke auf den Hinweis, um die Modseite zu öffnen.",
+  "cfg.section.controls": "Steuerung",
+  "cfg.refill_last_mix.name": "Letzte Mischung erneut einfüllen",
+  "cfg.refill_last_mix.desc": "Drücke dies an einer Alchemie-Mischstation, um die Plätze mit den zuletzt dort verwendeten Zutaten aus deinem Inventar zu füllen. Funktioniert auch für Fehlmischungen; was du nicht mehr hast, bleibt leer.",
+  "cfg.auto_refill_on_open.name": "Beim Öffnen automatisch füllen",
+  "cfg.auto_refill_on_open.desc": "Füllt eine Alchemie-Mischstation beim Öffnen automatisch mit deinen zuletzt verwendeten Zutaten.",
+  "cfg.section.controller": "Controller",
+  "cfg.refill_controller_button.name": "Controllertaste: Letzte Mischung einfüllen",
+  "cfg.refill_controller_button.desc": "Controllertaste, die eine Alchemie-Mischstation mit deinen zuletzt verwendeten Zutaten füllt. Auf None lassen, um nur die Tastatur zu nutzen."
 }

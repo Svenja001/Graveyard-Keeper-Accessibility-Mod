@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "디버그 기록 남기기",
   "cfg.debug_logging.desc": "연금술 레시피에 대한 상세한 진단 정보를 BepInEx 콘솔에 기록합니다. 평소 게임 플레이 시에는 끄고 사용하세요.",
   "cfg.check_for_updates.name": "업데이트 확인",
-  "cfg.check_for_updates.desc": "넥서스모드에 이 모드의 최신 버전이 나오면 메인 메뉴에 알림을 띄웁니다. 알림을 누르면 모드 페이지가 열립니다."
+  "cfg.check_for_updates.desc": "넥서스모드에 이 모드의 최신 버전이 나오면 메인 메뉴에 알림을 띄웁니다. 알림을 누르면 모드 페이지가 열립니다.",
+  "cfg.section.controls": "조작",
+  "cfg.refill_last_mix.name": "마지막 조합 다시 채우기",
+  "cfg.refill_last_mix.desc": "연금술 조합대에서 이 키를 누르면 그곳에서 마지막으로 사용한 재료를 인벤토리에서 꺼내 칸에 채웁니다. 실패 조합에도 작동하며, 더 이상 없는 재료는 빈칸으로 둡니다.",
+  "cfg.auto_refill_on_open.name": "열 때 자동 채우기",
+  "cfg.auto_refill_on_open.desc": "연금술 조합대를 열면 마지막으로 사용한 재료로 자동으로 채웁니다.",
+  "cfg.section.controller": "컨트롤러",
+  "cfg.refill_controller_button.name": "마지막 조합 다시 채우기 (컨트롤러)",
+  "cfg.refill_controller_button.desc": "연금술 조합대를 마지막으로 사용한 재료로 채우는 컨트롤러 버튼입니다. None으로 두면 키보드 키만 사용합니다."
 }

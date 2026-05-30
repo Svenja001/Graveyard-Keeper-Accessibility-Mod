@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "Journal de débogage",
   "cfg.debug_logging.desc": "Écrit des diagnostics détaillés des recettes d'alchimie dans la console BepInEx. Laisse désactivé pour le jeu normal.",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",
-  "cfg.check_for_updates.desc": "Affiche un avis dans le menu principal lorsqu'une nouvelle version de ce mod est disponible sur NexusMods. Clique sur l'avis pour ouvrir la page du mod."
+  "cfg.check_for_updates.desc": "Affiche un avis dans le menu principal lorsqu'une nouvelle version de ce mod est disponible sur NexusMods. Clique sur l'avis pour ouvrir la page du mod.",
+  "cfg.section.controls": "Contrôles",
+  "cfg.refill_last_mix.name": "Recharger le dernier mélange",
+  "cfg.refill_last_mix.desc": "Appuie sur cette touche devant une station d'alchimie pour remplir les emplacements avec les ingrédients que tu y as utilisés en dernier, pris dans ton inventaire. Fonctionne aussi pour les mélanges ratés ; ce que tu n'as plus est laissé vide.",
+  "cfg.auto_refill_on_open.name": "Remplir à l'ouverture",
+  "cfg.auto_refill_on_open.desc": "Remplit automatiquement une station d'alchimie avec tes derniers ingrédients dès que tu l'ouvres.",
+  "cfg.section.controller": "Manette",
+  "cfg.refill_controller_button.name": "Bouton manette : Recharger le dernier mélange",
+  "cfg.refill_controller_button.desc": "Bouton de la manette qui remplit une station d'alchimie avec tes derniers ingrédients. Laisse sur None pour n'utiliser que la touche du clavier."
 }

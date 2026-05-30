@@ -13,5 +13,8 @@
         <Reference Include="Newtonsoft.Json">
             <HintPath>..\..\libs\Newtonsoft.Json.dll</HintPath>
         </Reference>
+        <Reference Include="Rewired_Core">
+            <HintPath>..\..\libs\Rewired_Core.dll</HintPath>
+        </Reference>
     </ItemGroup>
 </Project>

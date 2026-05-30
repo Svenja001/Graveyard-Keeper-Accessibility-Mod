@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "Logi debugowania",
   "cfg.debug_logging.desc": "Zapisuje szczegółowe informacje diagnostyczne o recepturach alchemii w konsoli BepInEx. Pozostaw wyłączone podczas normalnej rozgrywki.",
   "cfg.check_for_updates.name": "Sprawdź aktualizacje",
-  "cfg.check_for_updates.desc": "Wyświetla powiadomienie w menu głównym, gdy na NexusMods pojawi się nowsza wersja tego moda. Kliknij powiadomienie, aby otworzyć stronę moda."
+  "cfg.check_for_updates.desc": "Wyświetla powiadomienie w menu głównym, gdy na NexusMods pojawi się nowsza wersja tego moda. Kliknij powiadomienie, aby otworzyć stronę moda.",
+  "cfg.section.controls": "Sterowanie",
+  "cfg.refill_last_mix.name": "Uzupełnij ostatnią miksturę",
+  "cfg.refill_last_mix.desc": "Naciśnij to przy stacji alchemicznej, aby wypełnić pola składnikami, których ostatnio tam użyto, pobranymi z ekwipunku. Działa też dla nieudanych mikstur; czego już nie masz, pozostaje puste.",
+  "cfg.auto_refill_on_open.name": "Uzupełnij przy otwarciu",
+  "cfg.auto_refill_on_open.desc": "Automatycznie wypełnia stację alchemiczną ostatnio użytymi składnikami zaraz po jej otwarciu.",
+  "cfg.section.controller": "Kontroler",
+  "cfg.refill_controller_button.name": "Przycisk kontrolera: Uzupełnij ostatnią miksturę",
+  "cfg.refill_controller_button.desc": "Przycisk kontrolera, który wypełnia stację alchemiczną ostatnio użytymi składnikami. Pozostaw None, aby używać tylko klawisza klawiatury."
 }

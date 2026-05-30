@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "デバッグログ",
   "cfg.debug_logging.desc": "錬金術レシピの詳細な診断情報を BepInEx コンソールに記録します。通常プレイ時はオフのままにしてください。",
   "cfg.check_for_updates.name": "アップデートを確認",
-  "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。"
+  "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。",
+  "cfg.section.controls": "操作",
+  "cfg.refill_last_mix.name": "前回の調合を再投入",
+  "cfg.refill_last_mix.desc": "錬金の調合台でこれを押すと、前回そこで使った材料を所持品から各スロットに補充します。失敗の調合にも対応します。手持ちにない材料は空のままです。",
+  "cfg.auto_refill_on_open.name": "開いたときに自動補充",
+  "cfg.auto_refill_on_open.desc": "錬金の調合台を開いた瞬間に、前回使った材料を自動で補充します。",
+  "cfg.section.controller": "コントローラー",
+  "cfg.refill_controller_button.name": "前回の調合を再投入（コントローラー）",
+  "cfg.refill_controller_button.desc": "錬金の調合台を前回使った材料で補充するコントローラーのボタンです。None のままにするとキーボードのキーのみを使用します。"
 }

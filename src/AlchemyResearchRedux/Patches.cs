@@ -109,6 +109,11 @@ public static class Patches
 
         ResultPreviewDrawUnknown(resultContainer);
         CreateResultLabel(resultContainer);
+
+        if (Plugin.AutoRefillOnOpen.Value)
+        {
+            ReapplyLastMix(__instance);
+        }
     }
 
 
@@ -129,12 +134,25 @@ public static class Patches
     {
         if (!__instance.IsCraftAllowed()) return;
 
-        var craftDef = __instance.GetCraftDefinition(false, out _);
-
-        if (craftDef == null || !craftDef.id.StartsWith("mix:mf_alchemy")) return;
+        var objId = __instance.GetCrafteryWGO().obj_id;
+        if (objId is not (AlchemyWorkbench1ObjID or AlchemyWorkbench2ObjID)) return;
 
         var preset = __instance._current_preset;
         var ingredients = preset.GetSelectedItems();
+
+        // Remember what went in - including deliberate failure combos - so the player
+        // can drop the same ingredients back later instead of re-picking each time.
+        var ingredientIds = ingredients.Select(item => item.IsEmpty() ? string.Empty : item.id).ToList();
+        LastMix.Set(objId, ingredientIds);
+
+        if (Plugin.DebugEnabled)
+        {
+            Plugin.Log.LogInfo($"Remembered last mix for {objId}: [{string.Join(", ", ingredientIds)}]");
+        }
+
+        // The preview memory below only tracks real (exact-match) recipes.
+        var craftDef = __instance.GetCraftDefinition(false, out _);
+        if (craftDef == null || !craftDef.id.StartsWith("mix:mf_alchemy")) return;
 
         var result = craftDef.GetFirstRealOutput();
 
@@ -148,6 +166,24 @@ public static class Patches
         };
 
         AlchemyRecipe.AddRecipe(recipe);
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(BaseGUI), nameof(BaseGUI.Update))]
+    public static void BaseGUI_Update(BaseGUI __instance)
+    {
+        if (__instance is not MixedCraftGUI mixedCraftGui || !mixedCraftGui.is_shown_and_top) return;
+
+        var keyDown = Plugin.RefillLastMixKey.Value.IsDown();
+        var padDown = Plugin.RefillButton != GamePadButton.None
+                      && LazyInput.gamepad_active
+                      && LazyInput._gamepad != null
+                      && LazyInput._gamepad._rewired_bindings.TryGetValue(Plugin.RefillButton, out var actionId)
+                      && ReInput.players.GetPlayer(0).GetButtonDown(actionId);
+
+        if (!keyDown && !padDown) return;
+
+        ReapplyLastMix(mixedCraftGui);
     }
 
     [HarmonyPostfix]
@@ -170,6 +206,7 @@ public static class Patches
     public static void PlatformSpecific_SaveGame(SaveSlotData slot)
     {
         AlchemyRecipe.SaveRecipesToFile();
+        LastMix.SaveToFile();
     }
 
     [HarmonyPostfix]
@@ -177,6 +214,58 @@ public static class Patches
     public static void PatchLoadGame(SaveSlotData slot, PlatformSpecific.OnGameLoadedDelegate on_lodaded)
     {
         AlchemyRecipe.LoadRecipesFromFile();
+        LastMix.LoadFromFile();
+    }
+
+
+    private static void ReapplyLastMix(MixedCraftGUI gui)
+    {
+        var crafteryWgo = gui.GetCrafteryWGO();
+        if (!crafteryWgo) return;
+
+        var objId = crafteryWgo.obj_id;
+        if (objId is not (AlchemyWorkbench1ObjID or AlchemyWorkbench2ObjID)) return;
+
+        if (!LastMix.TryGet(objId, out var ingredientIds) || ingredientIds == null) return;
+
+        var preset = gui._current_preset;
+        var inventory = gui._multi_inventory;
+        if (!preset || inventory == null) return;
+
+        var cells = preset.items;
+        var slots = Math.Min(ingredientIds.Count, cells.Length);
+
+        for (var n = 0; n < slots; n++)
+        {
+            var id = ingredientIds[n];
+            if (string.IsNullOrEmpty(id)) continue;
+
+            var cell = cells[n];
+            if (!cell) continue;
+
+            // Already holding the right thing.
+            if (!cell.item.IsEmpty() && cell.item.id == id) continue;
+
+            var def = GameBalance.me.GetDataOrNull<ItemDefinition>(id);
+            if (def == null) continue;
+
+            // Universal ingredients fit any slot; the rest must match the slot type.
+            if (def.alch_type != ItemDefinition.AlchemyType.Universal && def.alch_type != (ItemDefinition.AlchemyType)(n + 1)) continue;
+
+            var item = new Item(id, 1) { equipped_as = ItemDefinition.EquipmentType.None };
+
+            // Skip the slot if the player no longer has the ingredient.
+            if (!inventory.RemoveItem(item)) continue;
+
+            if (!cell.item.IsEmpty())
+            {
+                inventory.AddItem(cell.item);
+            }
+
+            cell.DrawItem(item);
+        }
+
+        gui._craft_button.SetEnabled(gui.IsCraftAllowed());
     }
 
 

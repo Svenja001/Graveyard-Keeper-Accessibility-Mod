@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "Debug Logging",
   "cfg.debug_logging.desc": "Write verbose alchemy-recipe diagnostics to the BepInEx console. Leave off for normal play.",
   "cfg.check_for_updates.name": "Check for Updates",
-  "cfg.check_for_updates.desc": "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page."
+  "cfg.check_for_updates.desc": "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page.",
+  "cfg.section.controls": "Controls",
+  "cfg.refill_last_mix.name": "Refill Last Mix",
+  "cfg.refill_last_mix.desc": "Press this at an alchemy mixing station to fill the slots with the ingredients you last used there, pulled from your inventory. Works for failure mixes too; anything you no longer have is left empty.",
+  "cfg.auto_refill_on_open.name": "Auto-Refill On Open",
+  "cfg.auto_refill_on_open.desc": "Automatically fill an alchemy mixing station with your last-used ingredients as soon as you open it.",
+  "cfg.section.controller": "Controller",
+  "cfg.refill_controller_button.name": "Refill Last Mix Controller Button",
+  "cfg.refill_controller_button.desc": "Controller button that refills an alchemy mixing station with your last-used ingredients. Set to None to use only the keyboard key."
 }

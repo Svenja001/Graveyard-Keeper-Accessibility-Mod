@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "Log di debug",
   "cfg.debug_logging.desc": "Scrive diagnostiche dettagliate delle ricette di alchimia nella console BepInEx. Lascia disattivato per il gioco normale.",
   "cfg.check_for_updates.name": "Controlla aggiornamenti",
-  "cfg.check_for_updates.desc": "Mostra un avviso nel menu principale quando è disponibile una nuova versione di questo mod su NexusMods. Clicca sull'avviso per aprire la pagina del mod."
+  "cfg.check_for_updates.desc": "Mostra un avviso nel menu principale quando è disponibile una nuova versione di questo mod su NexusMods. Clicca sull'avviso per aprire la pagina del mod.",
+  "cfg.section.controls": "Controlli",
+  "cfg.refill_last_mix.name": "Ricarica ultima miscela",
+  "cfg.refill_last_mix.desc": "Premi questo a una stazione di alchimia per riempire gli slot con gli ingredienti che hai usato lì l'ultima volta, presi dal tuo inventario. Funziona anche con le miscele fallite; ciò che non hai più resta vuoto.",
+  "cfg.auto_refill_on_open.name": "Riempi all'apertura",
+  "cfg.auto_refill_on_open.desc": "Riempie automaticamente una stazione di alchimia con i tuoi ultimi ingredienti appena la apri.",
+  "cfg.section.controller": "Controller",
+  "cfg.refill_controller_button.name": "Pulsante controller: Ricarica ultima miscela",
+  "cfg.refill_controller_button.desc": "Pulsante del controller che riempie una stazione di alchimia con i tuoi ultimi ingredienti. Lascia su None per usare solo il tasto della tastiera."
 }

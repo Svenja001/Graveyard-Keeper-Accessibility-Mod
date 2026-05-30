@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "调试日志",
   "cfg.debug_logging.desc": "向 BepInEx 控制台输出炼金配方相关的详细诊断信息。普通游玩时请关闭。",
   "cfg.check_for_updates.name": "检查更新",
-  "cfg.check_for_updates.desc": "当 NexusMods 上有此模组的更新版本时，在主菜单显示提示。点击提示可打开模组页面。"
+  "cfg.check_for_updates.desc": "当 NexusMods 上有此模组的更新版本时，在主菜单显示提示。点击提示可打开模组页面。",
+  "cfg.section.controls": "操作",
+  "cfg.refill_last_mix.name": "重新装入上次配方",
+  "cfg.refill_last_mix.desc": "在炼金调制台按下此键，即可用你上次在该处使用的材料从背包中装入各槽位。对失败配方同样有效；已经没有的材料会留空。",
+  "cfg.auto_refill_on_open.name": "打开时自动装入",
+  "cfg.auto_refill_on_open.desc": "打开炼金调制台时，自动装入你上次使用的材料。",
+  "cfg.section.controller": "手柄",
+  "cfg.refill_controller_button.name": "手柄按键：重新装入上次配方",
+  "cfg.refill_controller_button.desc": "用你上次使用的材料装满炼金调制台的手柄按键。保持为 None 则仅使用键盘按键。"
 }

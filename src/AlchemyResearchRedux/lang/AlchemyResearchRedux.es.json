@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "Registro de depuración",
   "cfg.debug_logging.desc": "Escribe diagnósticos detallados de las recetas de alquimia en la consola de BepInEx. Déjalo desactivado para el juego normal.",
   "cfg.check_for_updates.name": "Buscar actualizaciones",
-  "cfg.check_for_updates.desc": "Muestra un aviso en el menú principal cuando hay una versión más nueva de este mod en NexusMods. Haz clic en el aviso para abrir la página del mod."
+  "cfg.check_for_updates.desc": "Muestra un aviso en el menú principal cuando hay una versión más nueva de este mod en NexusMods. Haz clic en el aviso para abrir la página del mod.",
+  "cfg.section.controls": "Controles",
+  "cfg.refill_last_mix.name": "Rellenar última mezcla",
+  "cfg.refill_last_mix.desc": "Pulsa esto en una estación de alquimia para rellenar las casillas con los ingredientes que usaste allí por última vez, tomados de tu inventario. También funciona con mezclas fallidas; lo que ya no tengas se deja vacío.",
+  "cfg.auto_refill_on_open.name": "Rellenar al abrir",
+  "cfg.auto_refill_on_open.desc": "Rellena automáticamente una estación de alquimia con tus últimos ingredientes en cuanto la abres.",
+  "cfg.section.controller": "Mando",
+  "cfg.refill_controller_button.name": "Botón de mando: Rellenar última mezcla",
+  "cfg.refill_controller_button.desc": "Botón del mando que rellena una estación de alquimia con tus últimos ingredientes. Déjalo en None para usar solo la tecla del teclado."
 }

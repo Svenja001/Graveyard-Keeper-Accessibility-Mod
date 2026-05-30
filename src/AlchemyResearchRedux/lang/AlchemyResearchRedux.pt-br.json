@@ -4,5 +4,13 @@
   "cfg.debug_logging.name": "Log de depuração",
   "cfg.debug_logging.desc": "Escreve diagnósticos detalhados de receitas de alquimia no console do BepInEx. Mantenha desativado para jogo normal.",
   "cfg.check_for_updates.name": "Verificar atualizações",
-  "cfg.check_for_updates.desc": "Mostra um aviso no menu principal quando há uma nova versão deste mod no NexusMods. Clique no aviso para abrir a página do mod."
+  "cfg.check_for_updates.desc": "Mostra um aviso no menu principal quando há uma nova versão deste mod no NexusMods. Clique no aviso para abrir a página do mod.",
+  "cfg.section.controls": "Controles",
+  "cfg.refill_last_mix.name": "Reabastecer última mistura",
+  "cfg.refill_last_mix.desc": "Pressione isto em uma bancada de alquimia para preencher os espaços com os ingredientes que você usou ali por último, tirados do seu inventário. Também funciona com misturas que falham; o que você não tem mais fica vazio.",
+  "cfg.auto_refill_on_open.name": "Reabastecer ao abrir",
+  "cfg.auto_refill_on_open.desc": "Preenche automaticamente uma bancada de alquimia com seus últimos ingredientes assim que você a abre.",
+  "cfg.section.controller": "Controle",
+  "cfg.refill_controller_button.name": "Botão do controle: Reabastecer última mistura",
+  "cfg.refill_controller_button.desc": "Botão do controle que reabastece uma bancada de alquimia com seus últimos ingredientes. Deixe em None para usar apenas a tecla do teclado."
 }
