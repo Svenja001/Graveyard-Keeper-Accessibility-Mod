@@ -66,8 +66,15 @@ internal static class GUIAccessibility
 
     private static void DiscoverElements(BaseGUI gui)
     {
-        foreach (var button in gui.GetComponentsInChildren<UIButton>(true))
+        var buttons = gui.GetComponentsInChildren<UIButton>(true);
+        Plugin.Log.LogInfo($"[DiscoverElements] Found {buttons.Length} UIButton components in {gui.GetType().Name}");
+
+        foreach (var button in buttons)
         {
+            // Skip banner and promotional buttons
+            if (button.name.Contains("banner") || button.name.Contains("gk2") || button.name.Contains("Banner"))
+                continue;
+
             var slider = button.transform.parent?.GetComponent<UISlider>();
             if (slider != null) continue;
 
@@ -98,9 +105,19 @@ internal static class GUIAccessibility
             }
 
             var ownLabel = button.GetComponentInChildren<UILabel>();
-            if (ownLabel == null) continue;
-            var text = ScreenReader.StripNguiCodes(ownLabel.text);
-            if (string.IsNullOrWhiteSpace(text) || text.Length <= 1) continue;
+            string text = null;
+
+            if (ownLabel != null)
+            {
+                text = ScreenReader.StripNguiCodes(ownLabel.text);
+            }
+
+            // Fallback: use button name if no UILabel found or label is empty
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                text = button.name;
+                if (string.IsNullOrWhiteSpace(text) || text.Length <= 1) continue;
+            }
 
             Elements.Add(new GUIElement
             {
@@ -130,6 +147,38 @@ internal static class GUIAccessibility
                 ValueLabel = counter
             });
         }
+
+        // Fallback: Look for interactive UILabel elements (like save slots) that don't have UIButton
+        var allLabels = gui.GetComponentsInChildren<UILabel>(true);
+        foreach (var label in allLabels)
+        {
+            if (string.IsNullOrWhiteSpace(label.text)) continue;
+            var text = ScreenReader.StripNguiCodes(label.text);
+            if (string.IsNullOrWhiteSpace(text) || text.Length <= 1) continue;
+
+            // Skip labels that are already part of discovered elements
+            if (Elements.Any(e => e.Go == label.gameObject)) continue;
+
+            // Only add if this label or its parent seems clickable/interactive
+            var labelGo = label.gameObject;
+            var parent = label.transform.parent;
+
+            // Check if parent is likely a clickable container (has a name suggesting it's interactive)
+            if (parent != null && (parent.name.Contains("slot") || parent.name.Contains("Slot") ||
+                                  parent.name.Contains("save") || parent.name.Contains("Save")))
+            {
+                // Add the parent GameObject as the interactive element (deduplicate by label text)
+                if (!Elements.Any(e => e.Go == parent.gameObject) && !Elements.Any(e => e.Label == text))
+                {
+                    Elements.Add(new GUIElement
+                    {
+                        Go = parent.gameObject,
+                        Label = text,
+                        Type = ElementType.Button
+                    });
+                }
+            }
+        }
     }
 
     internal static List<GUIElement> GetActiveElements()
@@ -153,15 +202,43 @@ internal static class GUIAccessibility
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
         var elem = active[SelectedIndex];
+
         if (elem.Type == ElementType.Button)
         {
+            // Try to find a UIButton component (direct, in children, or parent)
             var button = elem.Go.GetComponent<UIButton>();
-            if (button == null) return;
-            button.SetState(UIButtonColor.State.Pressed, false);
-            elem.Go.SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
-            elem.Go.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
-            elem.Go.SendMessage("OnClick", SendMessageOptions.DontRequireReceiver);
-            button.SetState(UIButtonColor.State.Normal, false);
+            if (button == null)
+                button = elem.Go.GetComponentInChildren<UIButton>();
+            if (button == null)
+                button = elem.Go.GetComponentInParent<UIButton>();
+
+            if (button != null)
+            {
+                button.SetState(UIButtonColor.State.Pressed, false);
+                button.gameObject.SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                button.gameObject.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                button.gameObject.SendMessage("OnClick", SendMessageOptions.DontRequireReceiver);
+                button.SetState(UIButtonColor.State.Normal, false);
+            }
+            else
+            {
+                // Fallback: Send messages to the element itself and its children
+                elem.Go.SendMessage("OnSlotSelected", SendMessageOptions.DontRequireReceiver);
+                elem.Go.SendMessage("Select", SendMessageOptions.DontRequireReceiver);
+                elem.Go.SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                elem.Go.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                elem.Go.SendMessage("OnClick", SendMessageOptions.DontRequireReceiver);
+
+                foreach (var child in elem.Go.GetComponentsInChildren<Transform>())
+                {
+                    if (child == elem.Go.transform) continue;
+                    child.gameObject.SendMessage("OnSlotSelected", SendMessageOptions.DontRequireReceiver);
+                    child.gameObject.SendMessage("Select", SendMessageOptions.DontRequireReceiver);
+                    child.gameObject.SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                    child.gameObject.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                    child.gameObject.SendMessage("OnClick", SendMessageOptions.DontRequireReceiver);
+                }
+            }
         }
     }
 
@@ -207,7 +284,20 @@ internal static class GUIAccessibility
 
     private static void AdjustSlider(GUIElement elem, float delta)
     {
-        // TODO: SmartSlider value changes don't persist — needs investigation
+        var smartSlider = elem.Slider.GetComponent<SmartSlider>();
+        if (smartSlider != null)
+        {
+            int cur = smartSlider.value;
+            int step = Mathf.RoundToInt(Mathf.Abs(delta) * 100);
+            int next = Mathf.Clamp(cur + (delta > 0 ? step : -step), 0, 100);
+            elem.Slider.value = next / 100f;
+            smartSlider.OnSliderChanged();
+        }
+        else
+        {
+            elem.Slider.value = Mathf.Clamp01(elem.Slider.value + delta);
+        }
+
         ScreenReader.Say(elem.ReadLabel());
     }
 

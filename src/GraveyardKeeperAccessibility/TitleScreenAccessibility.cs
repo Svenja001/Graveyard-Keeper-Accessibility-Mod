@@ -1,0 +1,174 @@
+namespace GraveyardKeeperAccessibility;
+
+internal static class TitleScreenAccessibility
+{
+    internal static TitleScreen _currentScreen;
+    internal static readonly List<GUIElement> Elements = new();
+    internal static int SelectedIndex = -1;
+    private static bool _announced;
+
+    internal static bool HasActiveScreen => _currentScreen != null;
+
+    internal static void OnScreenOpened(TitleScreen screen)
+    {
+        if (screen == _currentScreen) return;
+        if (screen == null) return;
+
+        _currentScreen = screen;
+        _announced = false;
+        ScreenReader.ClearMenuContext();
+        Elements.Clear();
+        SelectedIndex = -1;
+
+        DiscoverElements(screen);
+
+        var activeCount = Elements.Count(e => e.Go != null && e.Go.activeInHierarchy);
+        Plugin.Log.LogInfo($"Title screen opened, {activeCount} elements discovered");
+
+        if (activeCount > 0 || !_announced)
+        {
+            _announced = true;
+            ScreenReader.Say("Title Screen");
+        }
+    }
+
+    internal static void OnScreenClosed(TitleScreen screen)
+    {
+        if (screen != _currentScreen) return;
+
+        Plugin.Log.LogInfo("Title screen closed, switching to GUI accessibility");
+        _currentScreen = null;
+        _announced = false;
+        ScreenReader.ClearMenuContext();
+        Elements.Clear();
+        SelectedIndex = -1;
+    }
+
+    private static void DiscoverElements(TitleScreen screen)
+    {
+        if (screen == null) return;
+
+        try
+        {
+            var buttons = screen.GetComponentsInChildren<UIButton>(true);
+            if (buttons == null || buttons.Length == 0) return;
+
+            foreach (var button in buttons)
+            {
+                if (button == null) continue;
+                var ownLabel = button.GetComponentInChildren<UILabel>();
+                if (ownLabel == null) continue;
+                var text = ScreenReader.StripNguiCodes(ownLabel.text);
+                if (string.IsNullOrWhiteSpace(text) || text.Length <= 1) continue;
+
+                Elements.Add(new GUIElement
+                {
+                    Go = button.gameObject,
+                    Label = text,
+                    Type = ElementType.Button
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"Error discovering title screen elements: {ex.Message}");
+        }
+    }
+
+    internal static List<GUIElement> GetActiveElements()
+    {
+        return Elements.Where(e => e.Go != null && e.Go.activeInHierarchy).ToList();
+    }
+
+    internal static void SelectIndex(int index)
+    {
+        var active = GetActiveElements();
+        if (active.Count == 0) return;
+
+        SelectedIndex = index;
+        var elem = active[SelectedIndex];
+        ScreenReader.Say(elem.ReadLabel());
+    }
+
+    internal static void ActivateSelected()
+    {
+        var active = GetActiveElements();
+        if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
+
+        var elem = active[SelectedIndex];
+        if (elem.Type == ElementType.Button)
+        {
+            var button = elem.Go.GetComponent<UIButton>();
+            if (button == null) return;
+            button.SetState(UIButtonColor.State.Pressed, false);
+            elem.Go.SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+            elem.Go.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+            elem.Go.SendMessage("OnClick", SendMessageOptions.DontRequireReceiver);
+            button.SetState(UIButtonColor.State.Normal, false);
+        }
+    }
+
+    internal static void CheckForTitleScreen()
+    {
+        try
+        {
+            // If a BaseGUI is visible (like MainMenuGUI), close title screen immediately
+            // This handles the case where TitleScreen component is shown as part of MainMenuGUI
+            var hasBaseGUI = GUIAccessibility.HasActiveGUI;
+            if (hasBaseGUI && _currentScreen != null)
+            {
+                OnScreenClosed(_currentScreen);
+                return;
+            }
+
+            var screen = UnityEngine.Object.FindObjectOfType<TitleScreen>();
+
+            // Check both that it exists and that it's actually visible (using is_shown property)
+            bool isVisible = false;
+            if (screen != null && screen.gameObject.activeInHierarchy)
+            {
+                try
+                {
+                    // TitleScreen likely has is_shown property like BaseGUI
+                    var isShownProp = screen.GetType().GetProperty("is_shown");
+                    if (isShownProp != null)
+                    {
+                        isVisible = (bool)isShownProp.GetValue(screen);
+                        if (_currentScreen != null && !isVisible)
+                            Plugin.Log.LogInfo($"[TitleScreen] is_shown = {isVisible}, closing screen");
+                    }
+                    else
+                    {
+                        // No is_shown property - check if canvas is enabled instead
+                        var canvas = screen.GetComponent<CanvasGroup>();
+                        if (canvas != null)
+                            isVisible = canvas.alpha > 0;
+                        else
+                            isVisible = true; // Fallback if no visibility tracking found
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning($"Error checking title screen visibility: {ex.Message}");
+                    // If property access fails, assume it's visible if gameObject is active
+                    isVisible = true;
+                }
+            }
+
+            if (isVisible)
+            {
+                if (_currentScreen != screen)
+                    OnScreenOpened(screen);
+            }
+            else
+            {
+                if (_currentScreen != null)
+                    OnScreenClosed(_currentScreen);
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"Error in CheckForTitleScreen: {ex.Message}");
+        }
+    }
+}

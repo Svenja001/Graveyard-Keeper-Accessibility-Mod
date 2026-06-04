@@ -29,21 +29,59 @@ public class Plugin : BaseUnityPlugin
             if (Input.GetKeyDown(KeyCode.Escape))
                 guiCheck = true;
 
+            // Check for GUI first
             if (guiCheck)
+            {
                 GUIAccessibility.CheckForNewGUI();
+            }
+
+            // Only check title screen if no BaseGUI is active
+            // This prevents the infinite loop of title screen opening/closing
+            if (!GUIAccessibility.HasActiveGUI)
+            {
+                TitleScreenAccessibility.CheckForTitleScreen();
+            }
+            else if (TitleScreenAccessibility.HasActiveScreen)
+            {
+                // If a GUI appeared while title screen was active, close title screen
+                TitleScreenAccessibility.OnScreenClosed(TitleScreenAccessibility._currentScreen);
+            }
+
+            // Title screen has priority - but keep checking if it's still active
+            if (TitleScreenAccessibility.HasActiveScreen)
+            {
+                var active = TitleScreenAccessibility.GetActiveElements();
+                var count = active.Count;
+
+                // Still handle input if there are elements
+                if (count > 0)
+                {
+                    var idx = TitleScreenAccessibility.SelectedIndex;
+
+                    if (Input.GetKeyDown(KeyCode.DownArrow))
+                        TitleScreenAccessibility.SelectIndex((idx + 1) % count);
+                    else if (Input.GetKeyDown(KeyCode.UpArrow))
+                        TitleScreenAccessibility.SelectIndex((idx - 1 + count) % count);
+                    else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+                    {
+                        TitleScreenAccessibility.ActivateSelected();
+                    }
+                }
+                return;
+            }
 
             if (!GUIAccessibility.HasActiveGUI) return;
 
-            var active = GUIAccessibility.GetActiveElements();
-            var count = active.Count;
-            if (count == 0) return;
+            var activeGUI = GUIAccessibility.GetActiveElements();
+            var countGUI = activeGUI.Count;
+            if (countGUI == 0) return;
 
-            var idx = GUIAccessibility.SelectedIndex;
+            var idxGUI = GUIAccessibility.SelectedIndex;
 
             if (Input.GetKeyDown(KeyCode.DownArrow))
-                GUIAccessibility.SelectIndex((idx + 1) % count);
+                GUIAccessibility.SelectIndex((idxGUI + 1) % countGUI);
             else if (Input.GetKeyDown(KeyCode.UpArrow))
-                GUIAccessibility.SelectIndex((idx - 1 + count) % count);
+                GUIAccessibility.SelectIndex((idxGUI - 1 + countGUI) % countGUI);
             else if (Input.GetKeyDown(KeyCode.LeftArrow))
                 GUIAccessibility.AdjustLeft();
             else if (Input.GetKeyDown(KeyCode.RightArrow))

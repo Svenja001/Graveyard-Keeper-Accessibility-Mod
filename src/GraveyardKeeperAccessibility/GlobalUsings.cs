@@ -5,6 +5,7 @@ global using System.Reflection;
 global using System.Runtime.InteropServices;
 global using System.Text.RegularExpressions;
 global using BepInEx;
+global using BepInEx.Bootstrap;
 global using BepInEx.Configuration;
 global using BepInEx.Logging;
 global using HarmonyLib;
