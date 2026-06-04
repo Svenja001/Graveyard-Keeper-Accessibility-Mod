@@ -8,6 +8,7 @@ public class Plugin : BaseUnityPlugin
     private void Awake()
     {
         Log = Logger;
+        Log.LogInfo("[PLUGIN_INIT] NEW CODE PATH EXECUTING");
         ScreenReader.Init(Log);
 
         var harmony = new HarmonyLib.Harmony(MyPluginInfo.PLUGIN_GUID);
@@ -15,9 +16,8 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.UIButtonColor_OnHover_Postfix),
             typeof(UIButtonColor), "OnHover", new[] { typeof(bool) });
 
-        // Try to patch dialogue UI via reflection - BubbleUI might be in game assembly
-        TryPatchByName(harmony, typeof(Patches), nameof(Patches.BubbleUI_ShowBubble_Postfix),
-            "BubbleUI", "ShowBubble", new[] { typeof(string) });
+        // Search for any class with a Say method and patch it
+        SearchAndPatchSayMethods(harmony);
 
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
@@ -155,6 +155,78 @@ public class Plugin : BaseUnityPlugin
             Log.LogWarning($"Failed to find and patch {targetTypeName}.{targetMethod}: {ex.Message}");
             return false;
         }
+    }
+
+
+    private static void SearchAndPatchSayMethods(HarmonyLib.Harmony harmony)
+    {
+        try
+        {
+            var gameAssembly = typeof(UIButtonColor).Assembly;
+            var allTypes = gameAssembly.GetTypes();
+
+            Log.LogInfo("Searching for Say methods...");
+            int count = 0;
+
+            foreach (var type in allTypes)
+            {
+                try
+                {
+                    var sayMethods = type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                                                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static)
+                        .Where(m => m.Name == "Say" && m.DeclaringType == type);
+
+                    foreach (var method in sayMethods)
+                    {
+                        var paramStr = string.Join(", ", method.GetParameters().Select(p => p.ParameterType.Name));
+                        Log.LogInfo($"Found Say method: {type.Name}.Say({paramStr})");
+
+                        try
+                        {
+                            var prefix = new HarmonyMethod(typeof(Patches).GetMethod(nameof(Patches.OnSayMethod)));
+                            harmony.Patch(method, prefix: prefix);
+                            count++;
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
+            Log.LogInfo($"Patched {count} Say methods");
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"Failed to search for Say methods: {ex.Message}");
+        }
+    }
+
+    private static bool LogDialogueCall(string __methodName, object[] __args)
+    {
+        try
+        {
+            var argStr = __args != null && __args.Length > 0
+                ? string.Join(", ", __args.Take(3).Select(a => a?.ToString() ?? "null"))
+                : "no args";
+            Log.LogInfo($"[DIALOGUE METHOD] {__methodName}({argStr})");
+
+            // If this looks like it might contain dialogue text, try to speak it
+            if (__args != null && __args.Length > 0)
+            {
+                var firstArg = __args[0];
+                if (firstArg is string text && !string.IsNullOrWhiteSpace(text))
+                {
+                    var cleanedText = ScreenReader.StripNguiCodes(text).Trim();
+                    if (!string.IsNullOrEmpty(cleanedText))
+                    {
+                        Log.LogInfo($"[DIALOGUE TEXT] {cleanedText}");
+                        ScreenReader.Say(cleanedText);
+                    }
+                }
+            }
+        }
+        catch { }
+        return true;
     }
 
     private void OnDestroy()

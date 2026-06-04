@@ -59,6 +59,27 @@ internal static class GUIAccessibility
         if (!string.IsNullOrEmpty(textContent))
             Plugin.Log.LogInfo($"[GUI TEXT] {textContent}");
 
+        // Special handling for dialogue GUIs
+        if (guiName.Contains("Dialog") || guiName.Contains("Subtitle") || guiName.Contains("Caption"))
+        {
+            var dialogLabels = allLabels.Where(l => l.gameObject.activeInHierarchy && !string.IsNullOrWhiteSpace(l.text))
+                .Select(l => ScreenReader.StripNguiCodes(l.text).Trim())
+                .Where(t => !string.IsNullOrEmpty(t) && t.Length > 1)
+                .ToList();
+
+            // Skip header/buttons and get the main dialogue content
+            var mainDialogue = dialogLabels.FirstOrDefault(t => t.Length > 10 && !t.StartsWith("X") && !t.Equals("Ja", StringComparison.OrdinalIgnoreCase) && !t.Equals("Nein", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(mainDialogue))
+            {
+                Plugin.Log.LogInfo($"[DIALOGUE CONTENT] {mainDialogue}");
+                ScreenReader.Say(mainDialogue);
+                return;
+            }
+        }
+
+        // Check if any new text appeared on screen (for subtitle/dialogue boxes)
+        TryReadNewDialogueText(allLabels);
+
         ScreenReader.Say(guiName);
     }
 

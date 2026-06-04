@@ -7,18 +7,69 @@ internal static class Patches
         GUIAccessibility.OnHover(__instance, isOver);
     }
 
-    // Hook into dialogue display to capture dialogue text for TTS
-    // The game uses BubbleUI to display dialogue bubbles
-    public static void BubbleUI_ShowBubble_Postfix(string str)
+    // Hook into any Say method to capture dialogue
+    public static void OnSayMethod(object[] __args)
     {
-        if (string.IsNullOrWhiteSpace(str)) return;
-
-        // Clean up dialogue text and speak it
-        var cleanedText = ScreenReader.StripNguiCodes(str).Trim();
-        if (!string.IsNullOrEmpty(cleanedText))
+        try
         {
-            Plugin.Log.LogInfo($"[DIALOGUE] {cleanedText}");
-            ScreenReader.Say(cleanedText);
+            if (__args == null || __args.Length == 0) return;
+
+            Plugin.Log.LogInfo($"[SAY_METHOD] Called with {__args.Length} args");
+
+            // Log all arguments
+            for (int i = 0; i < __args.Length && i < 3; i++)
+            {
+                if (__args[i] is string text)
+                {
+                    Plugin.Log.LogInfo($"  Arg[{i}] (string): {text}");
+                }
+                else
+                {
+                    Plugin.Log.LogInfo($"  Arg[{i}] ({__args[i]?.GetType().Name}): {__args[i]}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[SAY_METHOD] Error: {ex.Message}");
+        }
+    }
+
+    // Hook into DialogueUGUI.OnSubtitlesRequest to capture and speak dialogue
+    // Handles any method signature by using __args
+    public static void OnSubtitlesRequest_Prefix(object __instance, object[] __args)
+    {
+        try
+        {
+            Plugin.Log.LogInfo($"[DIALOGUE_HOOK] OnSubtitlesRequest called with {__args?.Length ?? 0} args");
+
+            // Log all arguments for debugging
+            if (__args != null)
+            {
+                for (int i = 0; i < __args.Length && i < 5; i++)
+                {
+                    Plugin.Log.LogInfo($"  Arg[{i}]: {__args[i]?.GetType().Name} = '{__args[i]}'");
+                }
+            }
+
+            // Try to find and speak the dialogue text from the arguments
+            foreach (var arg in __args ?? new object[0])
+            {
+                if (arg is string text && !string.IsNullOrWhiteSpace(text))
+                {
+                    var cleanedText = ScreenReader.StripNguiCodes(text).Trim();
+                    if (!string.IsNullOrEmpty(cleanedText) && cleanedText.Length > 2)
+                    {
+                        Plugin.Log.LogInfo($"[DIALOGUE] {cleanedText}");
+                        ScreenReader.Say(cleanedText);
+                        return;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[DIALOGUE_HOOK] Error: {ex.Message}");
         }
     }
 }
