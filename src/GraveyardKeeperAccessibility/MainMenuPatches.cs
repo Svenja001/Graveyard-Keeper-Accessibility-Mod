@@ -66,6 +66,14 @@ internal static class GUIAccessibility
 
     private static void DiscoverElements(BaseGUI gui)
     {
+        // Dump entire hierarchy for debugging
+        if (gui.GetType().Name == "SaveSlotsMenuGUI")
+        {
+            Plugin.Log.LogInfo($"[DiscoverElements] ===== SaveSlotsMenuGUI Hierarchy =====");
+            DumpHierarchy(gui.gameObject, 0);
+            Plugin.Log.LogInfo($"[DiscoverElements] ===== End Hierarchy =====");
+        }
+
         var buttons = gui.GetComponentsInChildren<UIButton>(true);
         Plugin.Log.LogInfo($"[DiscoverElements] Found {buttons.Length} UIButton components in {gui.GetType().Name}");
         Plugin.Log.LogInfo($"[DiscoverElements] Button names: {string.Join(", ", buttons.Select(b => b.name))}");
@@ -197,11 +205,24 @@ internal static class GUIAccessibility
 
             if (isClickable)
             {
-                // Add the label GameObject itself as the interactive element (deduplicate by label text)
+                // Add the label GameObject itself as the interactive element
                 // Use the parent if available, otherwise use the label's GameObject
                 var elementGO = parent?.gameObject ?? label.gameObject;
-                if (!Elements.Any(e => e.Go == elementGO) && !Elements.Any(e => e.Label == text))
+
+                // Check if we already have this element
+                var existing = Elements.FirstOrDefault(e => e.Label == text);
+                if (existing != null)
                 {
+                    // Replace inactive element with active one
+                    if (!existing.Go.activeInHierarchy && elementGO.activeInHierarchy)
+                    {
+                        Plugin.Log.LogInfo($"[DiscoverElements] Replacing inactive '{text}' with active version");
+                        existing.Go = elementGO;
+                    }
+                }
+                else if (!Elements.Any(e => e.Go == elementGO))
+                {
+                    // Add new element
                     Plugin.Log.LogInfo($"[DiscoverElements] Adding label as button: '{text}' from parent: {parent?.name ?? "null"}");
                     Elements.Add(new GUIElement
                     {
@@ -221,6 +242,35 @@ internal static class GUIAccessibility
     internal static List<GUIElement> GetActiveElements()
     {
         return Elements.Where(e => e.Go != null && e.Go.activeInHierarchy).ToList();
+    }
+
+    private static void DumpHierarchy(GameObject go, int depth, int maxDepth = 8)
+    {
+        if (depth > maxDepth) return;
+
+        string indent = new string(' ', depth * 2);
+        var active = go.activeInHierarchy ? "✓" : "✗";
+        var selfActive = go.activeSelf ? "●" : "○";
+
+        Plugin.Log.LogInfo($"{indent}[{active}{selfActive}] {go.name}");
+
+        // Log UILabel text if present
+        var label = go.GetComponent<UILabel>();
+        if (label != null && !string.IsNullOrEmpty(label.text))
+        {
+            Plugin.Log.LogInfo($"{indent}  └─ UILabel: \"{ScreenReader.StripNguiCodes(label.text)}\"");
+        }
+
+        // Log UIButton if present
+        if (go.GetComponent<UIButton>() != null)
+        {
+            Plugin.Log.LogInfo($"{indent}  └─ UIButton");
+        }
+
+        foreach (Transform child in go.transform)
+        {
+            DumpHierarchy(child.gameObject, depth + 1, maxDepth);
+        }
     }
 
     internal static void SelectIndex(int index)
