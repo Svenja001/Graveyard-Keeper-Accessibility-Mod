@@ -181,8 +181,7 @@ internal static class GUIAccessibility
         }
         else if (elem.Type == ElementType.Slider && elem.Slider != null)
         {
-            elem.Slider.value = Mathf.Clamp01(elem.Slider.value - 0.05f);
-            ScreenReader.Say(elem.ReadLabel());
+            AdjustSlider(elem, -0.05f);
         }
     }
 
@@ -202,9 +201,14 @@ internal static class GUIAccessibility
         }
         else if (elem.Type == ElementType.Slider && elem.Slider != null)
         {
-            elem.Slider.value = Mathf.Clamp01(elem.Slider.value + 0.05f);
-            ScreenReader.Say(elem.ReadLabel());
+            AdjustSlider(elem, 0.05f);
         }
+    }
+
+    private static void AdjustSlider(GUIElement elem, float delta)
+    {
+        // TODO: SmartSlider value changes don't persist — needs investigation
+        ScreenReader.Say(elem.ReadLabel());
     }
 
     public static void OnHover(UIButtonColor instance, bool isOver)
