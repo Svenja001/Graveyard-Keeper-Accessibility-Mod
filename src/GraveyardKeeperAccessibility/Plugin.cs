@@ -15,6 +15,10 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.UIButtonColor_OnHover_Postfix),
             typeof(UIButtonColor), "OnHover", new[] { typeof(bool) });
 
+        // Try to patch dialogue UI via reflection - BubbleUI might be in game assembly
+        TryPatchByName(harmony, typeof(Patches), nameof(Patches.BubbleUI_ShowBubble_Postfix),
+            "BubbleUI", "ShowBubble", new[] { typeof(string) });
+
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
 
@@ -128,6 +132,27 @@ public class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             Log.LogWarning($"Failed to patch {targetType.Name}.{targetMethod}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryPatchByName(HarmonyLib.Harmony harmony, Type patchClass, string methodName,
+        string targetTypeName, string targetMethod, Type[] parameters)
+    {
+        try
+        {
+            var targetType = AccessTools.TypeByName(targetTypeName);
+            if (targetType == null)
+            {
+                Log.LogWarning($"Type '{targetTypeName}' not found, skipping");
+                return false;
+            }
+
+            return TryPatch(harmony, patchClass, methodName, targetType, targetMethod, parameters);
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"Failed to find and patch {targetTypeName}.{targetMethod}: {ex.Message}");
             return false;
         }
     }
