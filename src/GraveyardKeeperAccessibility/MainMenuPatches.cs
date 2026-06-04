@@ -68,6 +68,7 @@ internal static class GUIAccessibility
     {
         var buttons = gui.GetComponentsInChildren<UIButton>(true);
         Plugin.Log.LogInfo($"[DiscoverElements] Found {buttons.Length} UIButton components in {gui.GetType().Name}");
+        Plugin.Log.LogInfo($"[DiscoverElements] Button names: {string.Join(", ", buttons.Select(b => b.name))}");
 
         foreach (var button in buttons)
         {
@@ -116,9 +117,14 @@ internal static class GUIAccessibility
             if (string.IsNullOrWhiteSpace(text))
             {
                 text = button.name;
-                if (string.IsNullOrWhiteSpace(text) || text.Length <= 1) continue;
+                if (string.IsNullOrWhiteSpace(text) || text.Length <= 1)
+                {
+                    Plugin.Log.LogInfo($"[DiscoverElements] Skipping button '{button.name}' - no valid label");
+                    continue;
+                }
             }
 
+            Plugin.Log.LogInfo($"[DiscoverElements] Adding button: '{text}' (name: {button.name})");
             Elements.Add(new GUIElement
             {
                 Go = button.gameObject,
@@ -148,7 +154,7 @@ internal static class GUIAccessibility
             });
         }
 
-        // Fallback: Look for interactive UILabel elements (like save slots) that don't have UIButton
+        // Fallback: Look for interactive UILabel elements (like save slots, new game button) that don't have UIButton
         var allLabels = gui.GetComponentsInChildren<UILabel>(true);
         foreach (var label in allLabels)
         {
@@ -163,13 +169,34 @@ internal static class GUIAccessibility
             var labelGo = label.gameObject;
             var parent = label.transform.parent;
 
-            // Check if parent is likely a clickable container (has a name suggesting it's interactive)
-            if (parent != null && (parent.name.Contains("slot") || parent.name.Contains("Slot") ||
-                                  parent.name.Contains("save") || parent.name.Contains("Save")))
+            // Check if parent is likely a clickable container
+            bool isClickable = false;
+            if (parent != null)
+            {
+                // Skip non-interactive containers
+                if (parent.name.Contains("header") || parent.name.Contains("Header") ||
+                    parent.name.Contains("label") || parent.name.Contains("Label"))
+                    isClickable = false;
+                else
+                {
+                    // Check parent name patterns for interactive elements
+                    isClickable = parent.name.Contains("slot") || parent.name.Contains("Slot") ||
+                                 parent.name.Contains("save") || parent.name.Contains("Save") ||
+                                 parent.name.Contains("new") || parent.name.Contains("New") ||
+                                 parent.name.Contains("game") || parent.name.Contains("Game");
+
+                    // Check if parent has a UIButton in its children (makes it interactive)
+                    if (!isClickable && parent.GetComponentInChildren<UIButton>(true) != null)
+                        isClickable = true;
+                }
+            }
+
+            if (isClickable)
             {
                 // Add the parent GameObject as the interactive element (deduplicate by label text)
                 if (!Elements.Any(e => e.Go == parent.gameObject) && !Elements.Any(e => e.Label == text))
                 {
+                    Plugin.Log.LogInfo($"[DiscoverElements] Adding label as button: '{text}' from parent: {parent?.name ?? "null"}");
                     Elements.Add(new GUIElement
                     {
                         Go = parent.gameObject,
@@ -177,6 +204,10 @@ internal static class GUIAccessibility
                         Type = ElementType.Button
                     });
                 }
+            }
+            else
+            {
+                Plugin.Log.LogInfo($"[DiscoverElements] Skipping label '{text}' - parent not clickable: {parent?.name ?? "null"}");
             }
         }
     }

@@ -51,16 +51,32 @@ internal static class TitleScreenAccessibility
         try
         {
             var buttons = screen.GetComponentsInChildren<UIButton>(true);
+            Plugin.Log.LogInfo($"[TitleScreen] Found {buttons?.Length ?? 0} UIButton components");
             if (buttons == null || buttons.Length == 0) return;
 
             foreach (var button in buttons)
             {
                 if (button == null) continue;
                 var ownLabel = button.GetComponentInChildren<UILabel>();
-                if (ownLabel == null) continue;
-                var text = ScreenReader.StripNguiCodes(ownLabel.text);
-                if (string.IsNullOrWhiteSpace(text) || text.Length <= 1) continue;
 
+                string text = null;
+                if (ownLabel != null)
+                {
+                    text = ScreenReader.StripNguiCodes(ownLabel.text);
+                }
+
+                // Fallback: use button name if no UILabel found or label is empty
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    text = button.name;
+                    if (string.IsNullOrWhiteSpace(text) || text.Length <= 1)
+                    {
+                        Plugin.Log.LogInfo($"[TitleScreen] Skipping button '{button.name}' - no valid label");
+                        continue;
+                    }
+                }
+
+                Plugin.Log.LogInfo($"[TitleScreen] Adding button: '{text}' (name: {button.name})");
                 Elements.Add(new GUIElement
                 {
                     Go = button.gameObject,

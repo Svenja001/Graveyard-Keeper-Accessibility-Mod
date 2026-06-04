@@ -48,6 +48,7 @@
 
     <ItemGroup>
         <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3" Condition="'$(MSBuildProjectName)' != 'CustomTextures'" />
     </ItemGroup>
 
     <!-- BepInEx framework references -->
@@ -91,19 +92,9 @@
         <Compile Include="..\Shared\ConfigurationManagerAttributes.cs" Link="ConfigurationManagerAttributes.cs"/>
     </ItemGroup>
 
-    <!-- Newtonsoft.Json is required by Shared/UpdateChecker.cs (JsonUtility can't
-         deserialize arrays of complex objects reliably). Ships with the game; same
-         DLL the game itself uses, so no runtime loading risk. -->
-    <ItemGroup Condition="'$(MSBuildProjectName)' != 'CustomTextures'">
-        <Reference Include="Newtonsoft.Json">
-            <HintPath>..\..\libs\Newtonsoft.Json.dll</HintPath>
-        </Reference>
-    </ItemGroup>
 
     <!-- Common game/Unity references (exclude CustomTextures which has its own extensive set).
-         Assembly-CSharp + firstpass live under libs/$(Storefront)/ because they genuinely differ
-         between Steam (v1407) and GOG (v1405). Everything else is metadata-identical and lives
-         at libs/ root. -->
+         All Unity assemblies live under libs/$(Storefront)/ for consistency. -->
     <ItemGroup Condition="'$(MSBuildProjectName)' != 'CustomTextures'">
         <Reference Include="Assembly-CSharp">
             <HintPath>..\..\libs\$(Storefront)\Assembly-CSharp.dll</HintPath>
@@ -112,64 +103,64 @@
             <HintPath>..\..\libs\$(Storefront)\Assembly-CSharp-firstpass.dll</HintPath>
         </Reference>
         <Reference Include="com.unity.multiplayer-hlapi.Runtime">
-            <HintPath>..\..\libs\com.unity.multiplayer-hlapi.Runtime.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\com.unity.multiplayer-hlapi.Runtime.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine">
-            <HintPath>..\..\libs\UnityEngine.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.AIModule">
-            <HintPath>..\..\libs\UnityEngine.AIModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.AIModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.AnimationModule">
-            <HintPath>..\..\libs\UnityEngine.AnimationModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.AnimationModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.AudioModule">
-            <HintPath>..\..\libs\UnityEngine.AudioModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.AudioModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.CoreModule">
-            <HintPath>..\..\libs\UnityEngine.CoreModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.CoreModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.IMGUIModule">
-            <HintPath>..\..\libs\UnityEngine.IMGUIModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.IMGUIModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.InputLegacyModule">
-            <HintPath>..\..\libs\UnityEngine.InputLegacyModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.InputLegacyModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.JSONSerializeModule">
-            <HintPath>..\..\libs\UnityEngine.JSONSerializeModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.JSONSerializeModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.ParticleSystemModule">
-            <HintPath>..\..\libs\UnityEngine.ParticleSystemModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.ParticleSystemModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.Physics2DModule">
-            <HintPath>..\..\libs\UnityEngine.Physics2DModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.Physics2DModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.PhysicsModule">
-            <HintPath>..\..\libs\UnityEngine.PhysicsModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.PhysicsModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.SharedInternalsModule">
-            <HintPath>..\..\libs\UnityEngine.SharedInternalsModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.SharedInternalsModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.SpriteMaskModule">
-            <HintPath>..\..\libs\UnityEngine.SpriteMaskModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.SpriteMaskModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.TerrainModule">
-            <HintPath>..\..\libs\UnityEngine.TerrainModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.TerrainModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.TextRenderingModule">
-            <HintPath>..\..\libs\UnityEngine.TextRenderingModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.TextRenderingModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.UI">
-            <HintPath>..\..\libs\UnityEngine.UI.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.UI.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.UIModule">
-            <HintPath>..\..\libs\UnityEngine.UIModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.UIModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.UnityWebRequestModule">
-            <HintPath>..\..\libs\UnityEngine.UnityWebRequestModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.UnityWebRequestModule.dll</HintPath>
         </Reference>
         <Reference Include="UnityEngine.UnityWebRequestWWWModule">
-            <HintPath>..\..\libs\UnityEngine.UnityWebRequestWWWModule.dll</HintPath>
+            <HintPath>..\..\libs\$(Storefront)\UnityEngine.UnityWebRequestWWWModule.dll</HintPath>
         </Reference>
     </ItemGroup>
 
