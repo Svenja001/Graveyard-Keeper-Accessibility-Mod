@@ -47,13 +47,13 @@ public class Plugin : BaseUnityPlugin
                 TitleScreenAccessibility.OnScreenClosed(TitleScreenAccessibility._currentScreen);
             }
 
-            // Title screen has priority - but keep checking if it's still active
+            // Title screen has priority - but only handle input if it has discoverable elements
             if (TitleScreenAccessibility.HasActiveScreen)
             {
                 var active = TitleScreenAccessibility.GetActiveElements();
                 var count = active.Count;
 
-                // Still handle input if there are elements
+                // Only handle input and return early if there are elements
                 if (count > 0)
                 {
                     var idx = TitleScreenAccessibility.SelectedIndex;
@@ -66,8 +66,9 @@ public class Plugin : BaseUnityPlugin
                     {
                         TitleScreenAccessibility.ActivateSelected();
                     }
+                    return;
                 }
-                return;
+                // If title screen has no elements, fall through to check GUI instead
             }
 
             if (!GUIAccessibility.HasActiveGUI) return;
@@ -94,7 +95,7 @@ public class Plugin : BaseUnityPlugin
         }
         catch (Exception ex)
         {
-            Log.LogError($"Update exception: {ex.Message}");
+            Log.LogError($"Update exception: {ex.Message}\n{ex.StackTrace}");
         }
     }
 

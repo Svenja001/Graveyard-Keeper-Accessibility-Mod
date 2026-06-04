@@ -105,6 +105,10 @@ internal static class GUIAccessibility
                 continue;
             }
 
+            // Skip delete buttons - not essential for accessibility
+            if (button.name.Contains("delete") || button.name.Contains("Delete"))
+                continue;
+
             var ownLabel = button.GetComponentInChildren<UILabel>();
             string text = null;
 
@@ -193,13 +197,15 @@ internal static class GUIAccessibility
 
             if (isClickable)
             {
-                // Add the parent GameObject as the interactive element (deduplicate by label text)
-                if (!Elements.Any(e => e.Go == parent.gameObject) && !Elements.Any(e => e.Label == text))
+                // Add the label GameObject itself as the interactive element (deduplicate by label text)
+                // Use the parent if available, otherwise use the label's GameObject
+                var elementGO = parent?.gameObject ?? label.gameObject;
+                if (!Elements.Any(e => e.Go == elementGO) && !Elements.Any(e => e.Label == text))
                 {
                     Plugin.Log.LogInfo($"[DiscoverElements] Adding label as button: '{text}' from parent: {parent?.name ?? "null"}");
                     Elements.Add(new GUIElement
                     {
-                        Go = parent.gameObject,
+                        Go = elementGO,
                         Label = text,
                         Type = ElementType.Button
                     });
