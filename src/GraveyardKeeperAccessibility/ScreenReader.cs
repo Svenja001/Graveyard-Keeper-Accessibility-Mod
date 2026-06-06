@@ -129,9 +129,11 @@ internal static class ScreenReader
 
     private static bool SapiSpeak(string text)
     {
+        _log?.LogInfo($"[SAPI] Attempting to speak: {text}");
+
         if (_sapiProcess == null || _sapiProcess.HasExited)
         {
-            _log?.LogWarning("SAPI process died, restarting");
+            _log?.LogWarning("[SAPI] Process died, restarting");
             KillSapi();
             _sapiAvailable = InitSapi();
             if (!_sapiAvailable) return false;
@@ -141,12 +143,15 @@ internal static class ScreenReader
         {
             var clean = text.Replace("\r", "").Replace("\n", " ").Replace("\0", "");
             if (clean.Length > 500) clean = clean.Substring(0, 500);
+            _log?.LogInfo($"[SAPI] Writing to stdin: {clean}");
             _sapiStdin.WriteLine(clean);
+            _sapiStdin.Flush();
+            _log?.LogInfo("[SAPI] Write successful");
             return true;
         }
         catch (Exception ex)
         {
-            _log?.LogWarning($"SAPI write failed: {ex.Message}, restarting");
+            _log?.LogWarning($"[SAPI] Write failed: {ex.Message}, restarting");
             KillSapi();
             _sapiAvailable = InitSapi();
             return false;

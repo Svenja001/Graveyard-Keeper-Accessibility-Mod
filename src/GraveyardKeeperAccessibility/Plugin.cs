@@ -10,6 +10,12 @@ public class Plugin : BaseUnityPlugin
         Log = Logger;
         Log.LogInfo("[PLUGIN_INIT] NEW CODE PATH EXECUTING");
         ScreenReader.Init(Log);
+        MovementFeedback.Init(Log);
+        InteractionDetector.Init(Log);
+
+        // Test TTS
+        Log.LogInfo("[TTS TEST] Speaking test message...");
+        ScreenReader.Say("Game starting", interrupt: true);
 
         var harmony = new HarmonyLib.Harmony(MyPluginInfo.PLUGIN_GUID);
 
@@ -46,6 +52,13 @@ public class Plugin : BaseUnityPlugin
             if (guiCheck)
             {
                 GUIAccessibility.CheckForNewGUI();
+            }
+
+            // Check for interactable objects (when not in GUI/menu)
+            if (!GUIAccessibility.HasActiveGUI && !TitleScreenAccessibility.HasActiveScreen)
+            {
+                // MovementFeedback temporarily disabled - needs debugging
+                InteractionDetector.Update();
             }
 
             // Only check title screen if no BaseGUI is active
