@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-30T16:36:37Z",
-  "generated_by": "update-manifest.yml@d230a6a6",
+  "generated_at": "2026-06-06T16:40:49Z",
+  "generated_by": "update-manifest.yml@5c87ba4e",
   "game_domain": "graveyardkeeper",
   "mods": [
     {
@@ -68,10 +68,10 @@
       "plugin_guid": "p1xel8ted.gyk.deadgiveaway",
       "nexus_mod_id": 159,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/159",
-      "latest_version": "0.1.0",
-      "latest_file_id": 1213,
+      "latest_version": "0.1.1",
+      "latest_file_id": 1221,
       "latest_file_name": "Dead Giveaway",
-      "uploaded_unix": 1780129864,
+      "uploaded_unix": 1780734294,
       "status": "ok"
     },
     {
@@ -148,10 +148,10 @@
       "plugin_guid": "p1xel8ted.gyk.givememoar",
       "nexus_mod_id": 70,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/70",
-      "latest_version": "1.2.17",
-      "latest_file_id": 1176,
+      "latest_version": "1.2.18",
+      "latest_file_id": 1222,
       "latest_file_name": "Give Me Moar",
-      "uploaded_unix": 1779190572,
+      "uploaded_unix": 1780734296,
       "status": "ok"
     },
     {
