@@ -26,8 +26,8 @@ internal static class InteractionDetector
                 var target = FindClosestInteractable();
                 if (target != null)
                 {
-                    var cleanName = CleanObjectName(target.name);
-                    ScreenReader.Say(cleanName, interrupt: true);
+                    var label = GetObjectLabel(target);
+                    ScreenReader.Say(label, interrupt: true);
                     _lastAnnouncedObject = target.name;
                 }
             }
@@ -38,8 +38,8 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var cleanName = CleanObjectName(nearby.name);
-                    ScreenReader.Say(cleanName, interrupt: false);
+                    var label = GetObjectLabel(nearby);
+                    ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
             }
@@ -99,6 +99,49 @@ internal static class InteractionDetector
         return obj.name.Contains("prefab") || obj.name.Contains("Prefab") || obj.name.Contains("template");
     }
 
+
+    private static string GetObjectLabel(WorldGameObject wgo)
+    {
+        if (wgo == null)
+            return null;
+
+        // Check if this is an exit/door (teleport object)
+        if (IsExitObject(wgo))
+        {
+            return "Door";
+        }
+
+        return CleanObjectName(wgo.name);
+    }
+
+    private static bool IsExitObject(WorldGameObject wgo)
+    {
+        if (wgo == null || wgo.obj_def == null)
+            return false;
+
+        // Check by object name pattern (teleport objects are exits)
+        if (wgo.name.IndexOf("teleport", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        // Check by interaction type if available
+        try
+        {
+            // If obj_def has interaction_type property, check it
+            var interactionType = wgo.obj_def?.interaction_type;
+            if (interactionType != null)
+            {
+                var typeString = interactionType.ToString();
+                if (typeString.IndexOf("Teleport", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+        }
+        catch
+        {
+            // If we can't access interaction_type, fall back to name-based detection
+        }
+
+        return false;
+    }
 
     private static string CleanObjectName(string objectName)
     {
