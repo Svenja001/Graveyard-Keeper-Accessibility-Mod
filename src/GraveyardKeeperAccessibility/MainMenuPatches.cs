@@ -371,7 +371,7 @@ internal static class GUIAccessibility
         }
         else if (elem.Type == ElementType.Slider && elem.Slider != null)
         {
-            AdjustSlider(elem, -0.05f);
+            AdjustSlider(elem, -0.1f);
         }
     }
 
@@ -391,25 +391,28 @@ internal static class GUIAccessibility
         }
         else if (elem.Type == ElementType.Slider && elem.Slider != null)
         {
-            AdjustSlider(elem, 0.05f);
+            AdjustSlider(elem, 0.1f);
         }
     }
 
     private static void AdjustSlider(GUIElement elem, float delta)
     {
+        float newValue = Mathf.Clamp01(elem.Slider.value + delta);
+        elem.Slider.value = newValue;
+
         var smartSlider = elem.Slider.GetComponent<SmartSlider>();
         if (smartSlider != null)
         {
-            int cur = smartSlider.value;
-            int step = Mathf.RoundToInt(Mathf.Abs(delta) * 100);
-            int next = Mathf.Clamp(cur + (delta > 0 ? step : -step), 0, 100);
-            elem.Slider.value = next / 100f;
             smartSlider.OnSliderChanged();
         }
-        else
+
+        foreach (var listener in elem.Slider.GetComponentsInChildren<UIProgressBar>())
         {
-            elem.Slider.value = Mathf.Clamp01(elem.Slider.value + delta);
+            listener.value = newValue;
         }
+
+        elem.Go.SendMessage("OnSliderChanged", SendMessageOptions.DontRequireReceiver);
+        elem.Slider.gameObject.SendMessage("OnValueChange", newValue, SendMessageOptions.DontRequireReceiver);
 
         ScreenReader.Say(elem.ReadLabel());
     }
