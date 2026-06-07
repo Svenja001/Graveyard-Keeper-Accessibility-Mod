@@ -22,8 +22,8 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.UIButtonColor_OnHover_Postfix),
             typeof(UIButtonColor), "OnHover", new[] { typeof(bool) });
 
-        // Search for any class with a Say method and patch it
-        SearchAndPatchSayMethods(harmony);
+        // Patch WorldGameObject.Say method for dialogue capture
+        TryPatchWorldGameObjectSay(harmony);
 
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
@@ -171,46 +171,34 @@ public class Plugin : BaseUnityPlugin
     }
 
 
-    private static void SearchAndPatchSayMethods(HarmonyLib.Harmony harmony)
+    private static void TryPatchWorldGameObjectSay(HarmonyLib.Harmony harmony)
     {
         try
         {
-            var gameAssembly = typeof(UIButtonColor).Assembly;
-            var allTypes = gameAssembly.GetTypes();
-
-            Log.LogInfo("Searching for Say methods...");
-            int count = 0;
-
-            foreach (var type in allTypes)
+            var speechBubbleType = AccessTools.TypeByName("SpeechBubbleGUI");
+            if (speechBubbleType == null)
             {
-                try
-                {
-                    var sayMethods = type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
-                                                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static)
-                        .Where(m => m.Name == "Say" && m.DeclaringType == type);
-
-                    foreach (var method in sayMethods)
-                    {
-                        var paramStr = string.Join(", ", method.GetParameters().Select(p => p.ParameterType.Name));
-                        Log.LogInfo($"Found Say method: {type.Name}.Say({paramStr})");
-
-                        try
-                        {
-                            var prefix = new HarmonyMethod(typeof(Patches).GetMethod(nameof(Patches.OnSayMethod)));
-                            harmony.Patch(method, prefix: prefix);
-                            count++;
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
+                Log.LogWarning("SpeechBubbleGUI type not found");
+                return;
             }
 
-            Log.LogInfo($"Patched {count} Say methods");
+            // Hook into SpeechBubbleGUI.SpeechText(string s) - this method converts dialogue IDs to actual text
+            var speechTextMethod = speechBubbleType.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "SpeechText" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string));
+
+            if (speechTextMethod == null)
+            {
+                Log.LogWarning("SpeechBubbleGUI.SpeechText method not found");
+                return;
+            }
+
+            var postfix = new HarmonyMethod(typeof(Patches).GetMethod(nameof(Patches.SpeechBubbleGUI_SpeechText_Postfix)));
+            harmony.Patch(speechTextMethod, postfix: postfix);
+            Log.LogInfo("Patched SpeechBubbleGUI.SpeechText");
         }
         catch (Exception ex)
         {
-            Log.LogWarning($"Failed to search for Say methods: {ex.Message}");
+            Log.LogWarning($"Failed to patch SpeechBubbleGUI.SpeechText: {ex.Message}");
         }
     }
 

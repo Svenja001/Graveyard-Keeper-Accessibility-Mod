@@ -2,6 +2,42 @@ namespace GraveyardKeeperAccessibility;
 
 internal static class Patches
 {
+    public static void SpeechBubbleGUI_ShowMessage_Prefix(string __0)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(__0)) return;
+
+            // This receives the dialogue ID like "in_the_dark_1"
+            // We need to look up the actual text using the game's localization system
+            // For now, log that we got it and let SpeechText handle it
+            Plugin.Log.LogInfo($"[DIALOGUE_ID] {__0}");
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[DIALOGUE_HOOK] Error: {ex.Message}");
+        }
+    }
+
+    public static void SpeechBubbleGUI_SpeechText_Postfix(string __0, ref string __result)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(__result)) return;
+
+            var cleanedText = ScreenReader.StripNguiCodes(__result).Trim();
+            if (!string.IsNullOrEmpty(cleanedText) && cleanedText.Length > 2)
+            {
+                Plugin.Log.LogInfo($"[DIALOGUE] {cleanedText}");
+                ScreenReader.Say(cleanedText);
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[DIALOGUE_HOOK] Error: {ex.Message}");
+        }
+    }
+
     public static void UIButtonColor_OnHover_Postfix(UIButtonColor __instance, bool isOver)
     {
         GUIAccessibility.OnHover(__instance, isOver);

@@ -182,6 +182,7 @@ internal static class ScreenReader
     internal static string StripNguiCodes(string text)
     {
         if (string.IsNullOrEmpty(text) || !text.Contains('[')) return text;
-        return Regex.Replace(text, @"\[[\da-fA-F]{6}\]|\[-\]", "");
+        // Strip NGUI color codes: [XXXXXX], [-], [c], [/c], etc.
+        return Regex.Replace(text, @"\[[\da-fA-F]{6}\]|\[-\]|\[/?c\]", "");
     }
 }
