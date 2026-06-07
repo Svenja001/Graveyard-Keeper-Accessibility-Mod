@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "generated_at": "2026-06-06T16:40:49Z",
-  "generated_by": "update-manifest.yml@5c87ba4e",
+  "generated_at": "2026-06-07T16:46:39Z",
+  "generated_by": "update-manifest.yml@5f1fe25f",
   "game_domain": "graveyardkeeper",
   "mods": [
     {
@@ -158,10 +158,10 @@
       "plugin_guid": "p1xel8ted.gyk.gravechangesredux",
       "nexus_mod_id": 89,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/89",
-      "latest_version": "0.1.10",
-      "latest_file_id": 1177,
+      "latest_version": "0.1.11",
+      "latest_file_id": 1223,
       "latest_file_name": "Grave Changes Redux",
-      "uploaded_unix": 1779190601,
+      "uploaded_unix": 1780819176,
       "status": "ok"
     },
     {
