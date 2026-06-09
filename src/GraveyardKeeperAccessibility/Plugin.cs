@@ -14,6 +14,7 @@ public class Plugin : BaseUnityPlugin
         InteractionDetector.Init(Log);
         InventoryItemHandler.Init(Log);
         ClickHandler.Init(Log);
+        ObjectNavigator.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -50,6 +51,12 @@ public class Plugin : BaseUnityPlugin
 
             // Check inventory for item changes
             InventoryItemHandler.Update();
+
+            // Update persistent navigation system
+            ObjectNavigator.Update();
+
+            // Handle object navigation input
+            HandleNavigationInput();
 
             var guiCheck = ++_tickCounter % 10 == 0;
 
@@ -236,6 +243,32 @@ public class Plugin : BaseUnityPlugin
         }
         catch { }
         return true;
+    }
+
+    private void HandleNavigationInput()
+    {
+        try
+        {
+            // Only handle navigation input when not in GUI (persistent navigation in world)
+            if (GUIAccessibility.HasActiveGUI || TitleScreenAccessibility.HasActiveScreen)
+                return;
+
+            // Navigation controls
+            if (Input.GetKeyDown(KeyCode.PageDown))
+                ObjectNavigator.SelectNext();
+            else if (Input.GetKeyDown(KeyCode.PageUp))
+                ObjectNavigator.SelectPrevious();
+            else if (Input.GetKeyDown(KeyCode.Home) && !Input.GetKey(KeyCode.LeftControl))
+                ObjectNavigator.AnnounceSelected();
+            else if (Input.GetKeyDown(KeyCode.Home) && Input.GetKey(KeyCode.LeftControl))
+                ObjectNavigator.WalkToSelected();
+            else if (Input.GetKeyDown(KeyCode.Escape) && ObjectNavigator.IsWalking)
+                ObjectNavigator.StopWalking();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Navigation input error: {ex.Message}\n{ex.StackTrace}");
+        }
     }
 
     private void OnDestroy()

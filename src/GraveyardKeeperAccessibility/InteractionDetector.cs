@@ -100,7 +100,7 @@ internal static class InteractionDetector
         return obj.name.Contains("prefab") || obj.name.Contains("Prefab") || obj.name.Contains("template");
     }
 
-    private static string GetObjectLabel(WorldGameObject wgo)
+    internal static string GetObjectLabel(WorldGameObject wgo)
     {
         if (wgo == null)
             return null;
