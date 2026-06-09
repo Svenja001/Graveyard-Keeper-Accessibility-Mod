@@ -12,6 +12,8 @@ public class Plugin : BaseUnityPlugin
         ScreenReader.Init(Log);
         MovementFeedback.Init(Log);
         InteractionDetector.Init(Log);
+        InventoryItemHandler.Init(Log);
+        ClickHandler.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -42,6 +44,12 @@ public class Plugin : BaseUnityPlugin
                 Log.LogInfo($"[SCENE CHANGE] {_lastSceneName ?? "null"} -> {currentScene}");
                 _lastSceneName = currentScene;
             }
+
+            // Handle click input (Z/X keys)
+            ClickHandler.Update();
+
+            // Check inventory for item changes
+            InventoryItemHandler.Update();
 
             var guiCheck = ++_tickCounter % 10 == 0;
 

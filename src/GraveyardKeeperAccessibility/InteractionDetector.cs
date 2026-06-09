@@ -67,9 +67,10 @@ internal static class InteractionDetector
             if (allObjects == null || allObjects.Length == 0)
                 return null;
 
-            // Find closest non-player, non-prefab object
+            // Find closest object, filtering out inactive ones
             var nearby = allObjects
                 .Where(obj => obj != null && !IsPlayer(obj) && !IsPrefab(obj))
+                .Where(obj => obj.gameObject.activeInHierarchy)
                 .OrderBy(obj => Vector3.Distance(obj.transform.position, playerPos))
                 .FirstOrDefault();
 
@@ -89,16 +90,15 @@ internal static class InteractionDetector
         }
     }
 
-    private static bool IsPlayer(WorldGameObject obj)
+    internal static bool IsPlayer(WorldGameObject obj)
     {
         return obj.name.Contains("Player");
     }
 
-    private static bool IsPrefab(WorldGameObject obj)
+    internal static bool IsPrefab(WorldGameObject obj)
     {
         return obj.name.Contains("prefab") || obj.name.Contains("Prefab") || obj.name.Contains("template");
     }
-
 
     private static string GetObjectLabel(WorldGameObject wgo)
     {
@@ -109,6 +109,26 @@ internal static class InteractionDetector
         if (IsExitObject(wgo))
         {
             return "Door";
+        }
+
+        // Try to get a label from the object definition
+        try
+        {
+            if (wgo.obj_def != null)
+            {
+                // Try to use the object id
+                if (!string.IsNullOrEmpty(wgo.obj_def.id))
+                    return CleanObjectName(wgo.obj_def.id);
+
+                // Fall back to interaction type
+                var typeString = wgo.obj_def.interaction_type.ToString();
+                if (!string.IsNullOrEmpty(typeString))
+                    return CleanObjectName(typeString);
+            }
+        }
+        catch
+        {
+            // Fall back to object name if obj_def access fails
         }
 
         return CleanObjectName(wgo.name);

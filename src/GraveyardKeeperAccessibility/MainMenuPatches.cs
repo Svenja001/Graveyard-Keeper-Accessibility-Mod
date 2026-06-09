@@ -51,6 +51,9 @@ internal static class GUIAccessibility
         var activeCount = Elements.Count(e => e.Go.activeInHierarchy);
         Plugin.Log.LogInfo($"[GUI OPENED] {guiName}, {activeCount} elements");
 
+        // Announce inventory items if this is an inventory/chest GUI
+        InventoryItemHandler.OnGUIOpened(gui);
+
         // Log all UI text for debugging
         var allLabels = gui.GetComponentsInChildren<UILabel>(true);
         var textContent = string.Join(" | ", allLabels.Where(l => !string.IsNullOrWhiteSpace(l.text))
@@ -88,6 +91,8 @@ internal static class GUIAccessibility
         ScreenReader.ClearMenuContext();
         Elements.Clear();
         SelectedIndex = -1;
+
+        InventoryItemHandler.OnGUIClosed(gui);
     }
 
     private static void DiscoverElements(BaseGUI gui)
