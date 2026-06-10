@@ -5,69 +5,22 @@ namespace GraveyardKeeperAccessibility;
 
 internal static class ScreenReader
 {
-    private static bool _tolkAvailable;
+    private static bool _prismAvailable;
     private static bool _sapiAvailable;
     private static Process _sapiProcess;
     private static StreamWriter _sapiStdin;
     private static string _lastMenuText = "";
     private static ManualLogSource _log;
 
-    [DllImport("Tolk", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void Tolk_Load();
-
-    [DllImport("Tolk", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void Tolk_Unload();
-
-    [DllImport("Tolk", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void Tolk_TrySAPI([MarshalAs(UnmanagedType.Bool)] bool trySAPI);
-
-    [DllImport("Tolk", CallingConvention = CallingConvention.Cdecl)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Tolk_Output(
-        [MarshalAs(UnmanagedType.LPWStr)] string str,
-        [MarshalAs(UnmanagedType.Bool)] bool interrupt);
-
-    [DllImport("Tolk", CallingConvention = CallingConvention.Cdecl)]
-    [return: MarshalAs(UnmanagedType.LPWStr)]
-    private static extern string Tolk_DetectScreenReader();
-
-    [DllImport("Tolk", CallingConvention = CallingConvention.Cdecl)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Tolk_IsLoaded();
-
     internal static void Init(ManualLogSource log)
     {
         _log = log;
-        _tolkAvailable = InitTolk();
-        if (!_tolkAvailable)
+        _prismAvailable = PrismWrapper.Init(log);
+        if (!_prismAvailable)
             _sapiAvailable = InitSapi();
 
-        if (!_tolkAvailable && !_sapiAvailable)
+        if (!_prismAvailable && !_sapiAvailable)
             log.LogError("No TTS output available");
-    }
-
-    private static bool InitTolk()
-    {
-        try
-        {
-            Tolk_TrySAPI(true);
-            Tolk_Load();
-            if (!Tolk_IsLoaded()) return false;
-
-            var reader = Tolk_DetectScreenReader();
-            _log.LogInfo($"Tolk screen reader: {reader ?? "SAPI fallback"}");
-            return true;
-        }
-        catch (DllNotFoundException)
-        {
-            _log.LogInfo("Tolk.dll not found, trying SAPI fallback");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log.LogInfo($"Tolk not available: {ex.Message}");
-            return false;
-        }
     }
 
     private static bool InitSapi()
@@ -109,11 +62,11 @@ internal static class ScreenReader
 
     internal static void Shutdown()
     {
-        if (_tolkAvailable)
-            try { Tolk_Unload(); } catch { }
+        if (_prismAvailable)
+            PrismWrapper.Shutdown();
 
         KillSapi();
-        _tolkAvailable = false;
+        _prismAvailable = false;
         _sapiAvailable = false;
     }
 
@@ -121,8 +74,8 @@ internal static class ScreenReader
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
 
-        if (_tolkAvailable)
-            return Tolk_Output(text, interrupt);
+        if (_prismAvailable)
+            return PrismWrapper.Speak(text, interrupt);
 
         return SapiSpeak(text);
     }
