@@ -25,6 +25,11 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.UIButtonColor_OnHover_Postfix),
             typeof(UIButtonColor), "OnHover", new[] { typeof(bool) });
 
+        // Pad the player pathfinding graph bounds while our navigator drives a walk,
+        // so A* can route around fences/walls to enclosed targets (e.g. graves).
+        TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.RefreshPlayerGraph_Prefix),
+            typeof(AStarTools), "RefreshPlayerGraph", new[] { typeof(Vector2), typeof(Vector2) });
+
         // Patch WorldGameObject.Say method for dialogue capture
         TryPatchWorldGameObjectSay(harmony);
 
@@ -164,6 +169,30 @@ public class Plugin : BaseUnityPlugin
         }
     }
 
+    private static bool TryPatchPrefix(HarmonyLib.Harmony harmony, Type patchClass, string methodName,
+        Type targetType, string targetMethod, Type[] parameters)
+    {
+        try
+        {
+            var original = AccessTools.Method(targetType, targetMethod, parameters);
+            if (original == null)
+            {
+                Log.LogWarning($"Method {targetType.Name}.{targetMethod} not found, skipping");
+                return false;
+            }
+
+            var prefix = new HarmonyMethod(AccessTools.Method(patchClass, methodName));
+            harmony.Patch(original, prefix: prefix);
+            Log.LogInfo($"Patched (prefix) {targetType.Name}.{targetMethod}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"Failed to patch {targetType.Name}.{targetMethod}: {ex.Message}");
+            return false;
+        }
+    }
+
     private static bool TryPatchByName(HarmonyLib.Harmony harmony, Type patchClass, string methodName,
         string targetTypeName, string targetMethod, Type[] parameters)
     {
@@ -253,14 +282,26 @@ public class Plugin : BaseUnityPlugin
             if (GUIAccessibility.HasActiveGUI || TitleScreenAccessibility.HasActiveScreen)
                 return;
 
-            // Navigation controls
+            var ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+
+            // Navigation controls:
+            //   PageUp / PageDown            -> previous / next object in category
+            //   Ctrl+PageUp / Ctrl+PageDown  -> previous / next category
+            //   Home / Ctrl+Home             -> announce / walk to selected
+            //   Escape (while walking)       -> stop walking
             if (Input.GetKeyDown(KeyCode.PageDown))
-                ObjectNavigator.SelectNext();
+            {
+                if (ctrl) ObjectNavigator.NextCategory();
+                else ObjectNavigator.SelectNext();
+            }
             else if (Input.GetKeyDown(KeyCode.PageUp))
-                ObjectNavigator.SelectPrevious();
-            else if (Input.GetKeyDown(KeyCode.Home) && !Input.GetKey(KeyCode.LeftControl))
+            {
+                if (ctrl) ObjectNavigator.PreviousCategory();
+                else ObjectNavigator.SelectPrevious();
+            }
+            else if (Input.GetKeyDown(KeyCode.Home) && !ctrl)
                 ObjectNavigator.AnnounceSelected();
-            else if (Input.GetKeyDown(KeyCode.Home) && Input.GetKey(KeyCode.LeftControl))
+            else if (Input.GetKeyDown(KeyCode.Home) && ctrl)
                 ObjectNavigator.WalkToSelected();
             else if (Input.GetKeyDown(KeyCode.Escape) && ObjectNavigator.IsWalking)
                 ObjectNavigator.StopWalking();

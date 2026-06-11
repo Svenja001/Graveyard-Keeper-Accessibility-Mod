@@ -43,6 +43,29 @@ internal static class Patches
         GUIAccessibility.OnHover(__instance, isOver);
     }
 
+    // The player pathfinder rescans its graph (graph 2) to a thin rectangle sized to
+    // the straight player->destination line. That's too tight to route around fences
+    // and walls (e.g. reaching a grave inside the cemetery), so A* fails even when the
+    // destination is valid. When our navigator drives a walk, pad those bounds so the
+    // search has room to go around obstacles.
+    public static void RefreshPlayerGraph_Prefix(ref Vector2 from, ref Vector2 to)
+    {
+        try
+        {
+            if (!ObjectNavigator.PadPlayerGraph) return;
+
+            const float pad = 480f; // ~5 tiles of slack on every side
+            var min = Vector2.Min(from, to) - new Vector2(pad, pad);
+            var max = Vector2.Max(from, to) + new Vector2(pad, pad);
+            from = min;
+            to = max;
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[NAVIGATOR] RefreshPlayerGraph_Prefix error: {ex.Message}");
+        }
+    }
+
     // Hook into any Say method to capture dialogue
     public static void OnSayMethod(object[] __args)
     {

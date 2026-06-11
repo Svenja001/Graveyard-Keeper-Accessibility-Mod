@@ -4,30 +4,83 @@ internal struct NavigationTarget
 {
     internal WorldGameObject Object;
     internal string Label;
-    internal float Distance;
-    internal Vector3 Position;
+    internal float Distance;   // world units (96 per tile)
+    internal Vector2 Position;  // canonical x-y world position (z is render depth)
+}
+
+/// <summary>
+/// Categories of navigable points of interest. Ordered for cycling with
+/// Ctrl+PageUp / Ctrl+PageDown.
+/// </summary>
+internal enum NavCategory
+{
+    Quests,
+    Doors,
+    Graves,
+    People,
+    Storage,
+    Stations,
+    Other
 }
 
 internal static class ObjectNavigator
 {
     private static ManualLogSource _log;
     private static bool _initialized = false;
+
+    // One ordered list of targets per category.
+    private static readonly Dictionary<NavCategory, List<NavigationTarget>> _byCategory = new();
+    private static readonly NavCategory[] _categoryOrder =
+    {
+        NavCategory.Quests,
+        NavCategory.Doors,
+        NavCategory.Graves,
+        NavCategory.People,
+        NavCategory.Storage,
+        NavCategory.Stations,
+        NavCategory.Other
+    };
+
+    private static NavCategory _currentCategory = NavCategory.Quests;
     private static int _selectedIndex = 0;
-    private static List<NavigationTarget> _destinations = new();
-    private static NavigationTarget _currentTarget;
+
     private static bool _isWalking = false;
     private static int _updateCounter = 0;
-    private const float MaxNavDistance = 10000f;  // Game coordinates are in large units
-    private const float ArrivalThreshold = 100f;  // Arrival threshold adjusted for large coordinate scale
-    private const int UpdateInterval = 30; // Update object list every 30 frames
+    private static int _walkWatchdog = 0;
+    private static int _questDiagCounter = 0;
+
+    // The object to turn and face when the current walk arrives, so the game's own
+    // E-interaction (which only fires on whatever is in front of the character) works
+    // without the player having to manually aim their facing.
+    private static WorldGameObject _walkFaceTarget;
+
+    // Deferred fallback walk: when A* fails we cannot re-issue GoTo synchronously
+    // (the game's OnPathFailed clobbers the new request right after our callback),
+    // so we queue a straight-line Direct attempt to run on the next frame.
+    private static bool _fallbackPending = false;
+    private static Vector2 _fallbackDest;
+    private static string _fallbackLabel;
+
+    // World coordinates use 96 units per tile. Only surface points of interest
+    // within a generous radius so the per-category lists stay manageable.
+    private const float TileSize = 96f;
+    private const float MaxNavDistance = 60f * TileSize;   // ~60 tiles
+    private const int UpdateInterval = 30;                 // refresh list every 30 frames
+    private const float ApproachOffset = 80f;              // stop ~1 tile short, on walkable ground
 
     internal static bool IsWalking => _isWalking;
+
+    // Set true only while we drive an A* GoTo, so the RefreshPlayerGraph patch pads
+    // the player-graph bounds for our walks without affecting vanilla pathfinding.
+    internal static bool PadPlayerGraph { get; private set; }
 
     internal static void Init(ManualLogSource log)
     {
         _log = log;
+        foreach (var cat in _categoryOrder)
+            _byCategory[cat] = new List<NavigationTarget>();
         _initialized = true;
-        _log?.LogInfo("[NAVIGATOR] ObjectNavigator initialized (persistent mode)");
+        _log?.LogInfo("[NAVIGATOR] ObjectNavigator initialized (native pathfinding, categorized)");
     }
 
     internal static void Update()
@@ -36,7 +89,13 @@ internal static class ObjectNavigator
 
         try
         {
-            // Only update object list every UpdateInterval frames for performance
+            // Run a queued straight-line fallback (A* couldn't find a path).
+            if (_fallbackPending)
+            {
+                _fallbackPending = false;
+                StartWalk(_fallbackDest, _fallbackLabel, MovementComponent.GoToMethod.Direct);
+            }
+
             _updateCounter++;
             if (_updateCounter >= UpdateInterval)
             {
@@ -44,10 +103,38 @@ internal static class ObjectNavigator
                 RefreshDestinations();
             }
 
-            // Continue walking if active
+            // Watch the game's own movement state while a walk is in progress.
             if (_isWalking)
             {
-                ContinueWalking();
+                var character = MainGame.me?.player?.components?.character;
+                if (character == null)
+                {
+                    _isWalking = false;
+                    _walkWatchdog = 0;
+                }
+                else if (!character.player_controlled_by_script)
+                {
+                    // Game released control (arrival completed normally).
+                    _isWalking = false;
+                    _walkWatchdog = 0;
+                }
+                else if (!character.IsInMovingState())
+                {
+                    // Still flagged as script-controlled but no longer moving and the
+                    // flag was never released (e.g. a failed path that left it stuck).
+                    // Release after a short grace so the player is never locked out.
+                    if (++_walkWatchdog > 10)
+                    {
+                        _log?.LogWarning("[NAVIGATOR] Watchdog releasing stuck script control");
+                        ReleaseScriptControl();
+                        _isWalking = false;
+                        _walkWatchdog = 0;
+                    }
+                }
+                else
+                {
+                    _walkWatchdog = 0;
+                }
             }
         }
         catch (Exception ex)
@@ -56,51 +143,87 @@ internal static class ObjectNavigator
         }
     }
 
-    private static void RefreshDestinations()
-    {
-        try
-        {
-            var newDestinations = FindNearbyObjects();
+    private static List<NavigationTarget> CurrentList =>
+        _byCategory.TryGetValue(_currentCategory, out var list) ? list : new List<NavigationTarget>();
 
-            // If list changed significantly, reset selection to nearest
-            if (_destinations.Count != newDestinations.Count)
-            {
-                _destinations = newDestinations;
-                _selectedIndex = 0;
-            }
-            else
-            {
-                // Update distances but keep selection
-                _destinations = newDestinations;
-                if (_selectedIndex >= _destinations.Count)
-                    _selectedIndex = 0;
-            }
-        }
-        catch (Exception ex)
+    // ---- Category cycling (Ctrl+PageUp / Ctrl+PageDown) ---------------------
+
+    internal static void NextCategory() => CycleCategory(+1);
+    internal static void PreviousCategory() => CycleCategory(-1);
+
+    private static void CycleCategory(int dir)
+    {
+        int start = Array.IndexOf(_categoryOrder, _currentCategory);
+        if (start < 0) start = 0;
+
+        // Find the next category that actually has targets.
+        for (int step = 1; step <= _categoryOrder.Length; step++)
         {
-            _log?.LogError($"[NAVIGATOR] Error refreshing destinations: {ex.Message}");
+            int idx = (start + dir * step) % _categoryOrder.Length;
+            if (idx < 0) idx += _categoryOrder.Length;
+            var cat = _categoryOrder[idx];
+            if (_byCategory[cat].Count > 0)
+            {
+                _currentCategory = cat;
+                _selectedIndex = 0;
+                AnnounceCategory();
+                return;
+            }
         }
+
+        ScreenReader.Say("No navigable objects nearby", interrupt: true);
     }
+
+    private static void AnnounceCategory()
+    {
+        var list = CurrentList;
+        var name = CategoryName(_currentCategory);
+        if (list.Count == 0)
+        {
+            ScreenReader.Say($"{name}, empty", interrupt: true);
+            return;
+        }
+
+        var target = list[_selectedIndex];
+        ScreenReader.Say($"{name}, {list.Count}. {target.Label}, {DistanceText(target.Distance)}", interrupt: true);
+        _log?.LogInfo($"[NAVIGATOR] Category {name} ({list.Count}) -> {target.Label}");
+    }
+
+    private static string CategoryName(NavCategory cat) => cat switch
+    {
+        NavCategory.Quests => "Quest targets",
+        NavCategory.Doors => "Doors",
+        NavCategory.Graves => "Graves",
+        NavCategory.People => "People",
+        NavCategory.Storage => "Storage",
+        NavCategory.Stations => "Crafting stations",
+        _ => "Other"
+    };
+
+    // ---- Item cycling within the current category (PageUp / PageDown) -------
 
     internal static void SelectNext()
     {
-        if (_destinations.Count == 0) return;
+        var list = CurrentList;
+        if (list.Count == 0) { EnsureNonEmptyCategory(); return; }
 
-        _selectedIndex = (_selectedIndex + 1) % _destinations.Count;
+        _selectedIndex = (_selectedIndex + 1) % list.Count;
         AnnounceSelected();
     }
 
     internal static void SelectPrevious()
     {
-        if (_destinations.Count == 0) return;
+        var list = CurrentList;
+        if (list.Count == 0) { EnsureNonEmptyCategory(); return; }
 
-        _selectedIndex = (_selectedIndex - 1 + _destinations.Count) % _destinations.Count;
+        _selectedIndex = (_selectedIndex - 1 + list.Count) % list.Count;
         AnnounceSelected();
     }
 
     internal static void AnnounceSelected()
     {
-        if (_destinations.Count == 0)
+        var list = CurrentList;
+        if (list.Count == 0)
         {
             ScreenReader.Say("No navigable objects nearby", interrupt: false);
             return;
@@ -108,8 +231,9 @@ internal static class ObjectNavigator
 
         try
         {
-            var target = _destinations[_selectedIndex];
-            var message = $"{target.Label}, {target.Distance:F0} meters away";
+            if (_selectedIndex >= list.Count) _selectedIndex = 0;
+            var target = list[_selectedIndex];
+            var message = $"{target.Label}, {DistanceText(target.Distance)}, {_selectedIndex + 1} of {list.Count}";
             ScreenReader.Say(message, interrupt: false);
             _log?.LogInfo($"[NAVIGATOR] Announced: {message}");
         }
@@ -119,27 +243,219 @@ internal static class ObjectNavigator
         }
     }
 
+    // If the current category emptied out, jump to the first non-empty one.
+    private static void EnsureNonEmptyCategory()
+    {
+        foreach (var cat in _categoryOrder)
+        {
+            if (_byCategory[cat].Count > 0)
+            {
+                _currentCategory = cat;
+                _selectedIndex = 0;
+                AnnounceCategory();
+                return;
+            }
+        }
+        ScreenReader.Say("No navigable objects nearby", interrupt: false);
+    }
+
+    private static string DistanceText(float worldDistance)
+    {
+        var tiles = worldDistance / TileSize;
+        return $"{tiles:F0} meters away";
+    }
+
+    // ---- Walking via the game's native A* pathfinding ----------------------
+
     internal static void WalkToSelected()
     {
-        if (_destinations.Count == 0) return;
+        var list = CurrentList;
+        if (list.Count == 0)
+        {
+            ScreenReader.Say("Nothing selected to walk to", interrupt: true);
+            return;
+        }
+
+        if (_selectedIndex >= list.Count) _selectedIndex = 0;
+        var target = list[_selectedIndex];
+
+        // Aim for a point ~1 tile short of the object, along the line from the
+        // object toward the player. Most points of interest sit ON an unwalkable
+        // tile; targeting their exact centre makes the player pathfinder reject the
+        // path ("end point too far", a hard 17-unit limit). The approach point lands
+        // on walkable ground right next to the object — where you'd stand anyway.
+        var dest = ApproachPoint(target.Position);
+
+        // Pad the player-graph bounds for both the snap scan and the A* walk below,
+        // so the search can route around fences/walls instead of failing.
+        PadPlayerGraph = true;
+        try
+        {
+            // Snap to an actual walkable navmesh node so A* accepts the destination and
+            // routes AROUND obstacles instead of failing and falling back to a straight
+            // line that just bumps into them.
+            dest = SnapToWalkable(dest);
+
+            var pp = MainGame.me?.player?.pos ?? Vector2.zero;
+            _log?.LogInfo($"[NAVIGATOR] GEOMETRY player={pp} object={target.Position} approach->snapped={dest} " +
+                          $"objDist={Vector2.Distance(pp, target.Position):F0} snapDist={Vector2.Distance(pp, dest):F0}");
+
+            _fallbackPending = false;
+            _walkFaceTarget = target.Object;   // face it on arrival so plain E interacts
+            ScreenReader.Say($"Walking to {target.Label}, {DistanceText(target.Distance)}", interrupt: true);
+            StartWalk(dest, target.Label, MovementComponent.GoToMethod.AStar);
+        }
+        finally
+        {
+            PadPlayerGraph = false;
+        }
+    }
+
+    /// <summary>
+    /// Turn the player to face the object we just walked to. The game's interaction
+    /// fires only on whatever sits inside the character's forward-facing interaction
+    /// collider (positioned by anim_direction), so a blind player who auto-walked up to
+    /// an object usually isn't facing it and plain E does nothing. Facing the object on
+    /// arrival rotates that collider onto it, so the vanilla E key just works.
+    /// </summary>
+    private static void FacePlayerAtTarget()
+    {
+        var target = _walkFaceTarget;
+        _walkFaceTarget = null;
+        if (target == null) return;
 
         try
         {
-            var player = MainGame.me?.player;
-            if (player?.components?.character != null)
-            {
-                player.components.character.player_controlled_by_script = true;
-            }
-
-            _currentTarget = _destinations[_selectedIndex];
-            _isWalking = true;
-
-            ScreenReader.Say($"Walking to {_currentTarget.Label}", interrupt: true);
-            _log?.LogInfo($"[NAVIGATOR] Starting walk to {_currentTarget.Label} at distance {_currentTarget.Distance:F1}m");
+            var character = MainGame.me?.player?.components?.character;
+            if (character == null) return;
+            character.LookAt(target);
+            _log?.LogInfo($"[NAVIGATOR] Facing {target.name} for interaction");
         }
         catch (Exception ex)
         {
-            _log?.LogError($"[NAVIGATOR] Error starting walk: {ex.Message}");
+            _log?.LogWarning($"[NAVIGATOR] FacePlayerAtTarget failed: {ex.Message}");
+        }
+    }
+
+    private static Vector2 ApproachPoint(Vector2 objPos)
+    {
+        var player = MainGame.me?.player;
+        if (player == null) return objPos;
+
+        var playerPos = player.pos;
+        var toPlayer = playerPos - objPos;
+        var d = toPlayer.magnitude;
+        if (d <= ApproachOffset) return playerPos;          // already adjacent
+        return objPos + toPlayer / d * ApproachOffset;       // back off one tile
+    }
+
+    /// <summary>
+    /// Snap a world point to the nearest walkable node ON THE PLAYER GRAPH (graph 2).
+    /// The player pathfinder rejects any destination whose path endpoint is more than
+    /// ~17 units away (AStarSearcher), and it searches only the dynamically-rescanned
+    /// player graph — which has different walkability from the persistent graph. So we
+    /// scan that graph around the target first (the same call GoTo makes), then snap to
+    /// a node on it. Snapping against the persistent graph isn't good enough: it returns
+    /// nodes that are unwalkable or unreachable once the player graph is built.
+    /// </summary>
+    private static Vector2 SnapToWalkable(Vector2 p)
+    {
+        try
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return p;
+
+            // Build the player graph (graph 2) around the player->target span so we
+            // snap to a node the upcoming A* search will actually have available.
+            var player = MainGame.me?.player;
+            if (player != null)
+                AStarTools.RefreshPlayerGraph(player.pos, p);
+
+            var constraint = Pathfinding.NNConstraint.Default;
+            constraint.graphMask = 1 << 2;  // player graph only
+
+            var nn = astar.GetNearest(new Vector3(p.x, p.y, 0f), constraint);
+            if (nn.node != null && nn.node.Walkable)
+            {
+                var snapped = new Vector2(nn.clampedPosition.x, nn.clampedPosition.y);
+                _log?.LogInfo($"[NAVIGATOR] Snapped {p} -> {snapped} (dist {Vector2.Distance(p, snapped):F0})");
+                return snapped;
+            }
+
+            _log?.LogWarning("[NAVIGATOR] No walkable player-graph node near target");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] SnapToWalkable failed: {ex.Message}");
+        }
+        return p;
+    }
+
+    private static void StartWalk(Vector2 dest, string label, MovementComponent.GoToMethod method)
+    {
+        try
+        {
+            var character = MainGame.me?.player?.components?.character;
+            if (character == null)
+            {
+                _log?.LogError("[NAVIGATOR] Player character component is null");
+                ScreenReader.Say("Cannot walk right now", interrupt: true);
+                _isWalking = false;
+                return;
+            }
+
+            // from_script:true suspends player input so the movement state machine
+            // drives the character cleanly. AStar routes around obstacles; Direct is
+            // the straight-line fallback used when A* can't find a valid path.
+            character.GoTo(
+                dest,
+                snap_to_node: false,   // we pre-snap to a walkable node ourselves
+                on_complete: () =>
+                {
+                    _isWalking = false;
+                    FacePlayerAtTarget();
+                    ScreenReader.Say($"Arrived at {label}", interrupt: true);
+                    _log?.LogInfo($"[NAVIGATOR] Arrived at {label} ({method})");
+                },
+                on_failed: () =>
+                {
+                    if (method == MovementComponent.GoToMethod.AStar)
+                    {
+                        // A* failed (no path / endpoint too far). Queue a straight-line
+                        // attempt for next frame — re-issuing GoTo here would be undone
+                        // by the game's OnPathFailed running right after this callback.
+                        _log?.LogWarning($"[NAVIGATOR] A* failed to {label}, trying direct");
+                        _fallbackDest = dest;
+                        _fallbackLabel = label;
+                        _fallbackPending = true;
+                    }
+                    else
+                    {
+                        // Direct fallback also failed (stuck against geometry). Release
+                        // control so the player is never locked out, then report.
+                        ReleaseScriptControl();
+                        _isWalking = false;
+                        ScreenReader.Say($"Could not reach {label}", interrupt: true);
+                        _log?.LogWarning($"[NAVIGATOR] Direct walk failed to {label}");
+                    }
+                },
+                with_cinematic: false,
+                goto_method: method,
+                event_on_complete: "",
+                filter_astar_area: null,
+                from_script: true,
+                target_gd_point: null);
+
+            _isWalking = true;
+            _walkWatchdog = 0;
+            _log?.LogInfo($"[NAVIGATOR] GoTo {label} via {method} to {dest}");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] Error starting walk: {ex.Message}\n{ex.StackTrace}");
+            ReleaseScriptControl();
+            ScreenReader.Say("Walk failed", interrupt: true);
+            _isWalking = false;
         }
     }
 
@@ -149,69 +465,366 @@ internal static class ObjectNavigator
 
         try
         {
-            var player = MainGame.me?.player;
-            if (player?.components?.character != null)
-            {
-                player.components.character.player_controlled_by_script = false;
-            }
-
+            ReleaseScriptControl();
             _isWalking = false;
+            _walkWatchdog = 0;
             ScreenReader.Say("Walking stopped", interrupt: true);
             _log?.LogInfo("[NAVIGATOR] Walking stopped");
         }
         catch (Exception ex)
         {
             _log?.LogError($"[NAVIGATOR] Error stopping walk: {ex.Message}");
+            _isWalking = false;
         }
     }
 
-    private static void ContinueWalking()
+    /// <summary>
+    /// Stop scripted movement and hand control back to the player. Safe to call
+    /// redundantly; this is the guard against the player being locked out of input
+    /// when the game's own OnPathFailed leaves player_controlled_by_script set.
+    /// </summary>
+    private static void ReleaseScriptControl()
     {
-        if (!_isWalking) return;
+        try
+        {
+            var character = MainGame.me?.player?.components?.character;
+            if (character != null)
+            {
+                character.StopMovement();
+                character.player_controlled_by_script = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] Error releasing script control: {ex.Message}");
+        }
+    }
 
+    // ---- Building the categorized destination lists ------------------------
+
+    private static void RefreshDestinations()
+    {
         try
         {
             var player = MainGame.me?.player;
             if (player == null)
-            {
-                _log?.LogError("[NAVIGATOR] Player is null during walk");
-                StopWalking();
                 return;
-            }
 
-            var currentPos = player.transform.position;
-            var targetPos = _currentTarget.Position;
-            var distance = Vector3.Distance(currentPos, targetPos);
+            // The world is a 2D x-y plane (z is only render-sorting depth), so use
+            // WorldGameObject.pos which is the authoritative (x, y) world position.
+            var playerPos = player.pos;
+            var allObjects = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true);
+            if (allObjects == null || allObjects.Length == 0)
+                return;
 
-            _log?.LogInfo($"[NAVIGATOR] Walking: current={currentPos}, target={targetPos}, distance={distance:F1}");
+            // Remember what is currently selected so we can keep the cursor on it
+            // across refreshes even as distances change.
+            WorldGameObject previouslySelected = null;
+            var curList = CurrentList;
+            if (curList.Count > 0 && _selectedIndex < curList.Count)
+                previouslySelected = curList[_selectedIndex].Object;
 
-            // Check if arrived
-            if (distance <= ArrivalThreshold)
+            foreach (var cat in _categoryOrder)
+                _byCategory[cat].Clear();
+
+            foreach (var obj in allObjects)
             {
-                var player2 = MainGame.me?.player;
-                if (player2?.components?.character != null)
+                if (obj == null) continue;
+                if (InteractionDetector.IsPlayer(obj) || InteractionDetector.IsPrefab(obj)) continue;
+                if (!obj.gameObject.activeInHierarchy) continue;
+
+                if (!TryClassify(obj, out var category)) continue;
+
+                var objPos = obj.pos;
+                var distance = Vector2.Distance(objPos, playerPos);
+                if (distance > MaxNavDistance) continue;
+
+                _byCategory[category].Add(new NavigationTarget
                 {
-                    player2.components.character.player_controlled_by_script = false;
-                }
-
-                _isWalking = false;
-                ScreenReader.Say($"Arrived at {_currentTarget.Label}", interrupt: true);
-                _log?.LogInfo("[NAVIGATOR] Arrived at destination");
-                return;
+                    Object = obj,
+                    Label = GetObjectLabelSafe(obj),
+                    Position = objPos,
+                    Distance = distance
+                });
             }
 
-            // Move toward target at fast walking speed
-            var direction = (targetPos - currentPos).normalized;
-            var moveDistance = 20.0f; // Fast walking (20 units per frame ~1200 units/sec at 60fps)
-            var newPos = currentPos + direction * moveDistance;
+            // Active quest targets are gathered separately: they are resolved by
+            // obj_id from the save's task list (not by walking the scene), and they
+            // bypass the distance cap so a far-off quest objective always shows up.
+            GatherQuestTargets(playerPos);
 
-            _log?.LogInfo($"[NAVIGATOR] Moving from {currentPos} to {newPos} (moveDistance={moveDistance})");
-            player.transform.position = newPos;
+            foreach (var cat in _categoryOrder)
+                _byCategory[cat].Sort((a, b) => a.Distance.CompareTo(b.Distance));
+
+            // Start in the first non-empty category if the current one is empty.
+            if (CurrentList.Count == 0)
+            {
+                foreach (var cat in _categoryOrder)
+                {
+                    if (_byCategory[cat].Count > 0) { _currentCategory = cat; break; }
+                }
+            }
+
+            // Restore selection by object identity, else clamp.
+            var list = CurrentList;
+            if (previouslySelected != null)
+            {
+                var idx = list.FindIndex(t => t.Object == previouslySelected);
+                _selectedIndex = idx >= 0 ? idx : 0;
+            }
+            if (_selectedIndex >= list.Count)
+                _selectedIndex = 0;
         }
         catch (Exception ex)
         {
-            _log?.LogError($"[NAVIGATOR] Error during walk: {ex.Message}\n{ex.StackTrace}");
-            StopWalking();
+            _log?.LogError($"[NAVIGATOR] Error refreshing destinations: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Populate the Quests category from the active quests' arrow targets. Each
+    /// <see cref="QuestDefinition"/> carries the on-screen quest arrow's destination via
+    /// <c>arrow_wgo_custom_tag</c> / <c>arrow_wgo_obj_id</c> — the same "special marking"
+    /// the sighted UI points its arrow at (see QuestListGUI). We resolve that world object
+    /// per quest and expose it as a direct navigation target — the screen-reader
+    /// equivalent of the quest arrow. Unlike the scene-scanned categories, quest targets
+    /// ignore the distance cap so a far objective (e.g. "find Gerry") still appears.
+    /// </summary>
+    private static void GatherQuestTargets(Vector2 playerPos)
+    {
+        try
+        {
+            var quests = MainGame.me?.save?.quests?.GetCurrentQuests();
+            if (quests == null) return;
+
+            bool diag = (_questDiagCounter-- <= 0);
+            if (diag) _questDiagCounter = 10; // RefreshDestinations runs every ~30 frames
+            if (diag) DumpNearby(playerPos);
+
+            var questList = _byCategory[NavCategory.Quests];
+            var seen = new HashSet<WorldGameObject>();
+
+            foreach (var quest in quests)
+            {
+                var def = quest?.definition;
+                if (def == null) continue;
+
+                var target = ResolveQuestArrowTarget(def, playerPos);
+
+                if (diag)
+                {
+                    _log?.LogInfo($"[QUESTDIAG] quest={def.id} visible={def.quest_visible} " +
+                                  $"tag='{def.arrow_wgo_custom_tag}' obj_id='{def.arrow_wgo_obj_id}' resolved={(target != null)}");
+                    if (target != null) DumpInteractionInfo(target);
+                }
+
+                // No arrow target set (or its object isn't loaded): nothing to walk to.
+                if (target == null || InteractionDetector.IsPlayer(target)) continue;
+                if (!seen.Add(target)) continue;
+
+                var questName = GetQuestLabelSafe(def.id);
+                var objName = GetObjectLabelSafe(target);
+                var label = string.IsNullOrEmpty(questName) ? objName : $"{questName}: {objName}";
+
+                var objPos = target.pos;
+                questList.Add(new NavigationTarget
+                {
+                    Object = target,
+                    Label = label,
+                    Position = objPos,
+                    Distance = Vector2.Distance(objPos, playerPos)
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] Error gathering quest targets: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Resolve a quest's arrow target the same way the vanilla quest list does: prefer a
+    /// custom-tagged object, else the nearest object matching the arrow's obj_id.
+    /// </summary>
+    private static WorldGameObject ResolveQuestArrowTarget(QuestDefinition def, Vector2 playerPos)
+    {
+        try
+        {
+            WorldGameObject target = null;
+
+            if (!string.IsNullOrEmpty(def.arrow_wgo_custom_tag))
+                target = WorldMap.GetWorldGameObjectByCustomTag(def.arrow_wgo_custom_tag);
+
+            if (target == null && !string.IsNullOrEmpty(def.arrow_wgo_obj_id))
+            {
+                var matches = WorldMap.GetWorldGameObjectsByObjId(def.arrow_wgo_obj_id);
+                if (matches != null)
+                {
+                    float best = float.MaxValue;
+                    foreach (var m in matches)
+                    {
+                        if (m == null) continue;
+                        float d = (playerPos - m.pos).sqrMagnitude;
+                        if (d < best) { best = d; target = m; }
+                    }
+                }
+            }
+
+            return target;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] arrow resolve failed for {def?.id}: {ex.Message}");
+            return null;
+        }
+    }
+
+    // TEMP: dump every active object within ~3 tiles, so we can identify objects the
+    // navigator currently filters out (e.g. a deliverable corpse) and how to handle them.
+    private static void DumpNearby(Vector2 playerPos)
+    {
+        try
+        {
+            var all = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true);
+            if (all == null) return;
+            int n = 0;
+            foreach (var o in all)
+            {
+                if (o == null || !o.gameObject.activeInHierarchy) continue;
+                if (InteractionDetector.IsPlayer(o) || InteractionDetector.IsPrefab(o)) continue;
+                float d = Vector2.Distance(o.pos, playerPos);
+
+                var cls = o.GetType().Name;
+                var id = o.obj_id ?? "";
+                bool hasBody = false;
+                try { hasBody = o.data?.inventory?.Exists(it => it != null && it.id == "body") ?? false; } catch { }
+
+                // Log anything within 3 tiles, OR any corpse/body-bearing object at any
+                // distance (so we find a deliverable body even if it's across the map).
+                bool isBodyish = hasBody || cls == "DeadBodyGameObject"
+                    || id.IndexOf("body", StringComparison.OrdinalIgnoreCase) >= 0
+                    || id.IndexOf("corpse", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (d > 300f && !isBodyish) continue;
+
+                var def = o.obj_def;
+                var tools = "";
+                if (def?.tool_actions?.action_tools != null)
+                    foreach (var t in def.tool_actions.action_tools) tools += t + " ";
+
+                _log?.LogInfo($"[NEARBY]{(isBodyish ? "[BODY]" : "")} id={id} cls={cls} otype={def?.type} " +
+                              $"itype={def?.interaction_type} tools=[{tools.Trim()}] body={hasBody} dist={d:F0}");
+                if (++n >= 40) break;
+            }
+        }
+        catch (Exception ex) { _log?.LogWarning($"[NEARBY] dump failed: {ex.Message}"); }
+    }
+
+    // TEMP: dump what a quest target's interaction actually requires, so we can see why
+    // pressing E does nothing (e.g. needs a tool, or has a condition-gated interaction).
+    private static void DumpInteractionInfo(WorldGameObject obj)
+    {
+        try
+        {
+            var def = obj.obj_def;
+            if (def == null) { _log?.LogInfo($"[QUESTDIAG]   obj_def null for {obj.name}"); return; }
+
+            var tools = "";
+            if (def.tool_actions?.action_tools != null)
+                foreach (var t in def.tool_actions.action_tools) tools += t + " ";
+
+            string hint = "";
+            try { hint = def.GetInteractionHint(obj); } catch (Exception e) { hint = "ERR:" + e.Message; }
+
+            string valid = "null";
+            try { var vi = def.GetValidInteraction(obj); if (vi != null) valid = $"hint='{vi.hint}' script='{vi.script}'"; }
+            catch (Exception e) { valid = "ERR:" + e.Message; }
+
+            _log?.LogInfo($"[QUESTDIAG]   target={obj.obj_id} type={def.interaction_type} " +
+                          $"attached_script='{def.attached_script}' tools=[{tools.Trim()}] " +
+                          $"hint='{hint}' valid_interaction=({valid})");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[QUESTDIAG] DumpInteractionInfo failed: {ex.Message}");
+        }
+    }
+
+    private static string GetQuestLabelSafe(string questId)
+    {
+        try
+        {
+            return ScreenReader.StripNguiCodes(GJL.L("qt_" + questId) ?? "").Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Decide whether an object is a navigable point of interest and which
+    /// category it belongs to. Non-interactive decoration is filtered out.
+    /// </summary>
+    private static bool TryClassify(WorldGameObject obj, out NavCategory category)
+    {
+        category = NavCategory.Other;
+
+        // Doors / zone exits are detected by name (the game has no explicit
+        // teleport interaction_type). Skip the non-usable arrival anchors
+        // (e.g. teleport_point, interaction_type None) — you can't walk through those,
+        // they are only where you land, and listing them clutters the door list.
+        if (obj.name.IndexOf("teleport", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            if (obj.obj_def != null &&
+                obj.obj_def.interaction_type == ObjectDefinition.InteractionType.None)
+                return false;
+
+            category = NavCategory.Doors;
+            return true;
+        }
+
+        var def = obj.obj_def;
+        if (def == null)
+            return false;
+
+        // People: NPCs and mobs.
+        try
+        {
+            if (def.type == ObjectDefinition.ObjType.NPC ||
+                def.type == ObjectDefinition.ObjType.Mob ||
+                def.IsNPC())
+            {
+                category = NavCategory.People;
+                return true;
+            }
+        }
+        catch { }
+
+        // Graves (by interaction type or id).
+        if (def.interaction_type == ObjectDefinition.InteractionType.Grave ||
+            (!string.IsNullOrEmpty(obj.obj_id) &&
+             obj.obj_id.IndexOf("grave", StringComparison.OrdinalIgnoreCase) >= 0))
+        {
+            category = NavCategory.Graves;
+            return true;
+        }
+
+        switch (def.interaction_type)
+        {
+            case ObjectDefinition.InteractionType.Chest:
+                category = NavCategory.Storage;
+                return true;
+            case ObjectDefinition.InteractionType.Craft:
+            case ObjectDefinition.InteractionType.Builder:
+                category = NavCategory.Stations;
+                return true;
+            case ObjectDefinition.InteractionType.RunScript:
+                category = NavCategory.Other;
+                return true;
+            default:
+                // interaction_type == None and not a special case: skip
+                // (grass, rocks scenery, etc.) to keep lists meaningful.
+                return false;
         }
     }
 
@@ -222,7 +835,7 @@ internal static class ObjectNavigator
             // Special handling for graves by checking obj_id
             if (obj != null && !string.IsNullOrEmpty(obj.obj_id))
             {
-                if (obj.obj_id.IndexOf("grave", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (obj.obj_id.IndexOf("grave", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     var cleanId = obj.obj_id.Replace("_", " ").Replace("-", " ");
                     if (cleanId.Length > 0)
@@ -235,72 +848,8 @@ internal static class ObjectNavigator
         }
         catch (Exception ex)
         {
-            _log?.LogWarning($"[NAVIGATOR] Failed to get label for object {obj.name}: {ex.Message}");
+            _log?.LogWarning($"[NAVIGATOR] Failed to get label for object {obj?.name}: {ex.Message}");
             return "Unknown Object";
-        }
-    }
-
-    private static List<NavigationTarget> FindNearbyObjects()
-    {
-        try
-        {
-            var player = MainGame.me?.player;
-            if (player == null)
-            {
-                _log?.LogWarning("[NAVIGATOR] Player is null");
-                return new List<NavigationTarget>();
-            }
-
-            var playerPos = player.transform.position;
-            var playerGridPos = player.grid_pos;
-            var allObjects = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true);
-
-            _log?.LogInfo($"[NAVIGATOR] Found {(allObjects?.Length ?? 0)} total WorldGameObjects");
-
-            if (allObjects == null || allObjects.Length == 0)
-            {
-                _log?.LogWarning("[NAVIGATOR] No WorldGameObjects found");
-                return new List<NavigationTarget>();
-            }
-
-            var filtered1 = allObjects
-                .Where(obj => obj != null && !InteractionDetector.IsPlayer(obj) && !InteractionDetector.IsPrefab(obj))
-                .ToList();
-            _log?.LogInfo($"[NAVIGATOR] After null/player/prefab filter: {filtered1.Count} objects");
-
-            var filtered2 = filtered1
-                .Where(obj => obj.gameObject.activeInHierarchy)
-                .ToList();
-            _log?.LogInfo($"[NAVIGATOR] After active filter: {filtered2.Count} objects");
-
-            var targets = filtered2
-                .Select(obj => {
-                    // Use transform.position for all objects, but keep walking horizontal (ignore Y differences)
-                    var objPos = new Vector3(obj.transform.position.x, playerPos.y, obj.transform.position.z);
-                    var distance = Vector3.Distance(objPos, playerPos);
-                    var label = GetObjectLabelSafe(obj);
-
-                    _log?.LogInfo($"[NAVIGATOR] Object: {obj.name} -> {label}, distance: {distance:F1}m");
-
-                    return new NavigationTarget
-                    {
-                        Object = obj,
-                        Label = label,
-                        Position = objPos,
-                        Distance = distance
-                    };
-                })
-                .Where(t => t.Distance <= MaxNavDistance)
-                .OrderBy(t => t.Distance)
-                .ToList();
-
-            _log?.LogInfo($"[NAVIGATOR] Final list: {targets.Count} navigable objects");
-            return targets;
-        }
-        catch (Exception ex)
-        {
-            _log?.LogError($"[NAVIGATOR] Error finding objects: {ex.Message}");
-            return new List<NavigationTarget>();
         }
     }
 }

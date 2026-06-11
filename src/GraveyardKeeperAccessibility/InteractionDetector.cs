@@ -105,10 +105,12 @@ internal static class InteractionDetector
         if (wgo == null)
             return null;
 
-        // Check if this is an exit/door (teleport object)
+        // Check if this is an exit/door (teleport object). Label it by destination so a
+        // blind player can tell which door leads where (e.g. into the mortuary vs back out)
+        // instead of hearing a row of identical "Door" entries.
         if (IsExitObject(wgo))
         {
-            return "Door";
+            return GetDoorLabel(wgo);
         }
 
         // Try to get a label from the object definition
@@ -132,6 +134,21 @@ internal static class InteractionDetector
         }
 
         return CleanObjectName(wgo.name);
+    }
+
+    /// <summary>
+    /// Name a teleport door by where it leads, derived from its obj_id
+    /// (teleport_inside / teleport_outside / teleport_hatch / ...). Falls back to "Door".
+    /// </summary>
+    internal static string GetDoorLabel(WorldGameObject wgo)
+    {
+        var id = (wgo?.obj_id ?? "").ToLowerInvariant();
+        if (id.Contains("inside")) return "Door inside";
+        if (id.Contains("outside")) return "Door outside";
+        if (id.Contains("hatch")) return "Hatch";
+        if (id.Contains("stairs")) return "Stairs";
+        if (id.Contains("dungeon")) return "Dungeon entrance";
+        return "Door";
     }
 
     private static bool IsExitObject(WorldGameObject wgo)
