@@ -21,6 +21,7 @@ public class Plugin : BaseUnityPlugin
         TechPointsAnnouncer.Init(Log);
         HealthEnergyAnnouncer.Init(Log);
         BuildPlacementHandler.Init(Log);
+        DialogueChoiceHandler.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -43,6 +44,14 @@ public class Plugin : BaseUnityPlugin
 
         // Patch WorldGameObject.Say method for dialogue capture
         TryPatchWorldGameObjectSay(harmony);
+
+        // Make dialogue answer choices (MultiAnswerGUI) keyboard-accessible: announce options
+        // when shown and clear our state once one is committed. See DialogueChoiceHandler.
+        TryPatch(harmony, typeof(DialogueChoiceHandler), nameof(DialogueChoiceHandler.OnAnswersShown),
+            typeof(MultiAnswerGUI), "ShowAnswers",
+            new[] { typeof(List<AnswerVisualData>), typeof(bool) });
+        TryPatch(harmony, typeof(DialogueChoiceHandler), nameof(DialogueChoiceHandler.OnAnswerChosen),
+            typeof(MultiAnswerGUI), "OnChosen", new[] { typeof(string) });
 
         // Announce newly visible quest objectives ("Neue Aufgabe") so the player knows the
         // next step after a dialogue/cutscene. See Patches.GameSave_SetTaskState_Postfix.
@@ -72,6 +81,11 @@ public class Plugin : BaseUnityPlugin
             // keyboard (arrows move, Enter places, etc.). Skip the rest of the update so the
             // nav system and menu reader don't fight it for the same keys.
             if (BuildPlacementHandler.Update())
+                return;
+
+            // Dialogue answer choices own the keyboard while shown (Up/Down to pick an answer,
+            // Enter to confirm) so the world nav and menu reader don't grab the same keys.
+            if (DialogueChoiceHandler.Update())
                 return;
 
             // Handle click input (Z/X keys)

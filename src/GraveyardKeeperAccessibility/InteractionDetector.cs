@@ -406,18 +406,70 @@ internal static class InteractionDetector
     }
 
     /// <summary>
-    /// Name a teleport door by where it leads, derived from its obj_id
-    /// (teleport_inside / teleport_outside / teleport_hatch / ...). Falls back to "Door".
+    /// Name a teleport door so doors that share an obj_id are still distinguishable. The door
+    /// "kind" comes from obj_id (teleport_inside / teleport_outside / hatch / stairs / dungeon);
+    /// the destination comes from custom_tag, which the game formats as
+    /// "tp_&lt;place&gt;_&lt;a|b&gt;[...]" (e.g. "tp_tavern_from_cellar_b_", "tp_mortuary_hatch_2_b").
+    /// So a row of identical "Door inside" entries becomes "Door inside: Tavern cellar",
+    /// "Door inside: Mortuary", etc. Falls back to the bare kind when no place can be recovered.
     /// </summary>
     internal static string GetDoorLabel(WorldGameObject wgo)
     {
         var id = (wgo?.obj_id ?? "").ToLowerInvariant();
-        if (id.Contains("inside")) return "Door inside";
-        if (id.Contains("outside")) return "Door outside";
-        if (id.Contains("hatch")) return "Hatch";
-        if (id.Contains("stairs")) return "Stairs";
-        if (id.Contains("dungeon")) return "Dungeon entrance";
-        return "Door";
+        string kind =
+            id.Contains("inside") ? "Door inside" :
+            id.Contains("outside") ? "Door outside" :
+            id.Contains("hatch") ? "Hatch" :
+            id.Contains("stairs") ? "Stairs" :
+            id.Contains("dungeon") ? "Dungeon entrance" :
+            "Door";
+
+        var place = DoorPlaceFromTag(wgo?.custom_tag);
+        return string.IsNullOrEmpty(place) ? kind : $"{kind}: {place}";
+    }
+
+    /// <summary>
+    /// Recover a human-readable destination from a teleport door's custom_tag. Tags follow the
+    /// game's "tp_&lt;place&gt;_&lt;a|b&gt;[_extra][_]" convention (see the teleport spawns in
+    /// GameSave and Flow_TeleportToWGO, which itself splits the tag on '_' and treats index 1 as
+    /// the place key). Pair-end markers (a/b), direction connectors, numeric suffixes and the kind
+    /// words already conveyed by obj_id are stripped, leaving the descriptive place words.
+    /// Returns null when nothing meaningful remains.
+    /// </summary>
+    private static string DoorPlaceFromTag(string tag)
+    {
+        if (string.IsNullOrEmpty(tag)) return null;
+        tag = tag.ToLowerInvariant().Trim();
+        if (!tag.StartsWith("tp_")) return null;
+
+        // Drop the "tp_" prefix and the trailing "_" that marks the door object (vs its anchor).
+        var body = tag.Substring(3).Trim('_');
+
+        var words = new List<string>();
+        foreach (var part in body.Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (part)
+            {
+                case "a":
+                case "b":
+                case "to":
+                case "from":
+                case "hatch":
+                case "stairs":
+                case "inside":
+                case "outside":
+                    continue;
+            }
+            if (int.TryParse(part, out _)) continue;
+            words.Add(part);
+        }
+
+        if (words.Count == 0) return null;
+
+        var place = string.Join(" ", words).Replace("-", " ").Trim();
+        // Guard against unhelpful single-letter tokens (e.g. "tp_h_a_").
+        if (place.Length < 2) return null;
+        return char.ToUpper(place[0]) + place.Substring(1);
     }
 
     private static bool IsExitObject(WorldGameObject wgo)
