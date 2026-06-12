@@ -12,9 +12,27 @@ internal class GUIElement
     internal UISlider Slider;
     internal UILabel ValueLabel;
     internal BaseItemCellGUI Cell;
+    internal int SortRank;
+
+    // Set for elements discovered from BaseMenuGUI rows (options/main/in-game menus).
+    // These let us drive the game's own widgets directly instead of guessing at
+    // dec/inc buttons, which is both cleaner and avoids announcing rows twice.
+    internal MenuItemGUI MenuItem;
+    internal SimpleOptionsSwitcher OptionsSwitcher;
+    internal SmartSlider Smart;
 
     internal string ReadLabel()
     {
+        if (OptionsSwitcher != null && OptionsSwitcher.label != null)
+        {
+            var val = ScreenReader.StripNguiCodes(OptionsSwitcher.label.text);
+            if (!string.IsNullOrWhiteSpace(val))
+                return Label + ": " + val;
+        }
+
+        if (Smart != null)
+            return Label + ": " + Smart.value;
+
         if (ValueLabel != null && ValueLabel.gameObject.activeInHierarchy)
         {
             var val = ScreenReader.StripNguiCodes(ValueLabel.text);
@@ -84,8 +102,27 @@ internal static class GUIAccessibility
         // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
-        var cellCount = GetActiveElements().Count(e => e.Type == ElementType.ItemCell);
-        ScreenReader.Say(cellCount > 0 ? $"{guiName}, {cellCount} items" : guiName);
+        var active = GetActiveElements();
+        var cellCount = active.Count(e => e.Type == ElementType.ItemCell);
+        var header = cellCount > 0 ? $"{guiName}, {cellCount} items" : guiName;
+
+        // For multi-panel inventory GUIs (e.g. a chest), call out any side that's empty so the
+        // player knows the chest or their own inventory has nothing in it.
+        var emptyDesc = InventoryItemHandler.DescribeEmptyPanels(gui);
+        if (!string.IsNullOrEmpty(emptyDesc))
+            header += $". {emptyDesc}";
+
+        // Auto-focus the first entry so the player lands on something immediately instead of
+        // having to press down once to enter the list.
+        if (active.Count > 0)
+        {
+            SelectedIndex = 0;
+            ScreenReader.Say($"{header}. {active[0].ReadLabel()}");
+        }
+        else
+        {
+            ScreenReader.Say(header);
+        }
     }
 
     internal static void OnGUIClosed(BaseGUI gui)
@@ -102,6 +139,22 @@ internal static class GUIAccessibility
 
     private static void DiscoverElements(BaseGUI gui)
     {
+        // BaseMenuGUI screens (main menu, in-game menu, options) are built from MenuItemGUI
+        // rows, each of which is a button, an options switcher, or a slider. Discovering those
+        // rows directly maps cleanly onto our element types and — crucially — avoids the
+        // generic heuristic below picking up each row a second time (the duplicate-read bug).
+        // SaveSlotsMenuGUI is also a BaseMenuGUI but has no MenuItemGUI rows (its slots are
+        // plain labels), so only take this path when rows actually exist.
+        if (gui is BaseMenuGUI menu)
+        {
+            var menuItems = menu.GetComponentsInChildren<MenuItemGUI>(true);
+            if (menuItems.Length > 0)
+            {
+                DiscoverMenuItems(menu, menuItems);
+                return;
+            }
+        }
+
         // Dump entire hierarchy for debugging
         if (gui.GetType().Name == "SaveSlotsMenuGUI")
         {
@@ -281,6 +334,102 @@ internal static class GUIAccessibility
         }
     }
 
+    // Build the element list for a BaseMenuGUI from its MenuItemGUI rows. Each row is a
+    // slider, an options switcher, or a plain button; we drive the game's own widget so the
+    // behaviour matches mouse/gamepad exactly. A row is only listed once.
+    private static void DiscoverMenuItems(BaseMenuGUI menu, MenuItemGUI[] items)
+    {
+        Plugin.Log.LogInfo($"[DiscoverMenuItems] Found {items.Length} MenuItemGUI rows in {menu.GetType().Name}");
+
+        foreach (var mi in items)
+        {
+            if (mi == null) continue;
+
+            var switcher = mi.GetComponentInChildren<SimpleOptionsSwitcher>(true);
+            var smart = mi.GetComponentInChildren<SmartSlider>(true);
+            var title = GetMenuItemTitle(mi, smart, switcher);
+
+            if (switcher != null)
+            {
+                Elements.Add(new GUIElement
+                {
+                    Go = mi.gameObject,
+                    Label = title,
+                    Type = ElementType.Switcher,
+                    MenuItem = mi,
+                    OptionsSwitcher = switcher
+                });
+            }
+            else if (smart != null)
+            {
+                Elements.Add(new GUIElement
+                {
+                    Go = mi.gameObject,
+                    Label = title,
+                    Type = ElementType.Slider,
+                    MenuItem = mi,
+                    Smart = smart,
+                    Slider = smart.GetComponentInChildren<UISlider>(true)
+                });
+            }
+            else
+            {
+                Elements.Add(new GUIElement
+                {
+                    Go = mi.gameObject,
+                    Label = title,
+                    Type = ElementType.Button,
+                    MenuItem = mi
+                });
+            }
+        }
+
+        // Some menus carry a plain back/close UIButton that isn't a MenuItemGUI row. Pick those
+        // up too, but skip anything already represented by a row or the promo banners.
+        foreach (var button in menu.GetComponentsInChildren<UIButton>(true))
+        {
+            if (button == null) continue;
+            var name = button.name;
+            if (name.Contains("banner") || name.Contains("gk2") || name.Contains("Banner")) continue;
+            if (Elements.Any(e => e.Go == button.gameObject || button.transform.IsChildOf(e.Go.transform))) continue;
+
+            var label = ScreenReader.StripNguiCodes(button.GetComponentInChildren<UILabel>()?.text);
+            if (string.IsNullOrWhiteSpace(label)) label = name;
+            if (string.IsNullOrWhiteSpace(label) || label.Length <= 1) continue;
+
+            Elements.Add(new GUIElement
+            {
+                Go = button.gameObject,
+                Label = label,
+                Type = ElementType.Button
+            });
+        }
+    }
+
+    // The visible title of a menu row, ignoring any label that belongs to the row's slider or
+    // switcher (those hold the current value, not the row name). Falls back to the localized
+    // token the game uses, then the GameObject name.
+    private static string GetMenuItemTitle(MenuItemGUI mi, SmartSlider smart, SimpleOptionsSwitcher switcher)
+    {
+        foreach (var label in mi.GetComponentsInChildren<UILabel>(true))
+        {
+            if (label == null) continue;
+            if (smart != null && label.transform.IsChildOf(smart.transform)) continue;
+            if (switcher != null && label.transform.IsChildOf(switcher.transform)) continue;
+
+            var text = ScreenReader.StripNguiCodes(label.text)?.Trim();
+            if (!string.IsNullOrWhiteSpace(text)) return text;
+        }
+
+        if (!string.IsNullOrEmpty(mi.locale_token))
+        {
+            var loc = ScreenReader.StripNguiCodes(GJL.L(mi.locale_token) ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(loc)) return loc;
+        }
+
+        return mi.name;
+    }
+
     internal static List<GUIElement> GetActiveElements()
     {
         return Elements.Where(e => e.Go != null && e.Go.activeInHierarchy).ToList();
@@ -325,6 +474,31 @@ internal static class GUIAccessibility
         ScreenReader.Say(elem.ReadLabel());
     }
 
+    // Re-discover the current GUI's elements in place (used after a chest move mutates the
+    // grids) and keep focus near where it was, re-announcing the now-current row.
+    private static void RefreshCurrentGUI(int focusIndex)
+    {
+        if (_currentGUI == null) return;
+
+        Elements.Clear();
+        DiscoverElements(_currentGUI);
+
+        // After a move a side may have just become empty — mention it so the player knows.
+        var emptyDesc = InventoryItemHandler.DescribeEmptyPanels(_currentGUI);
+
+        var active = GetActiveElements();
+        if (active.Count == 0)
+        {
+            SelectedIndex = -1;
+            ScreenReader.Say(string.IsNullOrEmpty(emptyDesc) ? "Empty" : emptyDesc);
+            return;
+        }
+
+        SelectedIndex = Mathf.Clamp(focusIndex, 0, active.Count - 1);
+        var label = active[SelectedIndex].ReadLabel();
+        ScreenReader.Say(string.IsNullOrEmpty(emptyDesc) ? label : $"{emptyDesc}. {label}");
+    }
+
     internal static void ActivateSelected()
     {
         var active = GetActiveElements();
@@ -336,12 +510,28 @@ internal static class GUIAccessibility
         {
             // Press the item cell, which fires its on-action callback (e.g. the autopsy
             // table's "extract this body part" flow → confirm dialog the mod reads next).
+            var prevIndex = SelectedIndex;
             InventoryItemHandler.PressItemCell(elem.Cell);
+
+            // A chest moves the item and redraws both grids in place — same GUI, but our
+            // cached cell list is now stale. Re-discover so the player isn't navigating
+            // ghost cells, and keep them on a sensible row. (Stackable items instead open a
+            // count picker, a new GUI that the normal flow will announce.)
+            if (_currentGUI is ChestGUI)
+                RefreshCurrentGUI(prevIndex);
             return;
         }
 
         if (elem.Type == ElementType.Button)
         {
+            // Menu rows fire their configured action directly — matches a mouse click and
+            // plays the same click sound.
+            if (elem.MenuItem != null)
+            {
+                elem.MenuItem.OnMenuItemSelect();
+                return;
+            }
+
             // Try to find a UIButton component (direct, in children, or parent)
             var button = elem.Go.GetComponent<UIButton>();
             if (button == null)
@@ -385,7 +575,12 @@ internal static class GUIAccessibility
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
         var elem = active[SelectedIndex];
-        if (elem.Type == ElementType.Switcher && elem.DecButton != null)
+        if (elem.Type == ElementType.Switcher && elem.OptionsSwitcher != null)
+        {
+            elem.OptionsSwitcher.Dec();
+            ScreenReader.Say(elem.ReadLabel());
+        }
+        else if (elem.Type == ElementType.Switcher && elem.DecButton != null)
         {
             var go = elem.DecButton.gameObject;
             go.SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
@@ -405,7 +600,12 @@ internal static class GUIAccessibility
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
         var elem = active[SelectedIndex];
-        if (elem.Type == ElementType.Switcher && elem.IncButton != null)
+        if (elem.Type == ElementType.Switcher && elem.OptionsSwitcher != null)
+        {
+            elem.OptionsSwitcher.Inc();
+            ScreenReader.Say(elem.ReadLabel());
+        }
+        else if (elem.Type == ElementType.Switcher && elem.IncButton != null)
         {
             var go = elem.IncButton.gameObject;
             go.SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
@@ -424,7 +624,8 @@ internal static class GUIAccessibility
         float newValue = Mathf.Clamp01(elem.Slider.value + delta);
         elem.Slider.value = newValue;
 
-        var smartSlider = elem.Slider.GetComponent<SmartSlider>();
+        // Menu sliders carry the SmartSlider directly; otherwise look for one on the UISlider.
+        var smartSlider = elem.Smart ?? elem.Slider.GetComponent<SmartSlider>();
         if (smartSlider != null)
         {
             smartSlider.OnSliderChanged();

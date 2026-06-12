@@ -204,28 +204,113 @@ internal static class InventoryItemHandler
     {
         try
         {
+            // Collect cells separately so we can group them by their owning panel. In a chest
+            // the player needs to know which items are in the chest (to take) versus in their
+            // own inventory (to put); a flat, unlabeled list hides that distinction.
+            var discovered = new List<GUIElement>();
+
             foreach (var cell in gui.GetComponentsInChildren<BaseItemCellGUI>(true))
             {
                 if (cell == null || !cell.gameObject.activeInHierarchy) continue;
                 if (cell.id_empty) continue;
                 if (elements.Any(e => e.Go == cell.gameObject)) continue;
+                if (discovered.Any(e => e.Go == cell.gameObject)) continue;
 
                 var label = DescribeItemCell(cell);
                 if (string.IsNullOrEmpty(label)) continue;
 
-                _log?.LogInfo($"[INVENTORY] Adding item cell: '{label}'");
-                elements.Add(new GUIElement
+                var (panel, rank) = GetPanelContext(cell, gui);
+                if (!string.IsNullOrEmpty(panel))
+                    label = $"{panel}: {label}";
+
+                discovered.Add(new GUIElement
                 {
                     Go = cell.gameObject,
                     Label = label,
                     Type = ElementType.ItemCell,
-                    Cell = cell
+                    Cell = cell,
+                    SortRank = rank
                 });
+            }
+
+            // Stable sort: chest items first, then the player's inventory.
+            foreach (var elem in discovered.OrderBy(e => e.SortRank))
+            {
+                _log?.LogInfo($"[INVENTORY] Adding item cell: '{elem.Label}'");
+                elements.Add(elem);
             }
         }
         catch (Exception ex)
         {
             _log?.LogError($"[INVENTORY] Error discovering item cells: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Determine which inventory panel an item cell belongs to and a sort rank for ordering.
+    /// For a chest, the chest side ("Chest", rank 0) sorts before the player side
+    /// ("Inventory", rank 1). Other two-panel GUIs fall back to the panel's own title.
+    /// </summary>
+    private static (string label, int rank) GetPanelContext(BaseItemCellGUI cell, BaseGUI gui)
+    {
+        try
+        {
+            var panel = cell.GetComponentInParent<InventoryPanelGUI>();
+            if (panel == null) return (null, 2);
+
+            if (gui is ChestGUI chest)
+            {
+                if (panel == chest.chest_panel) return ("Chest", 0);
+                if (panel == chest.player_panel) return ("Inventory", 1);
+            }
+
+            return (PanelLabel(panel, gui), 2);
+        }
+        catch
+        {
+            return (null, 2);
+        }
+    }
+
+    /// <summary>Spoken name for an inventory panel: "Chest"/"Inventory" for a chest, else its title.</summary>
+    private static string PanelLabel(InventoryPanelGUI panel, BaseGUI gui)
+    {
+        if (panel == null) return null;
+        if (gui is ChestGUI chest)
+        {
+            if (panel == chest.chest_panel) return "Chest";
+            if (panel == chest.player_panel) return "Inventory";
+        }
+        var title = ScreenReader.StripNguiCodes(panel.panel_title?.text)?.Trim();
+        return string.IsNullOrWhiteSpace(title) ? null : title;
+    }
+
+    /// <summary>
+    /// For multi-panel inventory GUIs (chest, etc.), describe which panels hold no items so the
+    /// player knows e.g. the chest is empty even though their own inventory isn't. Returns null
+    /// when nothing's empty or the GUI isn't panel-based.
+    /// </summary>
+    internal static string DescribeEmptyPanels(BaseGUI gui)
+    {
+        try
+        {
+            var empties = new List<string>();
+            foreach (var panel in gui.GetComponentsInChildren<InventoryPanelGUI>(true))
+            {
+                if (panel == null || !panel.gameObject.activeInHierarchy) continue;
+
+                bool hasItems = panel.GetComponentsInChildren<BaseItemCellGUI>(true)
+                    .Any(c => c != null && c.gameObject.activeInHierarchy && !c.id_empty);
+                if (hasItems) continue;
+
+                empties.Add($"{PanelLabel(panel, gui) ?? "Inventory"} empty");
+            }
+
+            return empties.Count > 0 ? string.Join(", ", empties) : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

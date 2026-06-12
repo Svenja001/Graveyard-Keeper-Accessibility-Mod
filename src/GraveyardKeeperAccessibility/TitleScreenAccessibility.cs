@@ -22,10 +22,17 @@ internal static class TitleScreenAccessibility
 
         DiscoverElements(screen);
 
-        var activeCount = Elements.Count(e => e.Go != null && e.Go.activeInHierarchy);
-        Plugin.Log.LogInfo($"Title screen opened, {activeCount} elements discovered");
+        var active = GetActiveElements();
+        Plugin.Log.LogInfo($"Title screen opened, {active.Count} elements discovered");
 
-        if (activeCount > 0 || !_announced)
+        if (active.Count > 0)
+        {
+            // Auto-focus the first entry so the player doesn't have to press down once first.
+            _announced = true;
+            SelectedIndex = 0;
+            ScreenReader.Say($"Title Screen. {active[0].ReadLabel()}");
+        }
+        else if (!_announced)
         {
             _announced = true;
             ScreenReader.Say("Title Screen");
