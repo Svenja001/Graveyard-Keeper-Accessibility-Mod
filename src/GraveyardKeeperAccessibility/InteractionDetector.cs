@@ -6,15 +6,17 @@ internal static class InteractionDetector
     private static int _lastHighlightedDropId = 0;
     private static bool _wasCarrying = false;
     private static bool _wasCrafting = false;
+    private static WorldGameObject _lastWorkHighlight = null;
+    private static bool _wasWorking = false;
+    private static float _workAnnounceAccum = 0f;
     private static ManualLogSource _log;
     private static bool _initialized = false;
     private const float InteractionRange = 300f;
 
     /// <summary>
-    /// True while a station next to the player is mid-craft. Station crafts (e.g. the autopsy
-    /// table cutting flesh) are timed and the player performs them by standing put — walking
-    /// away cancels them and can wedge the station. The navigator reads this to refuse
-    /// auto-walk until the craft finishes. Updated each frame by <see cref="AnnounceCraftState"/>.
+    /// True while a station next to the player is mid-craft (autopsy table cutting flesh, etc.).
+    /// The navigator reads this to refuse auto-walk so the player doesn't accidentally abandon a
+    /// half-finished craft. Updated each frame by <see cref="AnnounceWorkState"/>.
     /// </summary>
     internal static bool IsPlayerCrafting => _wasCrafting;
 
@@ -67,9 +69,9 @@ internal static class InteractionDetector
             // HasOverheadBody(), so announce the carry state on change.
             AnnounceCarryState();
 
-            // Station crafts (autopsy etc.) are timed and silent — tell the player to hold
-            // still while one runs, and announce when it's done. Reuses the nearby reference.
-            AnnounceCraftState(nearby);
+            // Work actions (hold F to craft/dig/chop/...) are invisible to a blind player:
+            // they get no "Press F" prompt and no progress cue. Announce both.
+            AnnounceWorkState(nearby);
         }
         catch (Exception ex)
         {
@@ -148,50 +150,98 @@ internal static class InteractionDetector
         }
     }
 
-    // Announce when an adjacent station starts/finishes a timed craft. Station crafts (cut
-    // flesh on the autopsy table, etc.) set the station's craft component to is_crafting and
-    // require the player to stand and perform the work; a blind player gets no cue, so they
-    // move and cancel it — which on the autopsy table strands the body and wedges the station.
-    private static void AnnounceCraftState(WorldGameObject station)
+    // Narrate the "hold F to work" loop a sighted player relies on but a blind player can't
+    // see: the on-screen "Press F" prompt, the work-in-progress animation, and craft completion.
+    //
+    // Work in GK (cut flesh on the autopsy table, dig a grave, chop a tree...) is performed by
+    // HOLDING GameKey.Work (default F) while standing on the object's dock point. The game shows
+    // a "Press F" bubble and sets character.wgo_hilighted_for_work when you're in position; while
+    // you hold F the character plays the Tool animation (anim_state == Tool) and progress fills.
+    private static void AnnounceWorkState(WorldGameObject nearby)
     {
         try
         {
-            CraftComponent craft = null;
-            // Only inspect the station the player is actually standing at (the nearest
-            // interactable). Stations the player has used already have components inited, so
-            // this is cheap and avoids a fresh scene scan.
-            if (station != null && station.obj_def != null && station.obj_def.has_craft)
-                craft = station.components?.craft;
+            var character = MainGame.me?.player?.components?.character;
+            if (character == null) return;
 
-            bool crafting = craft != null && craft.is_crafting;
-            if (crafting == _wasCrafting) return;
-            _wasCrafting = crafting;
-
-            if (crafting)
+            // 1) "Press F to {verb}" — fires when a new object becomes highlighted for work,
+            //    i.e. exactly when the game would show the on-screen F prompt.
+            WorldGameObject highlight = null;
+            try { highlight = character.wgo_hilighted_for_work; } catch { }
+            if (highlight != _lastWorkHighlight)
             {
-                string name = null;
-                try
-                {
-                    var output = craft.current_craft?.GetFirstRealOutput();
-                    name = ScreenReader.StripNguiCodes(output?.definition?.GetItemName() ?? "").Trim();
-                }
-                catch { }
-
-                ScreenReader.Say(string.IsNullOrEmpty(name)
-                    ? "Crafting, stand still until it finishes"
-                    : $"Crafting {name}, stand still until it finishes", interrupt: false);
+                _lastWorkHighlight = highlight;
+                if (highlight != null)
+                    ScreenReader.Say($"Press F to {GetWorkVerb(highlight)}", interrupt: false);
             }
-            else
+
+            // 2) "In progress" — while the character is actually working (F held, Tool anim).
+            bool working = false;
+            try { working = character.anim_state == CharAnimState.Tool; } catch { }
+            if (working)
             {
-                // Finished (or the craft was cleared). The inventory handler announces the
-                // delivered item separately; this just signals the station is free again.
-                ScreenReader.Say("Craft finished", interrupt: false);
+                if (!_wasWorking) _workAnnounceAccum = 0f;
+                _workAnnounceAccum += Time.deltaTime;
+                if (_workAnnounceAccum >= 2f)
+                {
+                    _workAnnounceAccum = 0f;
+                    ScreenReader.Say("In progress", interrupt: false);
+                }
+            }
+            _wasWorking = working;
+
+            // 3) "Finished" — when a station craft (autopsy etc.) completes. Crafts clear
+            //    is_crafting on completion; dig/chop completion announces itself naturally
+            //    (the grave opens, drops appear), so we only add a cue for crafts.
+            CraftComponent craft = null;
+            if (nearby != null && nearby.obj_def != null && nearby.obj_def.has_craft)
+                craft = nearby.components?.craft;
+            bool crafting = craft != null && craft.is_crafting && craft.current_craft != null;
+            if (crafting != _wasCrafting)
+            {
+                _wasCrafting = crafting;
+                if (!crafting)
+                    ScreenReader.Say("Finished", interrupt: false);
             }
         }
         catch (Exception ex)
         {
-            _log?.LogWarning($"[INTERACTION] craft-state announce failed: {ex.Message}");
+            _log?.LogWarning($"[INTERACTION] work-state announce failed: {ex.Message}");
         }
+    }
+
+    // The action verb a sighted player sees on the F prompt. Crafting stations say
+    // "craft {output}"; tool actions map the required tool to its verb (shovel→dig, etc.).
+    private static string GetWorkVerb(WorldGameObject wgo)
+    {
+        try
+        {
+            var craft = (wgo.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
+            if (craft != null && craft.is_crafting && craft.current_craft != null)
+            {
+                string outName = null;
+                try { outName = ScreenReader.StripNguiCodes(craft.current_craft.GetFirstRealOutput()?.definition?.GetItemName() ?? "").Trim(); }
+                catch { }
+                return string.IsNullOrEmpty(outName) ? "craft" : $"craft {outName}";
+            }
+
+            var actions = wgo.obj_def?.tool_actions;
+            if (actions != null && !actions.no_actions && actions.action_tools != null && actions.action_tools.Count > 0)
+            {
+                switch (actions.action_tools[0])
+                {
+                    case ItemDefinition.ItemType.Shovel: return "dig";
+                    case ItemDefinition.ItemType.Axe: return "chop";
+                    case ItemDefinition.ItemType.Pickaxe: return "mine";
+                    case ItemDefinition.ItemType.Hammer: return "build";
+                    case ItemDefinition.ItemType.Hand: return "gather";
+                }
+            }
+
+            if (craft != null) return "craft";
+        }
+        catch { }
+        return "work";
     }
 
     /// <summary>
