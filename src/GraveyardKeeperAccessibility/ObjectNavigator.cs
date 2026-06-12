@@ -6,6 +6,12 @@ internal struct NavigationTarget
     internal string Label;
     internal float Distance;   // world units (96 per tile)
     internal Vector2 Position;  // canonical x-y world position (z is render depth)
+
+    // Ground drops (DeadBody/loot) are DropResGameObjects, not WorldGameObjects, so Object
+    // is null for them. They sit on walkable ground, so we walk onto the exact tile (no
+    // approach offset) to land inside the game's pickup/highlight area.
+    internal bool IsDrop;
+    internal GameObject DropGo;  // the drop's GameObject (for selection-identity tracking)
 }
 
 /// <summary>
@@ -15,6 +21,7 @@ internal struct NavigationTarget
 internal enum NavCategory
 {
     Quests,
+    Items,
     Doors,
     Graves,
     People,
@@ -33,6 +40,7 @@ internal static class ObjectNavigator
     private static readonly NavCategory[] _categoryOrder =
     {
         NavCategory.Quests,
+        NavCategory.Items,
         NavCategory.Doors,
         NavCategory.Graves,
         NavCategory.People,
@@ -47,12 +55,12 @@ internal static class ObjectNavigator
     private static bool _isWalking = false;
     private static int _updateCounter = 0;
     private static int _walkWatchdog = 0;
-    private static int _questDiagCounter = 0;
 
-    // The object to turn and face when the current walk arrives, so the game's own
-    // E-interaction (which only fires on whatever is in front of the character) works
-    // without the player having to manually aim their facing.
-    private static WorldGameObject _walkFaceTarget;
+    // World position to turn and face when the current walk arrives, so the game's own
+    // E-interaction / drop-pickup (which only fires on whatever is in front of the
+    // character) works without the player having to manually aim their facing. Stored as
+    // a point so it works for both WorldGameObjects and ground drops (which aren't WGOs).
+    private static Vector2? _walkFacePos;
 
     // Deferred fallback walk: when A* fails we cannot re-issue GoTo synchronously
     // (the game's OnPathFailed clobbers the new request right after our callback),
@@ -192,6 +200,7 @@ internal static class ObjectNavigator
     private static string CategoryName(NavCategory cat) => cat switch
     {
         NavCategory.Quests => "Quest targets",
+        NavCategory.Items => "Items",
         NavCategory.Doors => "Doors",
         NavCategory.Graves => "Graves",
         NavCategory.People => "People",
@@ -284,7 +293,9 @@ internal static class ObjectNavigator
         // tile; targeting their exact centre makes the player pathfinder reject the
         // path ("end point too far", a hard 17-unit limit). The approach point lands
         // on walkable ground right next to the object — where you'd stand anyway.
-        var dest = ApproachPoint(target.Position);
+        // Drops sit on walkable ground, so walk onto the exact tile (no offset) to land
+        // inside the game's pickup/highlight area.
+        var dest = target.IsDrop ? target.Position : ApproachPoint(target.Position);
 
         // Pad the player-graph bounds for both the snap scan and the A* walk below,
         // so the search can route around fences/walls instead of failing.
@@ -301,7 +312,7 @@ internal static class ObjectNavigator
                           $"objDist={Vector2.Distance(pp, target.Position):F0} snapDist={Vector2.Distance(pp, dest):F0}");
 
             _fallbackPending = false;
-            _walkFaceTarget = target.Object;   // face it on arrival so plain E interacts
+            _walkFacePos = target.Position;   // face it on arrival so plain E interacts/picks up
             ScreenReader.Say($"Walking to {target.Label}, {DistanceText(target.Distance)}", interrupt: true);
             StartWalk(dest, target.Label, MovementComponent.GoToMethod.AStar);
         }
@@ -320,16 +331,22 @@ internal static class ObjectNavigator
     /// </summary>
     private static void FacePlayerAtTarget()
     {
-        var target = _walkFaceTarget;
-        _walkFaceTarget = null;
-        if (target == null) return;
+        var facePos = _walkFacePos;
+        _walkFacePos = null;
+        if (facePos == null) return;
 
         try
         {
-            var character = MainGame.me?.player?.components?.character;
+            var player = MainGame.me?.player;
+            var character = player?.components?.character;
             if (character == null) return;
-            character.LookAt(target);
-            _log?.LogInfo($"[NAVIGATOR] Facing {target.name} for interaction");
+
+            // LookAt(Vector2) takes a DIRECTION, so pass target-minus-player. Works for both
+            // WorldGameObjects and ground drops since we only need the point, not the object.
+            var dir = facePos.Value - player.pos;
+            if (dir.sqrMagnitude > 0.0001f)
+                character.LookAt(dir);
+            _log?.LogInfo($"[NAVIGATOR] Facing {facePos.Value} for interaction");
         }
         catch (Exception ex)
         {
@@ -518,11 +535,16 @@ internal static class ObjectNavigator
                 return;
 
             // Remember what is currently selected so we can keep the cursor on it
-            // across refreshes even as distances change.
+            // across refreshes even as distances change. Drops have no WorldGameObject,
+            // so track their GameObject separately.
             WorldGameObject previouslySelected = null;
+            GameObject previouslySelectedDrop = null;
             var curList = CurrentList;
             if (curList.Count > 0 && _selectedIndex < curList.Count)
+            {
                 previouslySelected = curList[_selectedIndex].Object;
+                previouslySelectedDrop = curList[_selectedIndex].DropGo;
+            }
 
             foreach (var cat in _categoryOrder)
                 _byCategory[cat].Clear();
@@ -553,6 +575,10 @@ internal static class ObjectNavigator
             // bypass the distance cap so a far-off quest objective always shows up.
             GatherQuestTargets(playerPos);
 
+            // Ground drops (bodies/loot) are DropResGameObjects, not WorldGameObjects, so
+            // they need their own scan or they stay invisible to the screen reader.
+            GatherDropTargets(playerPos);
+
             foreach (var cat in _categoryOrder)
                 _byCategory[cat].Sort((a, b) => a.Distance.CompareTo(b.Distance));
 
@@ -565,11 +591,13 @@ internal static class ObjectNavigator
                 }
             }
 
-            // Restore selection by object identity, else clamp.
+            // Restore selection by object identity (WorldGameObject or drop), else clamp.
             var list = CurrentList;
-            if (previouslySelected != null)
+            if (previouslySelected != null || previouslySelectedDrop != null)
             {
-                var idx = list.FindIndex(t => t.Object == previouslySelected);
+                var idx = list.FindIndex(t =>
+                    (previouslySelected != null && t.Object == previouslySelected) ||
+                    (previouslySelectedDrop != null && t.DropGo == previouslySelectedDrop));
                 _selectedIndex = idx >= 0 ? idx : 0;
             }
             if (_selectedIndex >= list.Count)
@@ -597,10 +625,6 @@ internal static class ObjectNavigator
             var quests = MainGame.me?.save?.quests?.GetCurrentQuests();
             if (quests == null) return;
 
-            bool diag = (_questDiagCounter-- <= 0);
-            if (diag) _questDiagCounter = 10; // RefreshDestinations runs every ~30 frames
-            if (diag) DumpNearby(playerPos);
-
             var questList = _byCategory[NavCategory.Quests];
             var seen = new HashSet<WorldGameObject>();
 
@@ -610,13 +634,6 @@ internal static class ObjectNavigator
                 if (def == null) continue;
 
                 var target = ResolveQuestArrowTarget(def, playerPos);
-
-                if (diag)
-                {
-                    _log?.LogInfo($"[QUESTDIAG] quest={def.id} visible={def.quest_visible} " +
-                                  $"tag='{def.arrow_wgo_custom_tag}' obj_id='{def.arrow_wgo_obj_id}' resolved={(target != null)}");
-                    if (target != null) DumpInteractionInfo(target);
-                }
 
                 // No arrow target set (or its object isn't loaded): nothing to walk to.
                 if (target == null || InteractionDetector.IsPlayer(target)) continue;
@@ -679,73 +696,71 @@ internal static class ObjectNavigator
         }
     }
 
-    // TEMP: dump every active object within ~3 tiles, so we can identify objects the
-    // navigator currently filters out (e.g. a deliverable corpse) and how to handle them.
-    private static void DumpNearby(Vector2 playerPos)
+    /// <summary>
+    /// Populate the Items category from ground drops. Bodies and large loot are
+    /// <see cref="DropResGameObject"/>s (plain MonoBehaviours), not WorldGameObjects, so the
+    /// scene scan in <see cref="RefreshDestinations"/> never sees them and a blind player has
+    /// no way to find e.g. a delivered corpse. We enumerate the drops directly, expose each
+    /// as a navigable target, and mark it <c>IsDrop</c> so the walk lands on its exact tile
+    /// (inside the game's pickup/highlight area) and plain E carries it.
+    /// </summary>
+    private static void GatherDropTargets(Vector2 playerPos)
     {
         try
         {
-            var all = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true);
-            if (all == null) return;
-            int n = 0;
-            foreach (var o in all)
+            var drops = UnityEngine.Object.FindObjectsOfType<DropResGameObject>();
+            if (drops == null || drops.Length == 0) return;
+
+            var itemList = _byCategory[NavCategory.Items];
+
+            foreach (var drop in drops)
             {
-                if (o == null || !o.gameObject.activeInHierarchy) continue;
-                if (InteractionDetector.IsPlayer(o) || InteractionDetector.IsPrefab(o)) continue;
-                float d = Vector2.Distance(o.pos, playerPos);
+                if (drop == null || drop.is_collected) continue;
 
-                var cls = o.GetType().Name;
-                var id = o.obj_id ?? "";
-                bool hasBody = false;
-                try { hasBody = o.data?.inventory?.Exists(it => it != null && it.id == "body") ?? false; } catch { }
+                var res = drop.res;
+                if (res == null || res.IsEmpty() || res.definition == null) continue;
 
-                // Log anything within 3 tiles, OR any corpse/body-bearing object at any
-                // distance (so we find a deliverable body even if it's across the map).
-                bool isBodyish = hasBody || cls == "DeadBodyGameObject"
-                    || id.IndexOf("body", StringComparison.OrdinalIgnoreCase) >= 0
-                    || id.IndexOf("corpse", StringComparison.OrdinalIgnoreCase) >= 0;
-                if (d > 300f && !isBodyish) continue;
+                var pos = (Vector2)drop.transform.position;
+                var distance = Vector2.Distance(pos, playerPos);
+                if (distance > MaxNavDistance) continue;
 
-                var def = o.obj_def;
-                var tools = "";
-                if (def?.tool_actions?.action_tools != null)
-                    foreach (var t in def.tool_actions.action_tools) tools += t + " ";
-
-                _log?.LogInfo($"[NEARBY]{(isBodyish ? "[BODY]" : "")} id={id} cls={cls} otype={def?.type} " +
-                              $"itype={def?.interaction_type} tools=[{tools.Trim()}] body={hasBody} dist={d:F0}");
-                if (++n >= 40) break;
+                itemList.Add(new NavigationTarget
+                {
+                    Object = null,
+                    Label = GetDropLabelSafe(res),
+                    Position = pos,
+                    Distance = distance,
+                    IsDrop = true,
+                    DropGo = drop.gameObject
+                });
             }
-        }
-        catch (Exception ex) { _log?.LogWarning($"[NEARBY] dump failed: {ex.Message}"); }
-    }
-
-    // TEMP: dump what a quest target's interaction actually requires, so we can see why
-    // pressing E does nothing (e.g. needs a tool, or has a condition-gated interaction).
-    private static void DumpInteractionInfo(WorldGameObject obj)
-    {
-        try
-        {
-            var def = obj.obj_def;
-            if (def == null) { _log?.LogInfo($"[QUESTDIAG]   obj_def null for {obj.name}"); return; }
-
-            var tools = "";
-            if (def.tool_actions?.action_tools != null)
-                foreach (var t in def.tool_actions.action_tools) tools += t + " ";
-
-            string hint = "";
-            try { hint = def.GetInteractionHint(obj); } catch (Exception e) { hint = "ERR:" + e.Message; }
-
-            string valid = "null";
-            try { var vi = def.GetValidInteraction(obj); if (vi != null) valid = $"hint='{vi.hint}' script='{vi.script}'"; }
-            catch (Exception e) { valid = "ERR:" + e.Message; }
-
-            _log?.LogInfo($"[QUESTDIAG]   target={obj.obj_id} type={def.interaction_type} " +
-                          $"attached_script='{def.attached_script}' tools=[{tools.Trim()}] " +
-                          $"hint='{hint}' valid_interaction=({valid})");
         }
         catch (Exception ex)
         {
-            _log?.LogWarning($"[QUESTDIAG] DumpInteractionInfo failed: {ex.Message}");
+            _log?.LogError($"[NAVIGATOR] Error gathering drop targets: {ex.Message}");
+        }
+    }
+
+    private static string GetDropLabelSafe(Item res)
+    {
+        try
+        {
+            var name = res.definition.GetItemName();
+            if (!string.IsNullOrEmpty(name))
+                name = ScreenReader.StripNguiCodes(name).Trim();
+            if (string.IsNullOrEmpty(name))
+                name = res.id;
+
+            // Bodies are the marquee case — make them obviously a corpse to carry.
+            if (res.definition.type == ItemDefinition.ItemType.Body && !string.IsNullOrEmpty(name))
+                return name;
+
+            var count = res.value > 1 ? $" x{res.value}" : "";
+            return name + count;
+        }
+        catch
+        {
+            return "Item";
         }
     }
 

@@ -3,6 +3,8 @@ namespace GraveyardKeeperAccessibility;
 internal static class InteractionDetector
 {
     private static string _lastAnnouncedObject = null;
+    private static int _lastHighlightedDropId = 0;
+    private static bool _wasCarrying = false;
     private static ManualLogSource _log;
     private static bool _initialized = false;
     private const float InteractionRange = 300f;
@@ -47,10 +49,77 @@ internal static class InteractionDetector
             {
                 _lastAnnouncedObject = null;
             }
+
+            // Ground drops (bodies/loot) only highlight visually and have no interaction
+            // bubble, so a blind player gets no cue they can pick something up.
+            AnnounceHighlightedDrop();
+
+            // Knowing whether a body is in hand matters: doors like the mortuary gate on
+            // HasOverheadBody(), so announce the carry state on change.
+            AnnounceCarryState();
         }
         catch (Exception ex)
         {
             _log?.LogError($"[INTERACTION] Error: {ex.Message}");
+        }
+    }
+
+    // Announce when a carryable ground drop becomes highlighted (i.e. close + faced),
+    // which is exactly when vanilla E will pick it up.
+    private static void AnnounceHighlightedDrop()
+    {
+        try
+        {
+            var drop = DropResGameObject.currently_higlighted_obj;
+            if (drop == null || drop.is_collected ||
+                drop.res == null || drop.res.IsEmpty() || drop.res.definition == null)
+            {
+                _lastHighlightedDropId = 0;
+                return;
+            }
+
+            int id = drop.GetInstanceID();
+            if (id == _lastHighlightedDropId) return;
+            _lastHighlightedDropId = id;
+
+            var name = ScreenReader.StripNguiCodes(drop.res.definition.GetItemName() ?? "").Trim();
+            if (string.IsNullOrEmpty(name)) name = drop.res.id;
+            ScreenReader.Say($"{name}, press E to pick up", interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INTERACTION] highlighted-drop announce failed: {ex.Message}");
+        }
+    }
+
+    // Announce transitions of the player's overhead carry slot (e.g. picking up / putting
+    // down a corpse), so the player knows whether they're carrying a body.
+    private static void AnnounceCarryState()
+    {
+        try
+        {
+            var character = MainGame.me?.player?.components?.character;
+            if (character == null) return;
+
+            bool carrying = character.has_overhead;
+            if (carrying == _wasCarrying) return;
+            _wasCarrying = carrying;
+
+            if (carrying)
+            {
+                string name = null;
+                try { name = ScreenReader.StripNguiCodes(character.GetOverheadItem()?.definition?.GetItemName() ?? "").Trim(); }
+                catch { }
+                ScreenReader.Say(string.IsNullOrEmpty(name) ? "Carrying item" : $"Carrying {name}", interrupt: false);
+            }
+            else
+            {
+                ScreenReader.Say("Hands free", interrupt: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INTERACTION] carry-state announce failed: {ex.Message}");
         }
     }
 
