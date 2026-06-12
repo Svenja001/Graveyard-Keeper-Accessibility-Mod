@@ -1,6 +1,6 @@
 namespace GraveyardKeeperAccessibility;
 
-internal enum ElementType { Button, Switcher, Slider }
+internal enum ElementType { Button, Switcher, Slider, ItemCell }
 
 internal class GUIElement
 {
@@ -11,6 +11,7 @@ internal class GUIElement
     internal UIButton IncButton;
     internal UISlider Slider;
     internal UILabel ValueLabel;
+    internal BaseItemCellGUI Cell;
 
     internal string ReadLabel()
     {
@@ -80,7 +81,11 @@ internal static class GUIAccessibility
             }
         }
 
-        ScreenReader.Say(guiName);
+        // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
+        // mention the count so the player knows there's a grid to arrow through. The cells'
+        // names are read individually as the player navigates.
+        var cellCount = GetActiveElements().Count(e => e.Type == ElementType.ItemCell);
+        ScreenReader.Say(cellCount > 0 ? $"{guiName}, {cellCount} items" : guiName);
     }
 
     internal static void OnGUIClosed(BaseGUI gui)
@@ -175,6 +180,12 @@ internal static class GUIAccessibility
                 Type = ElementType.Button
             });
         }
+
+        // Inventory-style item cells (BaseItemCellGUI) are not UIButtons, so the loop above
+        // misses them. InventoryItemHandler owns that concern — it appends each navigable
+        // cell (chest/inventory grids and the autopsy table's flesh/bones/blood extraction
+        // grid) as an ItemCell element. Activating one presses the cell.
+        InventoryItemHandler.DiscoverItemCells(gui, Elements);
 
         foreach (var slider in gui.GetComponentsInChildren<UISlider>(true))
         {
@@ -320,6 +331,14 @@ internal static class GUIAccessibility
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
         var elem = active[SelectedIndex];
+
+        if (elem.Type == ElementType.ItemCell)
+        {
+            // Press the item cell, which fires its on-action callback (e.g. the autopsy
+            // table's "extract this body part" flow → confirm dialog the mod reads next).
+            InventoryItemHandler.PressItemCell(elem.Cell);
+            return;
+        }
 
         if (elem.Type == ElementType.Button)
         {

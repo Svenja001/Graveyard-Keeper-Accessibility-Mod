@@ -189,4 +189,95 @@ internal static class InventoryItemHandler
 
         return items;
     }
+
+    // ---- Item-cell navigation (shared with GUIAccessibility) --------------------
+    // Inventory/craft item cells are BaseItemCellGUI, not UIButtons, so GUIAccessibility's
+    // button discovery misses them. These helpers let the menu navigator expose item cells
+    // as navigable elements — covering chest/inventory grids and the autopsy table's
+    // body-part extraction grid (cut out flesh/bones/blood).
+
+    /// <summary>
+    /// Find every non-empty, active item cell in the GUI and append it to the navigator's
+    /// element list so the player can arrow to it and activate it.
+    /// </summary>
+    internal static void DiscoverItemCells(BaseGUI gui, List<GUIElement> elements)
+    {
+        try
+        {
+            foreach (var cell in gui.GetComponentsInChildren<BaseItemCellGUI>(true))
+            {
+                if (cell == null || !cell.gameObject.activeInHierarchy) continue;
+                if (cell.id_empty) continue;
+                if (elements.Any(e => e.Go == cell.gameObject)) continue;
+
+                var label = DescribeItemCell(cell);
+                if (string.IsNullOrEmpty(label)) continue;
+
+                _log?.LogInfo($"[INVENTORY] Adding item cell: '{label}'");
+                elements.Add(new GUIElement
+                {
+                    Go = cell.gameObject,
+                    Label = label,
+                    Type = ElementType.ItemCell,
+                    Cell = cell
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[INVENTORY] Error discovering item cells: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Spoken label for an item cell: the localized item name, plus the stack count when
+    /// more than one. Returns null for empty/unnamed cells.
+    /// </summary>
+    internal static string DescribeItemCell(BaseItemCellGUI cell)
+    {
+        try
+        {
+            var item = cell.item;
+            if (item == null || item.IsEmpty()) return null;
+
+            // The autopsy grid includes a pseudo-item cell for inserting a part into the
+            // body; its raw name is unreadable, so give it a clear spoken label.
+            if (item.id == "insertion_button_pseudoitem")
+                return "Insert body part";
+
+            var name = ScreenReader.StripNguiCodes(item.definition?.GetItemName() ?? "").Trim();
+            if (string.IsNullOrEmpty(name)) name = item.id;
+            if (string.IsNullOrEmpty(name)) return null;
+
+            return item.value > 1 ? $"{name}, {item.value}" : name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Activate an item cell — fires its on-action callback (e.g. the autopsy table's
+    /// "extract this body part" flow → confirm dialog).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BaseItemCellGUI.OnPressed"/> runs the cell's action first, then plays a
+    /// click sound by dereferencing <c>container.selection.gameObject</c>. For cells outside
+    /// a fully-initialized inventory widget (e.g. some CraftGUI cells) <c>container.selection</c>
+    /// is null, so that last line throws AFTER the real action already ran. Swallow it here so
+    /// the exception never bubbles up into Plugin.Update and abort the rest of the frame.
+    /// </remarks>
+    internal static void PressItemCell(BaseItemCellGUI cell)
+    {
+        if (cell == null) return;
+        try
+        {
+            cell.OnPressed(false);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INVENTORY] item cell press threw after action (harmless): {ex.Message}");
+        }
+    }
 }

@@ -278,6 +278,15 @@ internal static class ObjectNavigator
 
     internal static void WalkToSelected()
     {
+        // Don't walk away from a station mid-craft: timed station crafts (e.g. the autopsy
+        // table cutting flesh) are performed by the player standing put, and moving cancels
+        // them — which strands the body and wedges the table. Make the player wait it out.
+        if (InteractionDetector.IsPlayerCrafting)
+        {
+            ScreenReader.Say("A craft is in progress. Stand still until it finishes.", interrupt: true);
+            return;
+        }
+
         var list = CurrentList;
         if (list.Count == 0)
         {
@@ -834,7 +843,12 @@ internal static class ObjectNavigator
                 category = NavCategory.Stations;
                 return true;
             case ObjectDefinition.InteractionType.RunScript:
-                category = NavCategory.Other;
+                // Script-driven objects that craft (e.g. the autopsy table mf_preparation_1,
+                // whose E runs PutOverheadToWGO/OpenCraft) are functionally crafting stations,
+                // so file them under Stations rather than the catch-all Other. has_craft is a
+                // cheap obj_def flag — avoid touching obj.components, which lazily allocates a
+                // ComponentsManager for every scene object on each refresh.
+                category = def.has_craft ? NavCategory.Stations : NavCategory.Other;
                 return true;
             default:
                 // interaction_type == None and not a special case: skip

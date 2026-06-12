@@ -5,9 +5,18 @@ internal static class InteractionDetector
     private static string _lastAnnouncedObject = null;
     private static int _lastHighlightedDropId = 0;
     private static bool _wasCarrying = false;
+    private static bool _wasCrafting = false;
     private static ManualLogSource _log;
     private static bool _initialized = false;
     private const float InteractionRange = 300f;
+
+    /// <summary>
+    /// True while a station next to the player is mid-craft. Station crafts (e.g. the autopsy
+    /// table cutting flesh) are timed and the player performs them by standing put — walking
+    /// away cancels them and can wedge the station. The navigator reads this to refuse
+    /// auto-walk until the craft finishes. Updated each frame by <see cref="AnnounceCraftState"/>.
+    /// </summary>
+    internal static bool IsPlayerCrafting => _wasCrafting;
 
     internal static void Init(ManualLogSource log)
     {
@@ -57,6 +66,10 @@ internal static class InteractionDetector
             // Knowing whether a body is in hand matters: doors like the mortuary gate on
             // HasOverheadBody(), so announce the carry state on change.
             AnnounceCarryState();
+
+            // Station crafts (autopsy etc.) are timed and silent — tell the player to hold
+            // still while one runs, and announce when it's done. Reuses the nearby reference.
+            AnnounceCraftState(nearby);
         }
         catch (Exception ex)
         {
@@ -114,12 +127,108 @@ internal static class InteractionDetector
             }
             else
             {
-                ScreenReader.Say("Hands free", interrupt: false);
+                // The body just left the overhead slot. If a nearby table/station now holds
+                // it, tell the player it landed (and how to use it) instead of a bare "Hands
+                // free" — the placement is otherwise silent (PutOverheadToWGO logs nothing).
+                var table = FindNearbyObjectHoldingBody();
+                if (table != null)
+                {
+                    var label = GetObjectLabel(table);
+                    ScreenReader.Say($"Body placed on {label}, press E to open", interrupt: false);
+                }
+                else
+                {
+                    ScreenReader.Say("Hands free", interrupt: false);
+                }
             }
         }
         catch (Exception ex)
         {
             _log?.LogWarning($"[INTERACTION] carry-state announce failed: {ex.Message}");
+        }
+    }
+
+    // Announce when an adjacent station starts/finishes a timed craft. Station crafts (cut
+    // flesh on the autopsy table, etc.) set the station's craft component to is_crafting and
+    // require the player to stand and perform the work; a blind player gets no cue, so they
+    // move and cancel it — which on the autopsy table strands the body and wedges the station.
+    private static void AnnounceCraftState(WorldGameObject station)
+    {
+        try
+        {
+            CraftComponent craft = null;
+            // Only inspect the station the player is actually standing at (the nearest
+            // interactable). Stations the player has used already have components inited, so
+            // this is cheap and avoids a fresh scene scan.
+            if (station != null && station.obj_def != null && station.obj_def.has_craft)
+                craft = station.components?.craft;
+
+            bool crafting = craft != null && craft.is_crafting;
+            if (crafting == _wasCrafting) return;
+            _wasCrafting = crafting;
+
+            if (crafting)
+            {
+                string name = null;
+                try
+                {
+                    var output = craft.current_craft?.GetFirstRealOutput();
+                    name = ScreenReader.StripNguiCodes(output?.definition?.GetItemName() ?? "").Trim();
+                }
+                catch { }
+
+                ScreenReader.Say(string.IsNullOrEmpty(name)
+                    ? "Crafting, stand still until it finishes"
+                    : $"Crafting {name}, stand still until it finishes", interrupt: false);
+            }
+            else
+            {
+                // Finished (or the craft was cleared). The inventory handler announces the
+                // delivered item separately; this just signals the station is free again.
+                ScreenReader.Say("Craft finished", interrupt: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INTERACTION] craft-state announce failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Find the closest interactable object within reach whose inventory now contains a body
+    /// (e.g. the autopsy table after laying a corpse down). Used to confirm placement audibly.
+    /// </summary>
+    private static WorldGameObject FindNearbyObjectHoldingBody()
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null) return null;
+            var playerPos = player.pos;
+
+            WorldGameObject best = null;
+            float bestDist = float.MaxValue;
+            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true))
+            {
+                if (obj == null || IsPlayer(obj) || IsPrefab(obj)) continue;
+                if (!obj.gameObject.activeInHierarchy) continue;
+
+                // 1 tile = 96 world units; only consider objects within a couple of tiles.
+                var dist = Vector2.Distance(obj.pos, playerPos);
+                if (dist > 240f || dist >= bestDist) continue;
+
+                Item body = null;
+                try { body = obj.GetBodyFromInventory(); } catch { }
+                if (body == null) continue;
+
+                best = obj;
+                bestDist = dist;
+            }
+            return best;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -187,9 +296,9 @@ internal static class InteractionDetector
         {
             if (wgo.obj_def != null)
             {
-                // Try to use the object id
+                // Try to use the object id, localized to a readable name where possible
                 if (!string.IsNullOrEmpty(wgo.obj_def.id))
-                    return CleanObjectName(wgo.obj_def.id);
+                    return LocalizedObjectName(wgo.obj_def.id);
 
                 // Fall back to interaction type
                 var typeString = wgo.obj_def.interaction_type.ToString();
@@ -247,6 +356,28 @@ internal static class InteractionDetector
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Localized, human-readable name for an object-definition id. The game stores object
+    /// names under their id key (see WorldGameObject: <c>GJL.L(this.obj_def.id)</c>), so
+    /// "mf_preparation_1" resolves to "Autopsy table" / "Obduktionstisch" instead of the
+    /// raw "Mf preparation 1". Falls back to the prettified id when there is no translation.
+    /// </summary>
+    private static string LocalizedObjectName(string objId)
+    {
+        try
+        {
+            var loc = ScreenReader.StripNguiCodes(GJL.L(objId) ?? "").Trim();
+            // GJL.L echoes the key back (or returns a "!key!" marker) when a translation
+            // is missing — only use the result when it is a real, different string.
+            if (!string.IsNullOrEmpty(loc) &&
+                !loc.Equals(objId, StringComparison.OrdinalIgnoreCase) &&
+                loc.IndexOf('!') < 0)
+                return loc;
+        }
+        catch { }
+        return CleanObjectName(objId);
     }
 
     private static string CleanObjectName(string objectName)
