@@ -414,7 +414,7 @@ internal static class InteractionDetector
     /// "mf_preparation_1" resolves to "Autopsy table" / "Obduktionstisch" instead of the
     /// raw "Mf preparation 1". Falls back to the prettified id when there is no translation.
     /// </summary>
-    private static string LocalizedObjectName(string objId)
+    internal static string LocalizedObjectName(string objId)
     {
         try
         {

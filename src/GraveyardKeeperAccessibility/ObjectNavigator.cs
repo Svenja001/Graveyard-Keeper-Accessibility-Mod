@@ -888,10 +888,45 @@ internal static class ObjectNavigator
                it == ObjectDefinition.InteractionType.Chest;
     }
 
+    /// <summary>
+    /// The recognizable name the tutorial/Gerry use for a build desk ("planning table"),
+    /// localized to the player's language. The game itself names build desks after their
+    /// zone (e.g. "Alter Friedhof"/"Old Cemetery"), which a player told to "go to the
+    /// Planungstisch" can't connect to — so we lead with this word and keep the zone name
+    /// only to tell multiple desks apart.
+    /// </summary>
+    private static string PlanningTableWord()
+    {
+        string code = "";
+        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
+        return code switch
+        {
+            "de" => "Planungstisch",
+            "fr" => "Table de planification",
+            "es" => "Mesa de planificación",
+            "it" => "Tavolo di progettazione",
+            "ru" => "Стол планирования",
+            _ => "Planning table",
+        };
+    }
+
     private static string GetObjectLabelSafe(WorldGameObject obj)
     {
         try
         {
+            // Build desks (the "planning table" Gerry sends you to) localize to their zone
+            // name, e.g. "Alter Friedhof", which doesn't match what the player is told to look
+            // for. Lead with the recognizable planning-table term, appending the zone name so
+            // desks in different zones stay distinguishable.
+            if (obj?.obj_def?.interaction_type == ObjectDefinition.InteractionType.Builder)
+            {
+                var zoneName = InteractionDetector.GetObjectLabel(obj);
+                var planning = PlanningTableWord();
+                return string.IsNullOrEmpty(zoneName) || zoneName == planning
+                    ? planning
+                    : $"{planning}: {zoneName}";
+            }
+
             // Special handling for graves by checking obj_id. Skip build/craft/chest
             // stations whose id merely embeds "grave" (e.g. the graveyard build desk):
             // those localize to a proper station name, so prefixing "Grave " would both

@@ -19,6 +19,7 @@ public class Plugin : BaseUnityPlugin
         ZoneScoreAnnouncer.Init(Log);
         TechPointsAnnouncer.Init(Log);
         HealthEnergyAnnouncer.Init(Log);
+        BuildPlacementHandler.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -33,6 +34,11 @@ public class Plugin : BaseUnityPlugin
         // so A* can route around fences/walls to enclosed targets (e.g. graves).
         TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.RefreshPlayerGraph_Prefix),
             typeof(AStarTools), "RefreshPlayerGraph", new[] { typeof(Vector2), typeof(Vector2) });
+
+        // Stop the build ghost snapping to the mouse while we drive it from the keyboard
+        // (see BuildPlacementHandler). MoveObjectToMouse is a private, parameterless method.
+        TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.MoveObjectToMouse_Prefix),
+            typeof(BuildModeLogics), "MoveObjectToMouse", Type.EmptyTypes);
 
         // Patch WorldGameObject.Say method for dialogue capture
         TryPatchWorldGameObjectSay(harmony);
@@ -54,6 +60,12 @@ public class Plugin : BaseUnityPlugin
                 Log.LogInfo($"[SCENE CHANGE] {_lastSceneName ?? "null"} -> {currentScene}");
                 _lastSceneName = currentScene;
             }
+
+            // Accessible build placement: while the build ghost is live, this owns the
+            // keyboard (arrows move, Enter places, etc.). Skip the rest of the update so the
+            // nav system and menu reader don't fight it for the same keys.
+            if (BuildPlacementHandler.Update())
+                return;
 
             // Handle click input (Z/X keys)
             ClickHandler.Update();

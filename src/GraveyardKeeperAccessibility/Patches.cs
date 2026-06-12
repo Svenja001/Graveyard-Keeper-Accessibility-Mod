@@ -43,6 +43,15 @@ internal static class Patches
         GUIAccessibility.OnHover(__instance, isOver);
     }
 
+    // While we drive the placement ghost from the keyboard, suppress the game's mouse-follow.
+    // BuildModeLogics.UpdateWhilePlacing -> ProcessMovement -> MoveObjectToMouse snaps the ghost
+    // back onto the cursor every frame; skipping it lets our arrow-key MoveCurrentByDir steps
+    // actually stick. Returning false skips the original method body.
+    public static bool MoveObjectToMouse_Prefix()
+    {
+        return !BuildPlacementHandler.Active;
+    }
+
     // The player pathfinder rescans its graph (graph 2) to a thin rectangle sized to
     // the straight player->destination line. That's too tight to route around fences
     // and walls (e.g. reaching a grave inside the cemetery), so A* fails even when the

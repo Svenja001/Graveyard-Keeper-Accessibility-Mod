@@ -155,6 +155,18 @@ internal static class GUIAccessibility
             }
         }
 
+        // The build-desk catalog reuses the regular CraftGUI in "build" mode. Its generic
+        // UIButtons are all anonymous "Anfertigen" (Craft) buttons, so the heuristic below
+        // would list four identical "Anfertigen" entries with no clue what you're building.
+        // Instead, enumerate the CraftItemGUI rows directly and label each with the build's
+        // name + whether you can afford it. Activating a row presses its cell, which the game
+        // routes to CraftBuilding -> placement (handled by BuildPlacementHandler).
+        if (gui is CraftGUI craftGui && MainGame.me?.build_mode_logics?.IsBuilding() == true)
+        {
+            DiscoverBuildCatalogItems(craftGui);
+            return;
+        }
+
         // Dump entire hierarchy for debugging
         if (gui.GetType().Name == "SaveSlotsMenuGUI")
         {
@@ -428,6 +440,89 @@ internal static class GUIAccessibility
         }
 
         return mi.name;
+    }
+
+    // CraftItemGUI.CanCraft(int? amount) is private; cache the MethodInfo so we can tell the
+    // player whether a build option is currently affordable.
+    private static MethodInfo _canCraftMethod;
+
+    /// <summary>
+    /// List the build-desk catalog as one navigable row per buildable object, named and with
+    /// an affordability hint. Each row's cell, when activated, fires the same action a mouse
+    /// click would (CraftItemGUI.OnItemAction -> OnCraft -> CraftBuilding).
+    /// </summary>
+    private static void DiscoverBuildCatalogItems(CraftGUI craftGui)
+    {
+        var items = craftGui.GetItemsList();
+        if (items == null)
+        {
+            Plugin.Log.LogWarning("[BUILD] CraftGUI has no items list");
+            return;
+        }
+
+        int added = 0;
+        foreach (var cri in items)
+        {
+            if (cri == null || !cri.gameObject.activeInHierarchy) continue;
+            var cell = cri.item_gui;
+            if (cell == null) continue;
+
+            Elements.Add(new GUIElement
+            {
+                Go = cri.gameObject,
+                Label = BuildCatalogLabel(cri),
+                Type = ElementType.ItemCell,
+                Cell = cell
+            });
+            added++;
+        }
+
+        Plugin.Log.LogInfo($"[BUILD] Catalog discovered {added} build option(s)");
+    }
+
+    /// <summary>Spoken label for a build catalog row: the object name + affordability.</summary>
+    private static string BuildCatalogLabel(CraftItemGUI cri)
+    {
+        string name = null;
+        try
+        {
+            // In build mode CraftItemGUI.Redraw sets label_name to the localized object name.
+            name = ScreenReader.StripNguiCodes(cri.label_name?.text)?.Trim();
+        }
+        catch { }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            try
+            {
+                var def = cri.craft_definition;
+                if (def != null)
+                    name = ScreenReader.StripNguiCodes(GJL.L(def.GetNameNonLocalized()) ?? "").Trim();
+            }
+            catch { }
+        }
+
+        if (string.IsNullOrWhiteSpace(name)) name = "Build option";
+
+        return CanBuild(cri) ? name : $"{name}, not enough materials";
+    }
+
+    private static bool CanBuild(CraftItemGUI cri)
+    {
+        try
+        {
+            // Prefer the build-zone inventory check (matches what placement enforces).
+            var def = cri.craft_definition;
+            var logics = MainGame.me?.build_mode_logics;
+            if (def != null && logics != null)
+                return logics.CanBuild(def);
+
+            _canCraftMethod ??= AccessTools.Method(typeof(CraftItemGUI), "CanCraft", new[] { typeof(int?) });
+            if (_canCraftMethod != null)
+                return (bool)_canCraftMethod.Invoke(cri, new object[] { null });
+        }
+        catch { }
+        return true;
     }
 
     internal static List<GUIElement> GetActiveElements()
