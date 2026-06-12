@@ -193,7 +193,7 @@ internal static class ObjectNavigator
         }
 
         var target = list[_selectedIndex];
-        ScreenReader.Say($"{name}, {list.Count}. {target.Label}, {DistanceText(target.Distance)}", interrupt: true);
+        ScreenReader.Say($"{name}, {list.Count}. {target.Label}, {DistanceText(target.Distance)}{SkullSuffix(target)}", interrupt: true);
         _log?.LogInfo($"[NAVIGATOR] Category {name} ({list.Count}) -> {target.Label}");
     }
 
@@ -242,7 +242,7 @@ internal static class ObjectNavigator
         {
             if (_selectedIndex >= list.Count) _selectedIndex = 0;
             var target = list[_selectedIndex];
-            var message = $"{target.Label}, {DistanceText(target.Distance)}, {_selectedIndex + 1} of {list.Count}";
+            var message = $"{target.Label}, {DistanceText(target.Distance)}, {_selectedIndex + 1} of {list.Count}{SkullSuffix(target)}";
             ScreenReader.Say(message, interrupt: false);
             _log?.LogInfo($"[NAVIGATOR] Announced: {message}");
         }
@@ -272,6 +272,13 @@ internal static class ObjectNavigator
     {
         var tiles = worldDistance / TileSize;
         return $"{tiles:F0} meters away";
+    }
+
+    // Append red/white skull info when the target is a grave's body or a corpse drop.
+    private static string SkullSuffix(NavigationTarget target)
+    {
+        var skulls = SkullInfo.Describe(SkullInfo.GetBodyItem(target));
+        return string.IsNullOrEmpty(skulls) ? "" : $". {skulls}";
     }
 
     // ---- Walking via the game's native A* pathfinding ----------------------
@@ -824,10 +831,12 @@ internal static class ObjectNavigator
         }
         catch { }
 
-        // Graves (by interaction type or id).
-        if (def.interaction_type == ObjectDefinition.InteractionType.Grave ||
-            (!string.IsNullOrEmpty(obj.obj_id) &&
-             obj.obj_id.IndexOf("grave", StringComparison.OrdinalIgnoreCase) >= 0))
+        // Real, interactable graves (open the GraveGUI). Classify these by their
+        // dedicated interaction type, NOT by an obj_id substring — "graveyard_builddesk"
+        // (the grave planning/build desk) embeds "grave" but is a Builder station and is
+        // handled below. The greedy substring catch is kept only as a default fallback so
+        // non-interactive grave fixtures still list under Graves.
+        if (def.interaction_type == ObjectDefinition.InteractionType.Grave)
         {
             category = NavCategory.Graves;
             return true;
@@ -840,6 +849,8 @@ internal static class ObjectNavigator
                 return true;
             case ObjectDefinition.InteractionType.Craft:
             case ObjectDefinition.InteractionType.Builder:
+                // Build desks (incl. the graveyard build desk where you plan/mark a grave)
+                // open a build catalog — functionally a crafting station.
                 category = NavCategory.Stations;
                 return true;
             case ObjectDefinition.InteractionType.RunScript:
@@ -851,26 +862,48 @@ internal static class ObjectNavigator
                 category = def.has_craft ? NavCategory.Stations : NavCategory.Other;
                 return true;
             default:
-                // interaction_type == None and not a special case: skip
-                // (grass, rocks scenery, etc.) to keep lists meaningful.
+                // Non-interactive grave fixtures (empty grave grounds, graveyard zone
+                // markers) have no Grave interaction but read as graves by id — keep them
+                // navigable under Graves. Everything else (grass, scenery) is skipped.
+                if (!string.IsNullOrEmpty(obj.obj_id) &&
+                    obj.obj_id.IndexOf("grave", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    category = NavCategory.Graves;
+                    return true;
+                }
                 return false;
         }
+    }
+
+    /// <summary>
+    /// True for objects that open a build/craft/chest UI on interact. Used so a station
+    /// whose obj_id happens to contain "grave" (the graveyard build desk) keeps its proper
+    /// localized name instead of being relabelled as a tombstone.
+    /// </summary>
+    private static bool IsStationLike(WorldGameObject obj)
+    {
+        var it = obj?.obj_def?.interaction_type;
+        return it == ObjectDefinition.InteractionType.Builder ||
+               it == ObjectDefinition.InteractionType.Craft ||
+               it == ObjectDefinition.InteractionType.Chest;
     }
 
     private static string GetObjectLabelSafe(WorldGameObject obj)
     {
         try
         {
-            // Special handling for graves by checking obj_id
-            if (obj != null && !string.IsNullOrEmpty(obj.obj_id))
+            // Special handling for graves by checking obj_id. Skip build/craft/chest
+            // stations whose id merely embeds "grave" (e.g. the graveyard build desk):
+            // those localize to a proper station name, so prefixing "Grave " would both
+            // mislabel them and bury them as if they were tombstones.
+            if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
+                obj.obj_id.IndexOf("grave", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                !IsStationLike(obj))
             {
-                if (obj.obj_id.IndexOf("grave", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    var cleanId = obj.obj_id.Replace("_", " ").Replace("-", " ");
-                    if (cleanId.Length > 0)
-                        cleanId = char.ToUpper(cleanId[0]) + cleanId.Substring(1);
-                    return "Grave " + cleanId.Trim();
-                }
+                var cleanId = obj.obj_id.Replace("_", " ").Replace("-", " ");
+                if (cleanId.Length > 0)
+                    cleanId = char.ToUpper(cleanId[0]) + cleanId.Substring(1);
+                return "Grave " + cleanId.Trim();
             }
 
             return InteractionDetector.GetObjectLabel(obj);

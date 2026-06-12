@@ -15,6 +15,10 @@ public class Plugin : BaseUnityPlugin
         InventoryItemHandler.Init(Log);
         ClickHandler.Init(Log);
         ObjectNavigator.Init(Log);
+        DayTimeAnnouncer.Init(Log);
+        ZoneScoreAnnouncer.Init(Log);
+        TechPointsAnnouncer.Init(Log);
+        HealthEnergyAnnouncer.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -305,6 +309,14 @@ public class Plugin : BaseUnityPlugin
                 ObjectNavigator.WalkToSelected();
             else if (Input.GetKeyDown(KeyCode.Escape) && ObjectNavigator.IsWalking)
                 ObjectNavigator.StopWalking();
+            else if (Input.GetKeyDown(KeyCode.Q) && !ctrl)
+                DayTimeAnnouncer.Announce();
+            else if (Input.GetKeyDown(KeyCode.G) && !ctrl)
+                ZoneScoreAnnouncer.Announce();
+            else if (Input.GetKeyDown(KeyCode.P) && !ctrl)
+                TechPointsAnnouncer.Announce();
+            else if (Input.GetKeyDown(KeyCode.H) && !ctrl)
+                HealthEnergyAnnouncer.Announce();
         }
         catch (Exception ex)
         {
