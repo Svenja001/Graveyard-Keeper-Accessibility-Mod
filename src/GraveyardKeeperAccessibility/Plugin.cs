@@ -16,6 +16,7 @@ public class Plugin : BaseUnityPlugin
         ClickHandler.Init(Log);
         ObjectNavigator.Init(Log);
         DayTimeAnnouncer.Init(Log);
+        QuestAnnouncer.Init(Log);
         ZoneScoreAnnouncer.Init(Log);
         TechPointsAnnouncer.Init(Log);
         HealthEnergyAnnouncer.Init(Log);
@@ -42,6 +43,12 @@ public class Plugin : BaseUnityPlugin
 
         // Patch WorldGameObject.Say method for dialogue capture
         TryPatchWorldGameObjectSay(harmony);
+
+        // Announce newly visible quest objectives ("Neue Aufgabe") so the player knows the
+        // next step after a dialogue/cutscene. See Patches.GameSave_SetTaskState_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.GameSave_SetTaskState_Postfix),
+            typeof(GameSave), "SetTaskState",
+            new[] { typeof(string), typeof(string), typeof(KnownNPC.TaskState.State), typeof(Action) });
 
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
@@ -329,6 +336,8 @@ public class Plugin : BaseUnityPlugin
                 TechPointsAnnouncer.Announce();
             else if (Input.GetKeyDown(KeyCode.H) && !ctrl)
                 HealthEnergyAnnouncer.Announce();
+            else if (Input.GetKeyDown(KeyCode.R) && !ctrl)
+                QuestAnnouncer.Announce();
         }
         catch (Exception ex)
         {

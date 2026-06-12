@@ -10,14 +10,27 @@ internal static class DayTimeAnnouncer
 {
     private static ManualLogSource _log;
 
-    // Weekday names, indexed the same way the HUD's sins circle picks "today".
-    // num = (12 - day_of_week) % 6 maps onto these six sins.
-    private static readonly string[] WeekdayNames =
-        { "Sloth", "Wrath", "Envy", "Gluttony", "Lust", "Pride" };
+    // Graveyard Keeper's week is a 6-day cycle whose days are named after sins. We speak each
+    // day by its German sin name ("Tag der Faulheit"), genitive-correct per sin. Indexed by
+    // (12 - day_of_week) % 6, the same mapping the HUD's sins circle uses to pick "today"
+    // (Flow_GetDayOfWeek: Sloth, Wrath, Envy, Gluttony, Lust, Pride).
+    private static readonly string[] WeekdayDayNames =
+        { "Tag der Faulheit", "Tag des Zorns", "Tag des Neids", "Tag der Völlerei", "Tag der Wollust", "Tag des Hochmuts" };
 
     internal static void Init(ManualLogSource log)
     {
         _log = log;
+    }
+
+    /// <summary>
+    /// The weekday name for an absolute calendar day number, e.g. day 6 → "Tag der Faulheit".
+    /// Mirrors the game's day → day_of_week → sin cycle so dialogue like "ich komme an Tag 6"
+    /// can also speak which day-of-week that falls on.
+    /// </summary>
+    internal static string DayNameForDay(int day)
+    {
+        int dow = ((day % 6) + 6) % 6;
+        return WeekdayDayNames[(12 - dow) % 6];
     }
 
     internal static void Announce()
@@ -32,7 +45,7 @@ internal static class DayTimeAnnouncer
 
             int day = MainGame.me.save.day;
             int dayOfWeek = MainGame.me.save.day_of_week;
-            string weekday = WeekdayNames[(12 - dayOfWeek) % 6];
+            string weekday = WeekdayDayNames[(12 - dayOfWeek) % 6];
 
             string clock = FormatTime();
 
