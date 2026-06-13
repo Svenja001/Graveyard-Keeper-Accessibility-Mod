@@ -436,7 +436,7 @@ internal static class InteractionDetector
     /// words already conveyed by obj_id are stripped, leaving the descriptive place words.
     /// Returns null when nothing meaningful remains.
     /// </summary>
-    private static string DoorPlaceFromTag(string tag)
+    internal static string DoorPlaceFromTag(string tag)
     {
         if (string.IsNullOrEmpty(tag)) return null;
         tag = tag.ToLowerInvariant().Trim();

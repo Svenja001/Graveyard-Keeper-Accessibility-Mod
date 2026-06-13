@@ -156,6 +156,10 @@ public class Plugin : BaseUnityPlugin
 
             if (!GUIAccessibility.HasActiveGUI) return;
 
+            // Voice live changes to a watched amount/price slider (the game steps it on
+            // Left/Right; this announces the new value).
+            GUIAccessibility.UpdateWatchers();
+
             var activeGUI = GUIAccessibility.GetActiveElements();
             var countGUI = activeGUI.Count;
             if (countGUI == 0) return;
@@ -173,6 +177,11 @@ public class Plugin : BaseUnityPlugin
             else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
                 GUIAccessibility.ActivateSelected();
+                GUIAccessibility.CheckForNewGUI();
+            }
+            else if (Input.GetKeyDown(KeyCode.Delete))
+            {
+                GUIAccessibility.DeleteSelected();
                 GUIAccessibility.CheckForNewGUI();
             }
         }
@@ -340,8 +349,8 @@ public class Plugin : BaseUnityPlugin
                 ObjectNavigator.AnnounceSelected();
             else if (Input.GetKeyDown(KeyCode.Home) && ctrl)
                 ObjectNavigator.WalkToSelected();
-            else if (Input.GetKeyDown(KeyCode.Escape) && ObjectNavigator.IsWalking)
-                ObjectNavigator.StopWalking();
+            else if (Input.GetKeyDown(KeyCode.Escape) && ObjectNavigator.IsBusy)
+                ObjectNavigator.CancelNavigation();
             else if (Input.GetKeyDown(KeyCode.Q) && !ctrl)
                 DayTimeAnnouncer.Announce();
             else if (Input.GetKeyDown(KeyCode.G) && !ctrl)

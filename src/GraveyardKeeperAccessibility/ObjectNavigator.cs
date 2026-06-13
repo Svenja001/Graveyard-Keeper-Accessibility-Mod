@@ -21,6 +21,7 @@ internal struct NavigationTarget
 internal enum NavCategory
 {
     Quests,
+    Landmarks,
     Items,
     Doors,
     Graves,
@@ -40,6 +41,7 @@ internal static class ObjectNavigator
     private static readonly NavCategory[] _categoryOrder =
     {
         NavCategory.Quests,
+        NavCategory.Landmarks,
         NavCategory.Items,
         NavCategory.Doors,
         NavCategory.Graves,
@@ -55,6 +57,44 @@ internal static class ObjectNavigator
     private static bool _isWalking = false;
     private static int _updateCounter = 0;
     private static int _walkWatchdog = 0;
+
+    // Long-distance auto-walk: targets too far for the A* player-graph to path to in one go
+    // (e.g. the Tavern from home) are walked in short hops. Each tick we aim a chunk-sized
+    // step toward the target, snap it to walkable ground, and let native A* route that hop;
+    // on arrival we issue the next hop until close enough for the precise final approach.
+    private static bool _longWalkActive = false;
+    private static NavigationTarget _longWalkTarget;
+    private static Vector2 _longWalkProgressPos;     // last position where we made real progress
+    private static int _longWalkStuckTicks = 0;      // consecutive hops with no progress
+    private static Vector2 _longWalkAnnouncePos;     // last position we announced remaining distance
+
+    // Obstacle-aware route computed on the whole-map NPC navmesh (graph 0). The player's own
+    // GoTo is locked to the thin graph-2 box and a 17-unit endpoint cap, so it walks straight
+    // into fences it should route around. Instead we ask graph 0 (what villagers path on) for
+    // a full route, then drive the player hop-by-hop along its waypoints — hugging the navmesh
+    // around walls/fences. Null while none is computed (then we fall back to straight hops).
+    private static bool _routePending = false;
+    private static bool _routeNeedsRecompute = false;
+    // Exit-assist: building interiors are navmesh regions disconnected from the outside world, so
+    // a route from inside to an outdoor target fails. When that happens we instead walk the player
+    // to the nearest exit door and prompt them to press E to step outside, then retry.
+    private static bool _exitAssisting = false;
+    private static string _exitAssistLabel;
+    private static Vector2 _longWalkDest;            // route end (approach point near the target)
+    // Partial-route chaining: when the target is unreachable on the navmesh (e.g. an NPC inside
+    // a building), graph 0 returns a path to the closest reachable node — the entrance/outside.
+    // We walk that, then re-route from the new spot to advance region-by-region, until either
+    // the target becomes reachable or the closest-reachable gap stops improving (navmesh limit).
+    private static bool _routeReachesTarget = true;  // this route's endpoint actually reaches the goal
+    private static bool _finalPartial = false;       // navmesh can't get closer; stop at route end
+    private static float _bestEndGap;                // smallest route-endpoint-to-goal gap seen so far
+    private static int _stalledRecomputes = 0;       // consecutive partial routes with no gap improvement
+
+    // Compass beacon: the manual fallback used only when the auto-walker gets boxed in by
+    // geometry it can't route around. We call out bearing + distance and let the player walk.
+    private static bool _beaconActive = false;
+    private static NavigationTarget _beaconTarget;
+    private static Vector2 _beaconLastAnnouncePos;
 
     // World position to turn and face when the current walk arrives, so the game's own
     // E-interaction / drop-pickup (which only fires on whatever is in front of the
@@ -76,7 +116,33 @@ internal static class ObjectNavigator
     private const int UpdateInterval = 30;                 // refresh list every 30 frames
     private const float ApproachOffset = 80f;              // stop ~1 tile short, on walkable ground
 
+    // Beyond LongWalkStartDistance the A* player graph can't path in one shot, so Ctrl+Home
+    // follows a graph-0 route until within FinalApproachDistance, then does the precise single
+    // A* approach. ProgressDistance/StuckTickLimit detect being boxed in.
+    private const float LongWalkStartDistance = 14f * TileSize;
+    private const float FinalApproachDistance = 11f * TileSize;
+    private const float ProgressDistance = 3f * TileSize;
+    private const float AnnounceProgressDistance = 10f * TileSize;
+    // TickLongWalk runs every frame, so this is in frames: how long the player may make less
+    // than ProgressDistance of headway before we treat the native follow as stuck. Generous so
+    // brief pauses at waypoints / slow stretches don't trip it.
+    private const int StuckTickLimit = 180;
+    // A graph-0 route whose endpoint is farther than this from the goal is a partial path: the
+    // target isn't navmesh-reachable, so we walk to that closest reachable point (the entrance).
+    private const float PartialRouteThreshold = 10f * TileSize;
+    // A partial re-route must shrink the endpoint-to-goal gap by at least this much to count as
+    // progress; after StalledRecomputeLimit partials with no improvement we've hit the navmesh
+    // limit (as close as walking can get) and stop at the entrance.
+    private const float EndGapImprove = 3f * TileSize;
+    private const int StalledRecomputeLimit = 2;
+
+    // Beacon (manual fallback) thresholds.
+    private const float BeaconHandoffDistance = 15f * TileSize;
+    private const float BeaconReannounceDistance = 6f * TileSize;
+
     internal static bool IsWalking => _isWalking;
+    internal static bool IsBeaconActive => _beaconActive;
+    internal static bool IsBusy => _isWalking || _beaconActive || _longWalkActive;
 
     // Set true only while we drive an A* GoTo, so the RefreshPlayerGraph patch pads
     // the player-graph bounds for our walks without affecting vanilla pathfinding.
@@ -111,8 +177,18 @@ internal static class ObjectNavigator
                 RefreshDestinations();
             }
 
-            // Watch the game's own movement state while a walk is in progress.
-            if (_isWalking)
+            // Monitor the long-distance auto-walk (the native follower does the moving).
+            if (_longWalkActive)
+                TickLongWalk();
+
+            // Drive the compass beacon (manual fallback guidance) if one is active.
+            if (_beaconActive)
+                UpdateBeacon();
+
+            // Watch the game's own movement state while a single A* walk is in progress. Skipped
+            // during a long native follow — that legitimately pauses at waypoints, and its own
+            // monitor (TickLongWalk) handles stalls; this short-grace watchdog would kill it.
+            if (_isWalking && !_longWalkActive)
             {
                 var character = MainGame.me?.player?.components?.character;
                 if (character == null)
@@ -193,13 +269,14 @@ internal static class ObjectNavigator
         }
 
         var target = list[_selectedIndex];
-        ScreenReader.Say($"{name}, {list.Count}. {target.Label}, {DistanceText(target.Distance)}{SkullSuffix(target)}", interrupt: true);
+        ScreenReader.Say($"{name}, {list.Count}. {target.Label}, {DirectionTo(target)}{DistanceText(target.Distance)}{SkullSuffix(target)}", interrupt: true);
         _log?.LogInfo($"[NAVIGATOR] Category {name} ({list.Count}) -> {target.Label}");
     }
 
     private static string CategoryName(NavCategory cat) => cat switch
     {
         NavCategory.Quests => "Quest targets",
+        NavCategory.Landmarks => "Landmarks",
         NavCategory.Items => "Items",
         NavCategory.Doors => "Doors",
         NavCategory.Graves => "Graves",
@@ -242,7 +319,8 @@ internal static class ObjectNavigator
         {
             if (_selectedIndex >= list.Count) _selectedIndex = 0;
             var target = list[_selectedIndex];
-            var message = $"{target.Label}, {DistanceText(target.Distance)}, {_selectedIndex + 1} of {list.Count}{SkullSuffix(target)}";
+            var dir = DirectionTo(target);
+            var message = $"{target.Label}, {dir}{DistanceText(target.Distance)}, {_selectedIndex + 1} of {list.Count}{SkullSuffix(target)}";
             ScreenReader.Say(message, interrupt: false);
             _log?.LogInfo($"[NAVIGATOR] Announced: {message}");
         }
@@ -272,6 +350,15 @@ internal static class ObjectNavigator
     {
         var tiles = worldDistance / TileSize;
         return $"{tiles:F0} meters away";
+    }
+
+    // Compass heading from the player to a target, formatted as a trailing ", " so it can
+    // be slotted before the distance text. Empty if the player position isn't available.
+    private static string DirectionTo(NavigationTarget target)
+    {
+        var player = MainGame.me?.player;
+        if (player == null) return "";
+        return CompassDirection(player.pos, target.Position) + ", ";
     }
 
     // Append red/white skull info when the target is a grave's body or a corpse drop.
@@ -304,6 +391,25 @@ internal static class ObjectNavigator
         if (_selectedIndex >= list.Count) _selectedIndex = 0;
         var target = list[_selectedIndex];
 
+        // For a faraway target (e.g. the Tavern from home) the A* player graph can't path
+        // there in one shot, so auto-walk it in short hops instead of a single GoTo.
+        var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+        if (Vector2.Distance(playerPos, target.Position) > LongWalkStartDistance)
+        {
+            StartLongWalk(target);
+            return;
+        }
+
+        WalkToTarget(target);
+    }
+
+    /// <summary>
+    /// Auto-walk (native A*) to a target that is within the player graph's reach. Used both
+    /// by Ctrl+Home on a near target and as the final approach when a compass beacon brings
+    /// the player into range.
+    /// </summary>
+    private static void WalkToTarget(NavigationTarget target)
+    {
         // Aim for a point ~1 tile short of the object, along the line from the
         // object toward the player. Most points of interest sit ON an unwalkable
         // tile; targeting their exact centre makes the player pathfinder reject the
@@ -336,6 +442,436 @@ internal static class ObjectNavigator
         {
             PadPlayerGraph = false;
         }
+    }
+
+    // ---- Long-distance auto-walk (native full-path follow) -----------------
+
+    private static void StartLongWalk(NavigationTarget target)
+    {
+        _longWalkActive = true;
+        _longWalkTarget = target;
+        _longWalkStuckTicks = 0;
+        _routeNeedsRecompute = false;
+        _exitAssisting = false;
+        _routeReachesTarget = true;
+        _finalPartial = false;
+        _bestEndGap = float.MaxValue;
+        _stalledRecomputes = 0;
+        var pp = MainGame.me?.player?.pos ?? Vector2.zero;
+        _longWalkProgressPos = pp;
+        _longWalkAnnouncePos = pp;
+        ScreenReader.Say($"Walking to {target.Label}, {DirectionTo(target)}{DistanceText(Vector2.Distance(pp, target.Position))}", interrupt: true);
+        _log?.LogInfo($"[NAVIGATOR] Long walk started to {target.Label}");
+
+        // Ask the whole-map NPC navmesh for an obstacle-aware route to the approach point;
+        // OnRouteComputed injects it into the native follower.
+        _longWalkDest = target.IsDrop ? target.Position : ApproachPoint(target.Position);
+        RequestGraph0Route(pp, _longWalkDest);
+    }
+
+    /// <summary>
+    /// Launch an async path query on graph 0 (the whole-map NPC navmesh, which knows every
+    /// wall/fence). Uses <see cref="AstarPath.StartPath"/> directly rather than the player's
+    /// Seeker, so the player-only 17-unit endpoint cap does not apply and we get a full route.
+    /// </summary>
+    private static void RequestGraph0Route(Vector2 from, Vector2 to)
+    {
+        _routePending = false;
+        try
+        {
+            if (AstarPath.active == null) return;
+
+            var path = Pathfinding.ABPath.Construct(
+                new Vector3(from.x, from.y, 0f),
+                new Vector3(to.x, to.y, 0f),
+                OnRouteComputed);
+
+            // Fresh constraint (don't mutate a shared Default) restricting snapping to graph 0.
+            var constraint = Pathfinding.NNConstraint.Default;
+            constraint.graphMask = 1 << 0;
+            path.nnConstraint = constraint;
+
+            _routePending = true;
+            AstarPath.StartPath(path);
+            _log?.LogInfo($"[NAVIGATOR] Graph-0 route requested {from} -> {to}");
+        }
+        catch (Exception ex)
+        {
+            _routePending = false;
+            _log?.LogWarning($"[NAVIGATOR] Graph-0 route request failed: {ex.Message}");
+        }
+    }
+
+    private static void OnRouteComputed(Pathfinding.Path p)
+    {
+        _routePending = false;
+        if (!_longWalkActive) return;   // walk was cancelled while computing
+
+        try
+        {
+            if (p == null || p.error || p.vectorPath == null || p.vectorPath.Count < 2)
+            {
+                HandleNoRoute();
+                return;
+            }
+
+            // Does this route actually reach the target, or only the closest reachable point
+            // (target unreachable on the navmesh, e.g. an NPC inside a building)?
+            var endpoint = (Vector2)p.vectorPath[p.vectorPath.Count - 1];
+            var endGap = Vector2.Distance(endpoint, _longWalkDest);
+            _routeReachesTarget = endGap <= PartialRouteThreshold;
+
+            if (_routeReachesTarget)
+            {
+                _log?.LogInfo($"[NAVIGATOR] Graph-0 route: {p.vectorPath.Count} wp, reaches goal ({endGap:F0}u)");
+            }
+            else
+            {
+                // Partial: walk to the closest reachable point, then re-route to advance. Once
+                // re-routes stop getting closer we've hit the navmesh limit (the entrance).
+                if (endGap < _bestEndGap - EndGapImprove) { _bestEndGap = endGap; _stalledRecomputes = 0; }
+                else _stalledRecomputes++;
+                _finalPartial = _stalledRecomputes > StalledRecomputeLimit;
+                _log?.LogInfo($"[NAVIGATOR] Graph-0 route: {p.vectorPath.Count} wp, PARTIAL ends {endGap:F0}u " +
+                              $"(best {_bestEndGap:F0}, stalled {_stalledRecomputes}, final={_finalPartial})");
+            }
+
+            StartNativePathWalk(p.vectorPath);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] OnRouteComputed error: {ex.Message}");
+            BeaconBail("route error");
+        }
+    }
+
+    /// <summary>
+    /// Hand the whole graph-0 route to the game's own path follower by overwriting the player's
+    /// public <c>cur_astar_path</c>. The follower (UpdatePathfinding) walks the entire list with
+    /// physics-based, collision-aware movement — the same system NPCs use to thread village gates
+    /// — so the player no longer jams at narrow passages the way our leg-by-leg driving did.
+    /// </summary>
+    private static void StartNativePathWalk(List<Vector3> waypoints)
+    {
+        try
+        {
+            var character = MainGame.me?.player?.components?.character;
+            if (character == null) { StopLongWalk(announce: false); return; }
+
+            // Copy with z=0 — a waypoint with z>=1000 is a teleport marker in the follower.
+            var path = new List<Vector3>(waypoints.Count);
+            foreach (var w in waypoints) path.Add(new Vector3(w.x, w.y, 0f));
+
+            var finalDest = (Vector2)path[path.Count - 1];
+
+            // Disable player control so the body becomes Kinematic (UpdateBodyPhysics). A Dynamic
+            // body physically collides and JAMS at fences/gates; Kinematic glides along the navmesh
+            // path exactly like an NPC. This is the key to scripted long-distance walking.
+            character.control_enabled = false;
+
+            // GoTo(Direct, from_script) sets up the movement state, script control and callbacks
+            // and leaves path_waypoint = 1; we then swap in the full route for the follower to walk.
+            character.GoTo(
+                finalDest,
+                snap_to_node: false,
+                on_complete: OnNativeWalkComplete,
+                on_failed: OnNativeWalkFailed,
+                with_cinematic: false,
+                goto_method: MovementComponent.GoToMethod.Direct,
+                event_on_complete: "",
+                filter_astar_area: null,
+                from_script: true,
+                target_gd_point: null);
+
+            character.cur_astar_path = path;
+
+            _isWalking = true;
+            _walkWatchdog = 0;
+            var pp = MainGame.me.player.pos;
+            _longWalkProgressPos = pp;
+            _longWalkAnnouncePos = pp;
+            _longWalkStuckTicks = 0;
+            _log?.LogInfo($"[NAVIGATOR] Native walk injected: {path.Count} points");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] StartNativePathWalk error: {ex.Message}");
+            BeaconBail("inject failed");
+        }
+    }
+
+    private static void OnNativeWalkComplete()
+    {
+        _isWalking = false;
+        // Restore player control / Dynamic body (we forced Kinematic for the scripted walk).
+        var ch = MainGame.me?.player?.components?.character;
+        if (ch != null) ch.control_enabled = true;
+
+        if (!_longWalkActive) return;
+        var target = _longWalkTarget;
+
+        // Exit-assist arrival: at the door. Face it and remind the player to step outside.
+        if (_exitAssisting)
+        {
+            _exitAssisting = false;
+            _longWalkActive = false;
+            _walkFacePos = target.Position;
+            FacePlayerAtTarget();
+            ScreenReader.Say($"At the door. Press E to step outside, then go to {_exitAssistLabel} again.", interrupt: true);
+            _log?.LogInfo("[NAVIGATOR] Exit-assist reached door");
+            return;
+        }
+
+        if (_routeReachesTarget)
+        {
+            // The native walk already landed at the approach point right next to the target. Do
+            // NOT run a graph-2 "final approach" here: the player A* graph can't path onto
+            // teleport/door tiles, so it fails and falsely says "Could not reach" even though we
+            // arrived. Just face the target so vanilla E interacts, and announce arrival.
+            _longWalkActive = false;
+            var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+            _walkFacePos = target.Position;
+            FacePlayerAtTarget();
+            ScreenReader.Say($"Arrived at {target.Label}, {DistanceText(Vector2.Distance(playerPos, target.Position))}", interrupt: true);
+            _log?.LogInfo($"[NAVIGATOR] Arrived at {target.Label} (native walk)");
+        }
+        else if (_finalPartial)
+        {
+            // Navmesh can't get any closer — this is the entrance / closest reachable point.
+            _longWalkActive = false;
+            var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+            _walkFacePos = target.Position;
+            FacePlayerAtTarget();
+            ScreenReader.Say($"Arrived as close as I can walk to {target.Label}, {DistanceText(Vector2.Distance(playerPos, target.Position))}. Look for the entrance ahead.", interrupt: true);
+            _log?.LogInfo($"[NAVIGATOR] Reached closest navmesh point to {target.Label}");
+        }
+        else
+        {
+            // Partial route still closing in: re-route from here to continue into the next region.
+            _routeNeedsRecompute = true;
+        }
+    }
+
+    private static void OnNativeWalkFailed()
+    {
+        _isWalking = false;
+        ReleaseScriptControl();
+        if (!_longWalkActive) return;
+        // The native follower got stuck. Re-route once from here; the stuck monitor in
+        // TickLongWalk falls back to the beacon if re-routing keeps failing.
+        _log?.LogWarning("[NAVIGATOR] Native walk failed, re-routing");
+        _routeNeedsRecompute = true;
+    }
+
+    /// <summary>
+    /// No graph-0 route to the target. If the player is inside a building (a navmesh region
+    /// disconnected from the outdoors), walk them to the nearest exit door and tell them to press
+    /// E to step outside, then retry — otherwise fall back to the manual compass beacon.
+    /// </summary>
+    private static void HandleNoRoute()
+    {
+        var character = MainGame.me?.player?.components?.character;
+        bool inside = character != null &&
+                      character.cur_environment == BaseCharacterComponent.Environment.Inside;
+
+        if (inside && !_exitAssisting)
+        {
+            var door = NearestDoor();
+            if (door != null)
+            {
+                _exitAssisting = true;
+                _exitAssistLabel = _longWalkTarget.Label;
+                _longWalkTarget = door.Value;
+                _longWalkDest = ApproachPoint(door.Value.Position);
+                _routeReachesTarget = true;
+                _finalPartial = false;
+                ScreenReader.Say($"You are inside a building. Walking to the nearest door — press E to step outside, then go to {_exitAssistLabel} again.", interrupt: true);
+                _log?.LogInfo($"[NAVIGATOR] Inside building; exit-assist to {door.Value.Label}");
+                RequestGraph0Route(MainGame.me.player.pos, _longWalkDest);
+                return;
+            }
+        }
+
+        BeaconBail("Graph-0 route unavailable");
+    }
+
+    private static NavigationTarget? NearestDoor()
+    {
+        var doors = _byCategory[NavCategory.Doors];
+        if (doors.Count == 0) return null;
+        var pp = MainGame.me?.player?.pos ?? Vector2.zero;
+        NavigationTarget best = default;
+        float bestSq = float.MaxValue;
+        bool found = false;
+        foreach (var d in doors)
+        {
+            float sq = (d.Position - pp).sqrMagnitude;
+            if (sq < bestSq) { bestSq = sq; best = d; found = true; }
+        }
+        return found ? best : (NavigationTarget?)null;
+    }
+
+    private static void BeaconBail(string reason)
+    {
+        var target = _longWalkTarget;
+        _longWalkActive = false;
+        ScreenReader.Say($"No clear auto-walk path. Switching to manual guidance to {target.Label}.", interrupt: true);
+        _log?.LogWarning($"[NAVIGATOR] {reason}; beacon fallback");
+        StartBeacon(target);
+    }
+
+    internal static void StopLongWalk(bool announce)
+    {
+        if (!_longWalkActive) return;
+        _longWalkActive = false;
+        _routePending = false;
+        _routeNeedsRecompute = false;
+        _exitAssisting = false;
+        ReleaseScriptControl();
+        _isWalking = false;
+        if (announce)
+            ScreenReader.Say("Walking stopped", interrupt: true);
+        _log?.LogInfo("[NAVIGATOR] Long walk stopped");
+    }
+
+    /// <summary>
+    /// Per-frame monitor while a long walk is active. The native follower does the moving; this
+    /// only handles route re-requests, periodic progress announcements, and a stuck watchdog that
+    /// bails to the compass beacon if the player stops making progress (or the walk drops out
+    /// without a completion callback).
+    /// </summary>
+    private static void TickLongWalk()
+    {
+        var player = MainGame.me?.player;
+        if (player == null) { StopLongWalk(announce: false); return; }
+
+        var playerPos = player.pos;
+        var target = _longWalkTarget;
+
+        // Waiting on an async route query.
+        if (_routePending) return;
+
+        // A re-route was requested (partial-route chaining, or recovery after a stuck).
+        if (_routeNeedsRecompute)
+        {
+            _routeNeedsRecompute = false;
+            _log?.LogInfo($"[NAVIGATOR] Recomputing route from {playerPos}");
+            RequestGraph0Route(playerPos, _longWalkDest);
+            return;
+        }
+
+        // Stuck watchdog: progress resets it; no progress for StuckTickLimit ticks (or the native
+        // walk dropping out without finishing) hands off to manual guidance.
+        if (Vector2.Distance(playerPos, _longWalkProgressPos) >= ProgressDistance)
+        {
+            _longWalkProgressPos = playerPos;
+            _longWalkStuckTicks = 0;
+        }
+        else if (!_isWalking || ++_longWalkStuckTicks >= StuckTickLimit)
+        {
+            _longWalkActive = false;
+            ScreenReader.Say($"Auto-walk is blocked. Switching to manual guidance to {target.Label}.", interrupt: true);
+            _log?.LogWarning($"[NAVIGATOR] Long walk stuck near {playerPos} (walking={_isWalking}), beacon fallback");
+            StartBeacon(target);
+            return;
+        }
+
+        // Periodic remaining-distance announcement so the player knows it's progressing.
+        if (Vector2.Distance(playerPos, _longWalkAnnouncePos) >= AnnounceProgressDistance)
+        {
+            _longWalkAnnouncePos = playerPos;
+            ScreenReader.Say($"{target.Label}, {DistanceText(Vector2.Distance(playerPos, target.Position))}", interrupt: false);
+        }
+    }
+
+    // ---- Compass beacon (manual fallback guidance) -------------------------
+
+    private static void StartBeacon(NavigationTarget target)
+    {
+        // The player walks manually in beacon mode, so make sure scripted control is released
+        // (a failed auto-walk hop can leave the player frozen otherwise).
+        ReleaseScriptControl();
+        _isWalking = false;
+        _beaconActive = true;
+        _beaconTarget = target;
+        var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+        _beaconLastAnnouncePos = playerPos;
+        _log?.LogInfo($"[NAVIGATOR] Beacon started to {target.Label}");
+        AnnounceBeacon(playerPos, prefix: "Guiding to ");
+    }
+
+    internal static void StopBeacon(bool announce = true)
+    {
+        if (!_beaconActive) return;
+        _beaconActive = false;
+        if (announce)
+            ScreenReader.Say("Guidance stopped", interrupt: true);
+        _log?.LogInfo("[NAVIGATOR] Beacon stopped");
+    }
+
+    /// <summary>
+    /// Per-tick beacon driver: re-announce bearing + distance as the player moves, and once
+    /// they are within A* range hand off to the precise auto-walk for the final approach.
+    /// </summary>
+    private static void UpdateBeacon()
+    {
+        var player = MainGame.me?.player;
+        if (player == null) { StopBeacon(announce: false); return; }
+
+        var playerPos = player.pos;
+        var dist = Vector2.Distance(playerPos, _beaconTarget.Position);
+
+        // Close enough for the player graph to path the rest of the way: finish with A*.
+        if (dist <= BeaconHandoffDistance)
+        {
+            var target = _beaconTarget;
+            _beaconActive = false;
+            ScreenReader.Say($"{target.Label} is close. Walking the rest of the way.", interrupt: true);
+            _log?.LogInfo($"[NAVIGATOR] Beacon handoff to A* for {target.Label} at {dist:F0}u");
+            WalkToTarget(target);
+            return;
+        }
+
+        // Otherwise re-announce the heading each time the player has moved a fair distance.
+        if (Vector2.Distance(playerPos, _beaconLastAnnouncePos) >= BeaconReannounceDistance)
+        {
+            _beaconLastAnnouncePos = playerPos;
+            AnnounceBeacon(playerPos);
+        }
+    }
+
+    private static void AnnounceBeacon(Vector2 playerPos, string prefix = "")
+    {
+        var dir = CompassDirection(playerPos, _beaconTarget.Position);
+        var dist = Vector2.Distance(playerPos, _beaconTarget.Position);
+        ScreenReader.Say($"{prefix}{_beaconTarget.Label}, {dir}, {DistanceText(dist)}", interrupt: true);
+    }
+
+    /// <summary>
+    /// Eight-point compass direction from one world point toward another. The world plane is
+    /// x-y with +x east and +y north, so the bearing is atan2(dy, dx).
+    /// </summary>
+    private static string CompassDirection(Vector2 from, Vector2 to)
+    {
+        var d = to - from;
+        if (d.sqrMagnitude < 1f) return "here";
+
+        // 0 deg = east, increasing counter-clockwise. Convert to a 0..8 sector.
+        float angle = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+        if (angle < 0f) angle += 360f;
+        int sector = Mathf.RoundToInt(angle / 45f) % 8;
+        return sector switch
+        {
+            0 => "east",
+            1 => "north-east",
+            2 => "north",
+            3 => "north-west",
+            4 => "west",
+            5 => "south-west",
+            6 => "south",
+            7 => "south-east",
+            _ => "",
+        };
     }
 
     /// <summary>
@@ -492,6 +1028,17 @@ internal static class ObjectNavigator
         }
     }
 
+    /// <summary>
+    /// Cancel whatever navigation is active — the compass beacon or an in-progress
+    /// auto-walk. Bound to Escape so one key always stops guidance.
+    /// </summary>
+    internal static void CancelNavigation()
+    {
+        if (_longWalkActive) StopLongWalk(announce: true);
+        else if (_beaconActive) StopBeacon();
+        else if (_isWalking) StopWalking();
+    }
+
     internal static void StopWalking()
     {
         if (!_isWalking) return;
@@ -525,6 +1072,7 @@ internal static class ObjectNavigator
             {
                 character.StopMovement();
                 character.player_controlled_by_script = false;
+                character.control_enabled = true;   // re-enable input + restore Dynamic body
             }
         }
         catch (Exception ex)
@@ -555,11 +1103,13 @@ internal static class ObjectNavigator
             // so track their GameObject separately.
             WorldGameObject previouslySelected = null;
             GameObject previouslySelectedDrop = null;
+            string previouslySelectedLabel = null;
             var curList = CurrentList;
             if (curList.Count > 0 && _selectedIndex < curList.Count)
             {
                 previouslySelected = curList[_selectedIndex].Object;
                 previouslySelectedDrop = curList[_selectedIndex].DropGo;
+                previouslySelectedLabel = curList[_selectedIndex].Label;
             }
 
             foreach (var cat in _categoryOrder)
@@ -591,6 +1141,11 @@ internal static class ObjectNavigator
             // bypass the distance cap so a far-off quest objective always shows up.
             GatherQuestTargets(playerPos);
 
+            // Fixed landmarks (Tavern, Church, home Graveyard). These are world zones that
+            // are always loaded regardless of distance, so they give a blind player a way to
+            // set off toward a far destination from anywhere — the compass beacon then guides.
+            GatherLandmarkTargets(playerPos, allObjects);
+
             // Ground drops (bodies/loot) are DropResGameObjects, not WorldGameObjects, so
             // they need their own scan or they stay invisible to the screen reader.
             GatherDropTargets(playerPos);
@@ -608,12 +1163,17 @@ internal static class ObjectNavigator
             }
 
             // Restore selection by object identity (WorldGameObject or drop), else clamp.
+            // Landmarks and quest targets have no Object/DropGo, so fall back to matching by
+            // label to keep the cursor on the same entry across refreshes.
             var list = CurrentList;
-            if (previouslySelected != null || previouslySelectedDrop != null)
+            if (previouslySelected != null || previouslySelectedDrop != null || previouslySelectedLabel != null)
             {
                 var idx = list.FindIndex(t =>
                     (previouslySelected != null && t.Object == previouslySelected) ||
-                    (previouslySelectedDrop != null && t.DropGo == previouslySelectedDrop));
+                    (previouslySelectedDrop != null && t.DropGo == previouslySelectedDrop) ||
+                    (previouslySelected == null && previouslySelectedDrop == null &&
+                     previouslySelectedLabel != null && t.Object == null && t.DropGo == null &&
+                     t.Label == previouslySelectedLabel));
                 _selectedIndex = idx >= 0 ? idx : 0;
             }
             if (_selectedIndex >= list.Count)
@@ -673,6 +1233,172 @@ internal static class ObjectNavigator
         {
             _log?.LogError($"[NAVIGATOR] Error gathering quest targets: {ex.Message}");
         }
+    }
+
+    // Named-NPC landmarks: key shops/services that are world objects rather than zones,
+    // resolved by obj_id map-wide.
+    private static readonly (string objId, string label)[] NpcLandmarks =
+    {
+        ("npc_merchant", "Merchant"),
+    };
+
+    // Building landmarks anchored on their EXTERIOR entrance door (a teleport WGO), not an interior
+    // NPC/zone — interiors are separate, navmesh-disconnected regions auto-walk can't reach. The
+    // door's place comes from its custom_tag (InteractionDetector.DoorPlaceFromTag). The game names
+    // the world-side door inconsistently per building (tavern = "outside", house = "inside"), so we
+    // specify which obj_id side is the exterior one. (place, objIdSide, spoken label).
+    private static readonly (string doorPlace, string objIdSide, string label)[] DoorLandmarks =
+    {
+        ("Tavern", "outside", "Tavern"),
+        ("House", "inside", "Home"),
+    };
+
+    // World-zone ids NOT to add as landmarks — superseded by a door landmark above (the zone's
+    // geometric centre is inside the building and unroutable).
+    private static readonly HashSet<string> SkipZoneIds = new() { "home" };
+
+    // Friendlier spoken names for known world-zone ids; any zone not listed falls back to its
+    // prettified id so every zone in the world is still reachable.
+    private static readonly Dictionary<string, string> ZoneLabelOverrides = new()
+    {
+        ["graveyard"] = "Graveyard, home",
+        ["church"] = "Church",
+        ["players_tavern"] = "Player's tavern, DLC",
+        ["player_tavern_cellar"] = "Player's tavern cellar, DLC",
+        ["refugees_camp"] = "Refugee camp",
+    };
+
+    /// <summary>
+    /// Populate the Landmarks category with key NPC services (Tavern barman, Merchant) and
+    /// every world zone. Zones are always loaded, and the named NPCs resolve map-wide, so
+    /// these targets exist even from across the map; the compass/auto-walk then heads there.
+    /// Like quest targets, landmarks ignore the distance cap.
+    /// </summary>
+    private static void GatherLandmarkTargets(Vector2 playerPos, WorldGameObject[] allObjects)
+    {
+        try
+        {
+            var list = _byCategory[NavCategory.Landmarks];
+
+            // Key NPC-anchored destinations.
+            foreach (var (objId, label) in NpcLandmarks)
+            {
+                var wgo = WorldMap.GetWorldGameObjectByObjId(objId, ignore_not_found_error: true);
+                if (wgo == null) continue;
+                list.Add(new NavigationTarget
+                {
+                    Object = wgo,
+                    Label = label,
+                    Position = wgo.pos,
+                    Distance = Vector2.Distance(wgo.pos, playerPos)
+                });
+            }
+
+            // Building entrances (Tavern, Home), anchored on the exterior door you press E on.
+            foreach (var (doorPlace, objIdSide, label) in DoorLandmarks)
+            {
+                var door = FindEntranceDoor(allObjects, doorPlace, objIdSide);
+                if (door == null) continue;
+                list.Add(new NavigationTarget
+                {
+                    Object = door,
+                    Label = label,
+                    Position = door.pos,
+                    Distance = Vector2.Distance(door.pos, playerPos)
+                });
+            }
+
+            // Every world zone, de-duplicated by id.
+            var seenZones = new HashSet<string>();
+            var zones = UnityEngine.Object.FindObjectsOfType<WorldZone>(true);
+            foreach (var zone in zones)
+            {
+                if (zone == null || zone.IsDisabled()) continue;
+                if (string.IsNullOrEmpty(zone.id) || !seenZones.Add(zone.id)) continue;
+                if (SkipZoneIds.Contains(zone.id)) continue;   // superseded by a door landmark
+
+                // Anchor on an actual object in the zone (closest to the player), NOT the
+                // geometric centre: a zone centre often falls inside a building (the church in
+                // the graveyard, etc.) — a disconnected navmesh pocket auto-walk can't route to.
+                // Zone member objects sit on/next to walkable ground, so routing reaches them.
+                var anchor = ZoneAnchorObject(zone, playerPos);
+                var pos = anchor != null ? anchor.pos : (Vector2)(zone.center_tf?.position ?? Vector3.zero);
+                if (zone.center_tf == null && anchor == null) continue;
+
+                list.Add(new NavigationTarget
+                {
+                    Object = anchor,
+                    Label = ZoneLabel(zone.id),
+                    Position = pos,
+                    Distance = Vector2.Distance(pos, playerPos)
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] Error gathering landmark targets: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Pick the zone's member object closest to the player as the zone's walkable anchor. Zone
+    /// objects sit on/next to walkable ground (unlike the geometric centre, which can land inside
+    /// a building), so auto-walk can actually route there. Null if the zone has no usable objects.
+    /// </summary>
+    private static WorldGameObject ZoneAnchorObject(WorldZone zone, Vector2 playerPos)
+    {
+        try
+        {
+            var wgos = zone.GetZoneWGOs();
+            if (wgos == null) return null;
+            WorldGameObject best = null;
+            float bestSq = float.MaxValue;
+            foreach (var w in wgos)
+            {
+                if (w == null || w.is_removed) continue;
+                float sq = (w.pos - playerPos).sqrMagnitude;
+                if (sq < bestSq) { bestSq = sq; best = w; }
+            }
+            return best;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Find a building's exterior entrance door — the teleport WGO whose custom_tag resolves to
+    /// <paramref name="place"/> (via the same logic that labels doors in the Doors category) and
+    /// whose obj_id marks it as the "outside" door (the one you walk up to and press E on). The
+    /// interior-side door (obj_id "inside") and sub-area doors (cellar/2nd floor, which resolve to
+    /// a longer place name) are skipped, so we get the open-world entrance auto-walk can reach.
+    /// </summary>
+    private static WorldGameObject FindEntranceDoor(WorldGameObject[] allObjects, string place, string objIdSide)
+    {
+        if (allObjects == null) return null;
+        WorldGameObject sided = null, fallback = null;
+        foreach (var w in allObjects)
+        {
+            if (w == null) continue;
+            if (w.name.IndexOf("teleport", StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (!string.Equals(InteractionDetector.DoorPlaceFromTag(w.custom_tag), place,
+                               StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            fallback = w;
+            var id = (w.obj_id ?? "").ToLowerInvariant();
+            if (id.Contains(objIdSide)) sided = w;
+        }
+        return sided ?? fallback;
+    }
+
+    private static string ZoneLabel(string zoneId)
+    {
+        if (ZoneLabelOverrides.TryGetValue(zoneId, out var nice))
+            return nice;
+
+        // Prettify the raw id: "flat_under_waterflow_3" -> "Flat under waterflow 3".
+        var text = zoneId.Replace('_', ' ').Replace('-', ' ').Trim();
+        if (text.Length == 0) return zoneId;
+        return char.ToUpper(text[0]) + text.Substring(1);
     }
 
     /// <summary>

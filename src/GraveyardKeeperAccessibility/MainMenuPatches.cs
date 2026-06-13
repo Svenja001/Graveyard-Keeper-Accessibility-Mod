@@ -21,6 +21,16 @@ internal class GUIElement
     internal SimpleOptionsSwitcher OptionsSwitcher;
     internal SmartSlider Smart;
 
+    // When set, ActivateSelected runs this directly instead of guessing at a UIButton /
+    // SendMessage. Used for buttons whose action we can call straight on the game object
+    // (e.g. the vendor's Confirm/Cancel, which map to VendorGUI.FinishOffer / ResetOrder).
+    internal Action OnActivate;
+
+    // Set for save-slot rows in SaveSlotsMenuGUI. Enter calls OnSlotSelect (load/new game);
+    // the Delete key calls OnDeletePressed. This avoids the generic UIButton fallback picking
+    // up the slot's child delete_button and wiring Enter to deletion instead of loading.
+    internal SaveSlotGUI SaveSlot;
+
     internal string ReadLabel()
     {
         if (OptionsSwitcher != null && OptionsSwitcher.label != null)
@@ -52,6 +62,19 @@ internal static class GUIAccessibility
     private static BaseGUI _currentGUI;
     internal static readonly List<GUIElement> Elements = new();
     internal static int SelectedIndex = -1;
+
+    // The amount/price picker (ItemCountGUI) changes its SmartSlider on Left/Right via the
+    // game's own key handling, so stepping it ourselves would double-count. Instead we watch
+    // its value each frame and announce changes. _watchedSmart is non-null only while such a
+    // picker is open.
+    private static SmartSlider _watchedSmart;
+    private static int _watchedValue;
+
+    // The picker's total-price function (null when the picker has no price, e.g. a chest
+    // count). Read from ItemCountGUI._price_calculate_delegate so we can voice the exact
+    // running total instead of the coin-sprite label, which doesn't convert to speech.
+    private static ItemCountGUI.PriceCalculateDelegate _watchedPrice;
+    private static FieldInfo _priceDelegateField;
 
     internal static bool HasActiveGUI => _currentGUI != null;
 
@@ -99,6 +122,24 @@ internal static class GUIAccessibility
             }
         }
 
+        // The amount/price picker: announce the item and starting amount with a hint, and
+        // start watching the slider so each Left/Right step (handled by the game) is voiced.
+        if (gui is ItemCountGUI countGui)
+        {
+            _watchedSmart = countGui.GetComponentInChildren<SmartSlider>(true);
+            _watchedValue = _watchedSmart != null ? _watchedSmart.value : 0;
+            _watchedPrice = ReadPriceDelegate(countGui);
+
+            var item = ScreenReader.StripNguiCodes(countGui.header_label?.text)?.Trim();
+            var msg = string.IsNullOrEmpty(item) ? "Choose amount" : $"{item}, amount {_watchedValue}";
+            ScreenReader.Say($"{msg}{DescribePrice(_watchedValue)}. Left and right to change, Enter to confirm");
+
+            // Still focus the confirm button so Enter works without arrowing.
+            var els = GetActiveElements();
+            SelectedIndex = els.Count > 0 ? 0 : -1;
+            return;
+        }
+
         // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
@@ -133,8 +174,59 @@ internal static class GUIAccessibility
         ScreenReader.ClearMenuContext();
         Elements.Clear();
         SelectedIndex = -1;
+        _watchedSmart = null;
+        _watchedPrice = null;
 
         InventoryItemHandler.OnGUIClosed(gui);
+    }
+
+    // Voice changes to a watched amount/price slider (the game steps it on Left/Right; we
+    // only announce). Called every frame from Plugin.Update while a GUI is active.
+    internal static void UpdateWatchers()
+    {
+        if (_watchedSmart == null) return;
+        try
+        {
+            var v = _watchedSmart.value;
+            if (v != _watchedValue)
+            {
+                _watchedValue = v;
+                ScreenReader.Say($"{v}{DescribePrice(v)}");
+            }
+        }
+        catch
+        {
+            _watchedSmart = null;
+        }
+    }
+
+    // Read the picker's private total-price function once on open. Returns null when the
+    // picker has no price (then nothing extra is spoken).
+    private static ItemCountGUI.PriceCalculateDelegate ReadPriceDelegate(ItemCountGUI gui)
+    {
+        try
+        {
+            _priceDelegateField ??= AccessTools.Field(typeof(ItemCountGUI), "_price_calculate_delegate");
+            return _priceDelegateField?.GetValue(gui) as ItemCountGUI.PriceCalculateDelegate;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // ", total 80 bronze" for the given amount, or "" when this picker has no price.
+    private static string DescribePrice(int amount)
+    {
+        if (_watchedPrice == null) return "";
+        try
+        {
+            return $", total {MoneyToSpeech(_watchedPrice(amount))}";
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static void DiscoverElements(BaseGUI gui)
@@ -177,12 +269,13 @@ internal static class GUIAccessibility
             return;
         }
 
-        // Dump entire hierarchy for debugging
-        if (gui.GetType().Name == "SaveSlotsMenuGUI")
+        // The save-slots screen lists SaveSlotGUI rows (a "new game" entry plus one per save).
+        // Each row owns a child delete_button UIButton, so the generic fallbacks below would
+        // wire Enter to deletion. Discover the rows explicitly: Enter loads, Delete deletes.
+        if (gui is SaveSlotsMenuGUI saveMenu)
         {
-            Plugin.Log.LogInfo($"[DiscoverElements] ===== SaveSlotsMenuGUI Hierarchy =====");
-            DumpHierarchy(gui.gameObject, 0);
-            Plugin.Log.LogInfo($"[DiscoverElements] ===== End Hierarchy =====");
+            DiscoverSaveSlots(saveMenu);
+            return;
         }
 
         var buttons = gui.GetComponentsInChildren<UIButton>(true);
@@ -428,6 +521,45 @@ internal static class GUIAccessibility
         }
     }
 
+    // Build one element per active save slot. The first row is the "new game" entry; the rest
+    // are existing saves. We label each from the slot's own labels (name / in-game day / stats /
+    // real-world save time) and keep a reference to the SaveSlotGUI so Enter can load and Delete
+    // can delete, both via the game's own methods.
+    private static void DiscoverSaveSlots(SaveSlotsMenuGUI menu)
+    {
+        var slots = menu.GetComponentsInChildren<SaveSlotGUI>(true);
+        Plugin.Log.LogInfo($"[DiscoverSaveSlots] Found {slots.Length} SaveSlotGUI rows");
+
+        foreach (var slot in slots)
+        {
+            if (slot == null) continue;
+            // Skip the inactive prefab the menu copies from; only real rows are active.
+            if (!slot.gameObject.activeInHierarchy) continue;
+
+            var parts = new List<string>();
+            void Add(UILabel l)
+            {
+                if (l == null) return;
+                var t = ScreenReader.StripNguiCodes(l.text)?.Trim();
+                if (!string.IsNullOrWhiteSpace(t)) parts.Add(t);
+            }
+            Add(slot.slot_name);
+            Add(slot.txt_descr);
+            Add(slot.txt_stats);
+            Add(slot.txt_realtime);
+
+            var label = parts.Count > 0 ? string.Join(", ", parts) : slot.name;
+
+            Elements.Add(new GUIElement
+            {
+                Go = slot.gameObject,
+                Label = label,
+                Type = ElementType.Button,
+                SaveSlot = slot
+            });
+        }
+    }
+
     // The visible title of a menu row, ignoring any label that belongs to the row's slider or
     // switcher (those hold the current value, not the row name). Falls back to the localized
     // token the game uses, then the GameObject name.
@@ -546,13 +678,17 @@ internal static class GUIAccessibility
     {
         InventoryItemHandler.DiscoverItemCells(vendor, Elements);
 
-        AddVendorButton(vendor.btn_confirm, "Confirm trade");
-        AddVendorButton(vendor.btn_cancel, "Cancel offer");
+        // Drive the trade actions directly rather than via the buttons' anonymous
+        // btn/spr children: FinishOffer accepts the assembled deal, ResetOrderAndRedraw
+        // returns the offered items. The buttons' own onClick wiring proved unreliable
+        // through our SendMessage path, and these public methods are unambiguous.
+        AddVendorButton(vendor.btn_confirm, "Confirm trade", () => ConfirmVendorTrade(vendor));
+        AddVendorButton(vendor.btn_cancel, "Cancel offer", () => CancelVendorOffer(vendor));
 
         Plugin.Log.LogInfo($"[VENDOR] Discovered {Elements.Count} element(s)");
     }
 
-    private static void AddVendorButton(UIButton button, string label)
+    private static void AddVendorButton(UIButton button, string label, Action onActivate)
     {
         if (button == null) return;
         if (Elements.Any(e => e.Go == button.gameObject)) return;
@@ -561,8 +697,74 @@ internal static class GUIAccessibility
         {
             Go = button.gameObject,
             Label = label,
-            Type = ElementType.Button
+            Type = ElementType.Button,
+            OnActivate = onActivate
         });
+    }
+
+    // Accept the assembled offer. FinishOffer completes the trade when CanAcceptOffer is
+    // true (offer clears, grids redraw, coins sound) and otherwise pops a "can't accept"
+    // dialog that CheckForNewGUI will read. The vendor screen intentionally stays open so
+    // the player can keep trading; we re-announce so they know what happened.
+    private static void ConfirmVendorTrade(VendorGUI vendor)
+    {
+        try
+        {
+            var trading = vendor.trading;
+            if (trading == null) return;
+
+            bool empty;
+            try { empty = trading.player_offer.inventory.Count == 0 && trading.trader.cur_offer.inventory.Count == 0; }
+            catch { empty = false; }
+            if (empty)
+            {
+                ScreenReader.Say("No offer to confirm");
+                return;
+            }
+
+            bool accepted = trading.CanAcceptOffer();
+            vendor.FinishOffer();
+
+            if (accepted)
+                AnnounceVendorState(vendor, $"Trade complete. You have {MoneyToSpeech(trading.player_money)}");
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[VENDOR] confirm failed: {ex.Message}");
+        }
+    }
+
+    // Return all offered items to their owners and re-announce the cleared state.
+    private static void CancelVendorOffer(VendorGUI vendor)
+    {
+        try
+        {
+            vendor.ResetOrderAndRedraw();
+            AnnounceVendorState(vendor, "Offer cancelled");
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[VENDOR] cancel failed: {ex.Message}");
+        }
+    }
+
+    // Re-discover the vendor screen after a confirm/cancel mutated it, focus the first row,
+    // and speak the given prefix followed by that row.
+    private static void AnnounceVendorState(VendorGUI vendor, string prefix)
+    {
+        Elements.Clear();
+        DiscoverElements(vendor);
+
+        var active = GetActiveElements();
+        if (active.Count == 0)
+        {
+            SelectedIndex = -1;
+            ScreenReader.Say(prefix);
+            return;
+        }
+
+        SelectedIndex = 0;
+        ScreenReader.Say($"{prefix}. {active[0].ReadLabel()}");
     }
 
     internal static List<GUIElement> GetActiveElements()
@@ -700,6 +902,14 @@ internal static class GUIAccessibility
 
         var elem = active[SelectedIndex];
 
+        // Elements with an explicit action (vendor Confirm/Cancel) own their behaviour,
+        // including any announcement and re-discovery, so run it and stop here.
+        if (elem.OnActivate != null)
+        {
+            elem.OnActivate();
+            return;
+        }
+
         if (elem.Type == ElementType.ItemCell)
         {
             // Press the item cell, which fires its on-action callback (e.g. the autopsy
@@ -720,6 +930,14 @@ internal static class GUIAccessibility
 
         if (elem.Type == ElementType.Button)
         {
+            // Save-slot rows: Enter loads the save (or starts a new game for the first row),
+            // exactly as clicking the slot does. Deletion is handled separately by the Delete key.
+            if (elem.SaveSlot != null)
+            {
+                elem.SaveSlot.OnSlotSelect();
+                return;
+            }
+
             // Menu rows fire their configured action directly — matches a mouse click and
             // plays the same click sound.
             if (elem.MenuItem != null)
@@ -763,6 +981,18 @@ internal static class GUIAccessibility
                 }
             }
         }
+    }
+
+    // Delete the currently selected save slot. Only meaningful on the save-slots screen; the
+    // game opens its own yes/no confirmation dialog, which the mod reads like any other dialog.
+    internal static void DeleteSelected()
+    {
+        var active = GetActiveElements();
+        if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
+
+        var elem = active[SelectedIndex];
+        if (elem.SaveSlot != null)
+            elem.SaveSlot.OnDeletePressed();
     }
 
     internal static void AdjustLeft()
