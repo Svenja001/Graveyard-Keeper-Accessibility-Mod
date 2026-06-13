@@ -167,6 +167,16 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The vendor (trade) screen is built from two inventory panels plus two offer
+        // widgets, and its confirm/cancel are UIButtons whose children are named only
+        // "btn"/"spr" — meaningless to read out. Discover the item cells (labelled
+        // Buy/Sell/offer by InventoryItemHandler) and add clearly-named Confirm/Cancel rows.
+        if (gui is VendorGUI vendor)
+        {
+            DiscoverVendor(vendor);
+            return;
+        }
+
         // Dump entire hierarchy for debugging
         if (gui.GetType().Name == "SaveSlotsMenuGUI")
         {
@@ -525,6 +535,36 @@ internal static class GUIAccessibility
         return true;
     }
 
+    /// <summary>
+    /// Build the navigable element list for the vendor (trade) screen: every item cell
+    /// (vendor stock, the player's inventory, and both offer widgets — labelled Buy/Sell/
+    /// Your offer/Vendor offer by InventoryItemHandler), followed by clearly-named
+    /// "Confirm trade" and "Cancel offer" buttons. Activating an item moves it into/out of
+    /// an offer; activating Confirm accepts the assembled offer.
+    /// </summary>
+    private static void DiscoverVendor(VendorGUI vendor)
+    {
+        InventoryItemHandler.DiscoverItemCells(vendor, Elements);
+
+        AddVendorButton(vendor.btn_confirm, "Confirm trade");
+        AddVendorButton(vendor.btn_cancel, "Cancel offer");
+
+        Plugin.Log.LogInfo($"[VENDOR] Discovered {Elements.Count} element(s)");
+    }
+
+    private static void AddVendorButton(UIButton button, string label)
+    {
+        if (button == null) return;
+        if (Elements.Any(e => e.Go == button.gameObject)) return;
+
+        Elements.Add(new GUIElement
+        {
+            Go = button.gameObject,
+            Label = label,
+            Type = ElementType.Button
+        });
+    }
+
     internal static List<GUIElement> GetActiveElements()
     {
         return Elements.Where(e => e.Go != null && e.Go.activeInHierarchy).ToList();
@@ -594,6 +634,65 @@ internal static class GUIAccessibility
         ScreenReader.Say(string.IsNullOrEmpty(emptyDesc) ? label : $"{emptyDesc}. {label}");
     }
 
+    // After a vendor move the offer/stock grids are redrawn in place, so re-discover the
+    // element list (like RefreshCurrentGUI) and keep focus near where it was. Lead the
+    // announcement with the new running balance so the player hears the cost/gain of the
+    // deal they're building, then the now-current row.
+    private static void RefreshVendorAfterMove(VendorGUI vendor, int focusIndex)
+    {
+        Elements.Clear();
+        DiscoverElements(vendor);
+
+        string balance = null;
+        try
+        {
+            if (vendor.trading != null)
+                balance = DescribeBalance(vendor.trading.GetTotalBalance());
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[VENDOR] balance read failed: {ex.Message}");
+        }
+
+        var active = GetActiveElements();
+        if (active.Count == 0)
+        {
+            SelectedIndex = -1;
+            ScreenReader.Say(balance ?? "Empty");
+            return;
+        }
+
+        SelectedIndex = Mathf.Clamp(focusIndex, 0, active.Count - 1);
+        var row = active[SelectedIndex].ReadLabel();
+        ScreenReader.Say(string.IsNullOrEmpty(balance) ? row : $"{balance}. {row}");
+    }
+
+    // Spoken running balance of the assembled offer. GetTotalBalance is the player's net:
+    // positive means the player gains money (selling), negative means they pay (buying).
+    private static string DescribeBalance(float balance)
+    {
+        if (Mathf.Abs(balance) < 0.005f) return "Even trade";
+        var amount = MoneyToSpeech(Mathf.Abs(balance));
+        return balance > 0f ? $"You receive {amount}" : $"You pay {amount}";
+    }
+
+    // Decompose a money value into spoken gold/silver/bronze, matching Trading.FormatMoney's
+    // arithmetic (1 gold = 100 silver, 1 silver = 100 bronze) but voiced as words instead of
+    // the (gld)/(slv)/(brz) coin sprites the on-screen label uses.
+    private static string MoneyToSpeech(float value)
+    {
+        value = Mathf.Round(Mathf.Abs(value) * 100f) / 100f;
+        int gold = Mathf.FloorToInt(value / 100f);
+        int silver = Mathf.FloorToInt(value - gold * 100f);
+        int bronze = Mathf.RoundToInt((value - gold * 100f - silver) * 100f);
+
+        var parts = new List<string>();
+        if (gold > 0) parts.Add($"{gold} gold");
+        if (silver > 0) parts.Add($"{silver} silver");
+        if (bronze > 0) parts.Add($"{bronze} bronze");
+        return parts.Count > 0 ? string.Join(", ", parts) : "nothing";
+    }
+
     internal static void ActivateSelected()
     {
         var active = GetActiveElements();
@@ -614,6 +713,8 @@ internal static class GUIAccessibility
             // count picker, a new GUI that the normal flow will announce.)
             if (_currentGUI is ChestGUI)
                 RefreshCurrentGUI(prevIndex);
+            else if (_currentGUI is VendorGUI vendor)
+                RefreshVendorAfterMove(vendor, prevIndex);
             return;
         }
 

@@ -255,14 +255,30 @@ internal static class InventoryItemHandler
     {
         try
         {
-            var panel = cell.GetComponentInParent<InventoryPanelGUI>();
-            if (panel == null) return (null, 2);
-
             if (gui is ChestGUI chest)
             {
-                if (panel == chest.chest_panel) return ("Chest", 0);
-                if (panel == chest.player_panel) return ("Inventory", 1);
+                var chestPanel = cell.GetComponentInParent<InventoryPanelGUI>();
+                if (chestPanel == chest.chest_panel) return ("Chest", 0);
+                if (chestPanel == chest.player_panel) return ("Inventory", 1);
             }
+
+            // The vendor screen has two panels (stock you can buy, your inventory to sell)
+            // plus two offer widgets (the two sides of the deal being assembled). The offer
+            // widgets are bare InventoryWidgets with no InventoryPanelGUI parent, so check
+            // the cell's owning widget against the vendor's offer widgets first.
+            if (gui is VendorGUI vendor)
+            {
+                var widget = cell.GetComponentInParent<InventoryWidget>();
+                if (widget != null && widget == vendor.player_offer_widget) return ("Your offer", 2);
+                if (widget != null && widget == vendor.vendor_offer_widget) return ("Vendor offer", 3);
+
+                var vendorPanel = cell.GetComponentInParent<InventoryPanelGUI>();
+                if (vendorPanel == vendor.vendor_panel) return ("Buy", 0);
+                if (vendorPanel == vendor.player_panel) return ("Sell", 1);
+            }
+
+            var panel = cell.GetComponentInParent<InventoryPanelGUI>();
+            if (panel == null) return (null, 2);
 
             return (PanelLabel(panel, gui), 2);
         }
@@ -280,6 +296,11 @@ internal static class InventoryItemHandler
         {
             if (panel == chest.chest_panel) return "Chest";
             if (panel == chest.player_panel) return "Inventory";
+        }
+        if (gui is VendorGUI vendor)
+        {
+            if (panel == vendor.vendor_panel) return "Buy";
+            if (panel == vendor.player_panel) return "Sell";
         }
         var title = ScreenReader.StripNguiCodes(panel.panel_title?.text)?.Trim();
         return string.IsNullOrWhiteSpace(title) ? null : title;
@@ -352,10 +373,25 @@ internal static class InventoryItemHandler
     /// a fully-initialized inventory widget (e.g. some CraftGUI cells) <c>container.selection</c>
     /// is null, so that last line throws AFTER the real action already ran. Swallow it here so
     /// the exception never bubbles up into Plugin.Update and abort the rest of the frame.
+    ///
+    /// We fire <c>OnOver(false)</c> first, mirroring a real mouse (which always hovers before
+    /// it clicks). Some GUIs cache the "currently selected" item in their hover callback rather
+    /// than their press callback — VendorGUI does exactly this, so without the hover its
+    /// MoveItem sees null state and silently does nothing. The hover is harmless for the chest
+    /// (ChestGUI.OnItemOver returns immediately outside gamepad mode) and the autopsy/build
+    /// cells, and each call is isolated so a throw in one never blocks the other.
     /// </remarks>
     internal static void PressItemCell(BaseItemCellGUI cell)
     {
         if (cell == null) return;
+        try
+        {
+            cell.OnOver(false);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INVENTORY] cell OnOver threw (harmless): {ex.Message}");
+        }
         try
         {
             cell.OnPressed(false);
