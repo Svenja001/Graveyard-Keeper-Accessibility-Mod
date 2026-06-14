@@ -140,6 +140,28 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The NPCs/quests tab: announce how many characters are listed (the generic header
+        // would read the type name "NPCsList") and focus the first card so the player lands
+        // on a character to arrow through immediately.
+        if (gui is NPCsListGUI)
+        {
+            var npcCards = GetActiveElements();
+            var npcHeader = npcCards.Count == 1
+                ? "NPCs and quests, 1 character"
+                : $"NPCs and quests, {npcCards.Count} characters";
+
+            if (npcCards.Count > 0)
+            {
+                SelectedIndex = 0;
+                ScreenReader.Say($"{npcHeader}. {npcCards[0].ReadLabel()}");
+            }
+            else
+            {
+                ScreenReader.Say($"{npcHeader}. No characters known yet");
+            }
+            return;
+        }
+
         // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
@@ -275,6 +297,16 @@ internal static class GUIAccessibility
         if (gui is SaveSlotsMenuGUI saveMenu)
         {
             DiscoverSaveSlots(saveMenu);
+            return;
+        }
+
+        // The NPCs/quests tab (opened with N) lists NPCItemGUI cards — each a character's
+        // name, description, relationship score and their active quest objectives. These are
+        // info displays, not buttons, so the generic heuristic below finds nothing navigable.
+        // Make each card a navigable row whose label reads out the whole card.
+        if (gui is NPCsListGUI npcsList)
+        {
+            DiscoverNPCsList(npcsList);
             return;
         }
 
@@ -558,6 +590,65 @@ internal static class GUIAccessibility
                 SaveSlot = slot
             });
         }
+    }
+
+    // Build one navigable row per known NPC shown in the NPCs/quests tab. Each row's label
+    // reads the card the game drew: the character's name, relationship score (0–100), short
+    // description, and every not-yet-complete quest objective tied to them. The cards aren't
+    // clickable, so these rows have no action — Up/Down simply reads each character in turn.
+    private static void DiscoverNPCsList(NPCsListGUI gui)
+    {
+        var cards = gui.GetComponentsInChildren<NPCItemGUI>(true);
+        Plugin.Log.LogInfo($"[DiscoverNPCsList] Found {cards.Length} NPCItemGUI cards");
+
+        foreach (var card in cards)
+        {
+            if (card == null) continue;
+            // The list keeps an inactive prefab it clones from; only real cards are active.
+            if (!card.gameObject.activeInHierarchy) continue;
+
+            Elements.Add(new GUIElement
+            {
+                Go = card.gameObject,
+                Label = DescribeNPCCard(card),
+                Type = ElementType.Button
+            });
+        }
+    }
+
+    // Spoken description of one NPC card: "name, relationship N. description. Quests: a. b."
+    // Reads the labels the game already populated (NPCItemGUI.Draw) so we don't re-derive
+    // localization, and skips the relationship for the player's own card (which hides it).
+    private static string DescribeNPCCard(NPCItemGUI card)
+    {
+        var parts = new List<string>();
+
+        var name = ScreenReader.StripNguiCodes(card.npc_name?.text)?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) name = card.name;
+
+        var relation = ScreenReader.StripNguiCodes(card.relation_txt?.text)?.Trim();
+        if (card.go_relation != null && card.go_relation.activeInHierarchy && !string.IsNullOrWhiteSpace(relation))
+            parts.Add($"{name}, relationship {relation}");
+        else
+            parts.Add(name);
+
+        var descr = ScreenReader.StripNguiCodes(card.npc_descr?.text)?.Trim();
+        if (!string.IsNullOrWhiteSpace(descr) && descr.IndexOf('!') < 0)
+            parts.Add(descr);
+
+        var quests = new List<string>();
+        foreach (var q in card.GetComponentsInChildren<NPCListQuestText>(true))
+        {
+            if (q == null || !q.gameObject.activeInHierarchy) continue;
+            var text = ScreenReader.StripNguiCodes(q.txt?.text)?.Trim();
+            // GJL.L echoes "!task_x!" when a task has no translation — skip those.
+            if (!string.IsNullOrWhiteSpace(text) && text.IndexOf('!') < 0)
+                quests.Add(text);
+        }
+        if (quests.Count > 0)
+            parts.Add($"Quests: {string.Join(". ", quests)}");
+
+        return string.Join(". ", parts);
     }
 
     // The visible title of a menu row, ignoring any label that belongs to the row's slider or
