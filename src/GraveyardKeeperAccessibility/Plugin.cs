@@ -20,6 +20,7 @@ public class Plugin : BaseUnityPlugin
         ZoneScoreAnnouncer.Init(Log);
         TechPointsAnnouncer.Init(Log);
         HealthEnergyAnnouncer.Init(Log);
+        MoneyAnnouncer.Init(Log);
         BuildPlacementHandler.Init(Log);
         DialogueChoiceHandler.Init(Log);
 
@@ -367,7 +368,7 @@ public class Plugin : BaseUnityPlugin
             else if (Input.GetKeyDown(KeyCode.H) && !ctrl)
                 HealthEnergyAnnouncer.Announce();
             else if (Input.GetKeyDown(KeyCode.R) && !ctrl)
-                QuestAnnouncer.Announce();
+                MoneyAnnouncer.Announce();
         }
         catch (Exception ex)
         {
