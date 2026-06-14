@@ -17,6 +17,13 @@ internal static class DialogueChoiceHandler
     private static readonly AccessTools.FieldRef<MultiAnswerGUI, List<MultiAnswerOptionGUI>> _answersField =
         AccessTools.FieldRefAccess<MultiAnswerGUI, List<MultiAnswerOptionGUI>>("_answers");
 
+    // _answer_data is the private AnswerVisualData each option GUI is built from. It carries the
+    // full translation AND can_be_picked, which we need because "detailed" options (those with an
+    // item price/reward, e.g. "give Gerry a beer") clear the visible `label` and render into a
+    // separate `label_2`, so reading `label.text` alone returns empty for them.
+    private static readonly AccessTools.FieldRef<MultiAnswerOptionGUI, AnswerVisualData> _answerDataField =
+        AccessTools.FieldRefAccess<MultiAnswerOptionGUI, AnswerVisualData>("_answer_data");
+
     internal static void Init(ManualLogSource log)
     {
         _log = log;
@@ -38,7 +45,8 @@ internal static class DialogueChoiceHandler
             _options = new List<MultiAnswerOptionGUI>(answers);
             _selectedIndex = 0;
 
-            _log?.LogInfo($"[DIALOGUE_CHOICE] {_options.Count} answer option(s) shown");
+            var optTexts = string.Join(" | ", _options.Select(o => LabelOf(o)));
+            _log?.LogInfo($"[DIALOGUE_CHOICE] {_options.Count} answer option(s) shown: {optTexts}");
             AnnounceList();
         }
         catch (Exception ex)
@@ -96,6 +104,22 @@ internal static class DialogueChoiceHandler
             if (opt == null) return;
 
             var label = LabelOf(opt);
+
+            // The game locks options the player can't currently take (e.g. "give a beer" when
+            // you don't have the beer): MultiAnswerOptionGUI.OnChosen silently no-ops on them.
+            // A sighted player sees them greyed out; tell a blind player instead of falsely
+            // confirming a choice that does nothing, and keep the dialog open to pick another.
+            if (!CanPick(opt))
+            {
+                _log?.LogInfo($"[DIALOGUE_CHOICE] option #{_selectedIndex} not pickable: {label}");
+                ScreenReader.Say($"{label} ist nicht verfügbar", interrupt: true);
+                return;
+            }
+
+            // Force the appear-animation to finish first: OnChosen also rejects the pick while
+            // the option is still fading in (widget alpha < 0.5).
+            try { opt.FinishAnimation(); } catch { }
+
             _log?.LogInfo($"[DIALOGUE_CHOICE] choosing #{_selectedIndex}: {label}");
             ScreenReader.Say($"Gewählt: {label}", interrupt: true);
 
@@ -109,10 +133,44 @@ internal static class DialogueChoiceHandler
         }
     }
 
+    // Full option text. Prefer the source AnswerVisualData.translation, which is always set;
+    // the visible label is cleared for "detailed" (item price/reward) options.
     private static string LabelOf(MultiAnswerOptionGUI opt)
     {
-        if (opt == null || opt.label == null) return "";
-        return ScreenReader.StripNguiCodes(opt.label.text ?? "").Trim();
+        if (opt == null) return "";
+        try
+        {
+            var data = _answerDataField(opt);
+            if (data != null && !string.IsNullOrEmpty(data.translation))
+                return ScreenReader.StripNguiCodes(data.translation).Trim();
+        }
+        catch { }
+        if (opt.label_2 != null && !string.IsNullOrEmpty(opt.label_2.text))
+            return ScreenReader.StripNguiCodes(opt.label_2.text).Trim();
+        if (opt.label != null)
+            return ScreenReader.StripNguiCodes(opt.label.text ?? "").Trim();
+        return "";
+    }
+
+    // Whether the game will accept this option right now (false = locked/greyed out).
+    private static bool CanPick(MultiAnswerOptionGUI opt)
+    {
+        try
+        {
+            var data = _answerDataField(opt);
+            if (data != null) return data.can_be_picked;
+        }
+        catch { }
+        return true;
+    }
+
+    // Option text plus an availability hint when the game has locked it.
+    private static string OptionPhrase(MultiAnswerOptionGUI opt)
+    {
+        var label = LabelOf(opt);
+        if (!string.IsNullOrEmpty(label) && !CanPick(opt))
+            label += " (nicht verfügbar)";
+        return label;
     }
 
     private static void AnnounceList()
@@ -123,7 +181,7 @@ internal static class DialogueChoiceHandler
             : $"{_options.Count} Antwortmöglichkeiten. ");
         for (int i = 0; i < _options.Count; i++)
         {
-            var label = LabelOf(_options[i]);
+            var label = OptionPhrase(_options[i]);
             if (string.IsNullOrEmpty(label)) continue;
             sb.Append($"{i + 1}. {label}. ");
         }
@@ -133,7 +191,7 @@ internal static class DialogueChoiceHandler
     private static void AnnounceSelected()
     {
         if (_options == null || _selectedIndex < 0 || _selectedIndex >= _options.Count) return;
-        var label = LabelOf(_options[_selectedIndex]);
+        var label = OptionPhrase(_options[_selectedIndex]);
         ScreenReader.Say($"{_selectedIndex + 1} von {_options.Count}: {label}", interrupt: true);
     }
 
