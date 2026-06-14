@@ -39,12 +39,12 @@ internal static class InteractionDetector
                 // The game blocks interaction with most objects during the tutorial/intro
                 // (WorldGameObject.CheckIfDisabledInTutorial). To a blind player that just
                 // feels like "nothing happens", so when the object the game would interact
-                // with is tutorial-locked, say why and point at the current task instead.
+                // with is tutorial-locked, say why.
                 var gameNearest = GetGameInteractionNearest();
                 if (gameNearest != null && IsTutorialDisabled(gameNearest))
                 {
                     var label = GetObjectLabel(gameNearest);
-                    ScreenReader.Say($"{label}. Not available during the intro. Press R for your current task.", interrupt: true);
+                    ScreenReader.Say($"{label}. Not available during the intro.", interrupt: true);
                     _lastAnnouncedObject = gameNearest.name;
                 }
                 else
