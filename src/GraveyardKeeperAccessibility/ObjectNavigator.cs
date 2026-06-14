@@ -25,6 +25,7 @@ internal enum NavCategory
     Items,
     Doors,
     Graves,
+    ExhumableGraves,
     People,
     Storage,
     Stations,
@@ -45,6 +46,7 @@ internal static class ObjectNavigator
         NavCategory.Items,
         NavCategory.Doors,
         NavCategory.Graves,
+        NavCategory.ExhumableGraves,
         NavCategory.People,
         NavCategory.Storage,
         NavCategory.Stations,
@@ -114,6 +116,14 @@ internal static class ObjectNavigator
     private static Vector2 _fallbackDest;
     private static string _fallbackLabel;
 
+    // When a SHORT A* walk fails, the target is usually behind a fence (the plain player-graph
+    // A* can't path through a gate, and the straight-line Direct fallback just jams on the rail).
+    // Before giving up to Direct, escalate to the same fence-aware graph-0 route the long walk
+    // uses, which threads gates like an NPC. Deferred to the next frame for the same reason as
+    // the Direct fallback (the game's OnPathFailed runs right after our callback).
+    private static bool _escalatePending = false;
+    private static NavigationTarget _shortWalkTarget;
+
     // World coordinates use 96 units per tile. Only surface points of interest
     // within a generous radius so the per-category lists stay manageable.
     private const float TileSize = 96f;
@@ -178,8 +188,16 @@ internal static class ObjectNavigator
 
         try
         {
+            // A* failed on a short walk — retry through the fence-aware graph-0 route (gates)
+            // before resorting to the straight line. Runs next frame so the game's OnPathFailed
+            // has finished clobbering the previous request.
+            if (_escalatePending)
+            {
+                _escalatePending = false;
+                StartLongWalk(_shortWalkTarget);
+            }
             // Run a queued straight-line fallback (A* couldn't find a path).
-            if (_fallbackPending)
+            else if (_fallbackPending)
             {
                 _fallbackPending = false;
                 StartWalk(_fallbackDest, _fallbackLabel, MovementComponent.GoToMethod.Direct);
@@ -295,6 +313,7 @@ internal static class ObjectNavigator
         NavCategory.Items => "Items",
         NavCategory.Doors => "Doors",
         NavCategory.Graves => "Graves",
+        NavCategory.ExhumableGraves => "Exhumable graves",
         NavCategory.People => "People",
         NavCategory.Storage => "Storage",
         NavCategory.Stations => "Crafting stations",
@@ -449,6 +468,8 @@ internal static class ObjectNavigator
                           $"objDist={Vector2.Distance(pp, target.Position):F0} snapDist={Vector2.Distance(pp, dest):F0}");
 
             _fallbackPending = false;
+            _escalatePending = false;
+            _shortWalkTarget = target;        // kept so an A* failure can escalate to fence-aware routing
             _walkFacePos = target.Position;   // face it on arrival so plain E interacts/picks up
             ScreenReader.Say($"Walking to {target.Label}, {DistanceText(target.Distance)}", interrupt: true);
             StartWalk(dest, target.Label, MovementComponent.GoToMethod.AStar);
@@ -1091,13 +1112,25 @@ internal static class ObjectNavigator
                 {
                     if (method == MovementComponent.GoToMethod.AStar)
                     {
-                        // A* failed (no path / endpoint too far). Queue a straight-line
-                        // attempt for next frame — re-issuing GoTo here would be undone
-                        // by the game's OnPathFailed running right after this callback.
-                        _log?.LogWarning($"[NAVIGATOR] A* failed to {label}, trying direct");
-                        _fallbackDest = dest;
-                        _fallbackLabel = label;
-                        _fallbackPending = true;
+                        // A* failed (no path / endpoint too far) — typically the target sits
+                        // behind a fence the player graph can't path through. Escalate to the
+                        // fence-aware graph-0 route (threads gates like an NPC) instead of a
+                        // straight line that just jams on the rail. Deferred to next frame for
+                        // the same reason as the Direct fallback (OnPathFailed runs right after
+                        // this callback). Falls through to Direct only if we have no target to
+                        // escalate with.
+                        if (_shortWalkTarget.Object != null || _shortWalkTarget.DropGo != null)
+                        {
+                            _log?.LogWarning($"[NAVIGATOR] A* failed to {label}, escalating to fence-aware route");
+                            _escalatePending = true;
+                        }
+                        else
+                        {
+                            _log?.LogWarning($"[NAVIGATOR] A* failed to {label}, trying direct");
+                            _fallbackDest = dest;
+                            _fallbackLabel = label;
+                            _fallbackPending = true;
+                        }
                     }
                     else
                     {
@@ -1228,13 +1261,29 @@ internal static class ObjectNavigator
                 var distance = Vector2.Distance(objPos, playerPos);
                 if (distance > MaxNavDistance) continue;
 
+                var label = GetObjectLabelSafe(obj);
                 _byCategory[category].Add(new NavigationTarget
                 {
                     Object = obj,
-                    Label = GetObjectLabelSafe(obj),
+                    Label = label,
                     Position = objPos,
                     Distance = distance
                 });
+
+                // A grave holding a body can be exhumed (needs the exhumation permit). Mirror
+                // those into a dedicated focused list so the player can jump straight to a
+                // dig-able grave instead of cycling every tombstone. They stay in Graves too,
+                // so the general browse remains complete.
+                if (category == NavCategory.Graves && HasExhumableBody(obj))
+                {
+                    _byCategory[NavCategory.ExhumableGraves].Add(new NavigationTarget
+                    {
+                        Object = obj,
+                        Label = label,
+                        Position = objPos,
+                        Distance = distance
+                    });
+                }
             }
 
             // Active quest targets are gathered separately: they are resolved by
@@ -1634,6 +1683,34 @@ internal static class ObjectNavigator
     /// Decide whether an object is a navigable point of interest and which
     /// category it belongs to. Non-interactive decoration is filtered out.
     /// </summary>
+    /// <summary>
+    /// True when a grave can actually be dug up via the GraveGUI "Exhume" button. Mirrors the
+    /// game's own enable condition (GraveGUI.Redraw): the grave must hold a body AND be
+    /// undecorated — placing a gravestone or fence locks the body in and disables exhuming.
+    /// Most filled graves in the starting graveyard already have a body, so the body alone is
+    /// far too broad a marker; the no-cross/no-fence test is what narrows it to graves you can
+    /// dig right now (e.g. Yorick's neighbour). We skip the transient is_crafting check on
+    /// purpose: reading obj.components lazily allocates a manager for every scene object each
+    /// refresh, which the discovery loop deliberately avoids.
+    /// </summary>
+    private static bool HasExhumableBody(WorldGameObject obj)
+    {
+        try
+        {
+            var body = obj.GetBodyFromInventory();
+            if (body == null || body.definition == null
+                || body.definition.type != ItemDefinition.ItemType.Body
+                || body.IsEmpty())
+                return false;
+
+            // A cross or fence disables exhuming, exactly as GraveGUI does.
+            var cross = obj.data.GetItemOfType(ItemDefinition.ItemType.GraveStone);
+            var fence = obj.data.GetItemOfType(ItemDefinition.ItemType.GraveFence);
+            return cross == null && fence == null;
+        }
+        catch { return false; }
+    }
+
     private static bool TryClassify(WorldGameObject obj, out NavCategory category)
     {
         category = NavCategory.Other;
@@ -1752,6 +1829,18 @@ internal static class ObjectNavigator
     {
         try
         {
+            // The broken morgue's throw-in (obj_id "morgue_throw_in_broken") localizes to
+            // "Leiche hineinwerfen" (Throw body in) — identical to the river-disposal the Yorick
+            // quest needs, but it only opens an unusable craft window; the real spot is the
+            // separate "throw_body_river" object. Relabel so the player isn't lured here. Only
+            // the BROKEN one — a repaired morgue throw-in is a legitimate disposal station.
+            if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
+                obj.obj_id.IndexOf("morgue_throw", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Broken morgue, can't throw bodies here";
+            }
+
             // Build desks (the "planning table" Gerry sends you to) localize to their zone
             // name, e.g. "Alter Friedhof", which doesn't match what the player is told to look
             // for. Lead with the recognizable planning-table term, appending the zone name so

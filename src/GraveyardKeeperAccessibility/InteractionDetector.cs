@@ -136,25 +136,47 @@ internal static class InteractionDetector
 
             if (carrying)
             {
+                var item = character.GetOverheadItem();
                 string name = null;
-                try { name = ScreenReader.StripNguiCodes(character.GetOverheadItem()?.definition?.GetItemName() ?? "").Trim(); }
+                bool isBody = false;
+                try
+                {
+                    // GetItemName() resolves the body's personalised name (GJL.L on its
+                    // definition id) — e.g. "John's dead body" — the same source the grave UI
+                    // uses, so a specific corpse is named, not just "a body".
+                    name = ScreenReader.StripNguiCodes(item?.definition?.GetItemName() ?? "").Trim();
+                    isBody = item?.definition?.type == ItemDefinition.ItemType.Body;
+                }
                 catch { }
-                ScreenReader.Say(string.IsNullOrEmpty(name) ? "Carrying item" : $"Carrying {name}", interrupt: false);
+
+                var spoken = !string.IsNullOrEmpty(name) ? $"Carrying {name}"
+                           : isBody ? "Carrying a body"
+                           : "Carrying item";
+                ScreenReader.Say(spoken, interrupt: false);
             }
             else
             {
-                // The body just left the overhead slot. If a nearby table/station now holds
-                // it, tell the player it landed (and how to use it) instead of a bare "Hands
-                // free" — the placement is otherwise silent (PutOverheadToWGO logs nothing).
-                var table = FindNearbyObjectHoldingBody();
-                if (table != null)
+                // The body just left the overhead slot — say HOW it left, since each is
+                // otherwise silent. Three cases, checked in order:
+                //   1. thrown into the river at the throw_body_river spot (Yorick's quest);
+                //   2. set onto a nearby table/station that now holds it (autopsy etc.);
+                //   3. just dropped — bare "Hands free".
+                if (FindNearbyRiverThrowSpot() != null)
                 {
-                    var label = GetObjectLabel(table);
-                    ScreenReader.Say($"Body placed on {label}, press E to open", interrupt: false);
+                    ScreenReader.Say("Body thrown in the river", interrupt: false);
                 }
                 else
                 {
-                    ScreenReader.Say("Hands free", interrupt: false);
+                    var table = FindNearbyObjectHoldingBody();
+                    if (table != null)
+                    {
+                        var label = GetObjectLabel(table);
+                        ScreenReader.Say($"Body placed on {label}, press E to open", interrupt: false);
+                    }
+                    else
+                    {
+                        ScreenReader.Say("Hands free", interrupt: false);
+                    }
                 }
             }
         }
@@ -294,6 +316,34 @@ internal static class InteractionDetector
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// The river-disposal spot (obj_id "throw_body_river") the player stands on to chuck a
+    /// carried corpse into the water — Yorick's "throw the neighbour in the river" step. Used
+    /// to announce a throw distinctly from a plain set-down. See [[exhumation-grave-disposal]].
+    /// </summary>
+    private static WorldGameObject FindNearbyRiverThrowSpot()
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null) return null;
+            var playerPos = player.pos;
+
+            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true))
+            {
+                if (obj == null || IsPlayer(obj) || IsPrefab(obj)) continue;
+                if (!obj.gameObject.activeInHierarchy) continue;
+                if (string.IsNullOrEmpty(obj.obj_id)) continue;
+                if (obj.obj_id.IndexOf("throw_body_river", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                // 1 tile = 96 world units; the player stands right on the throw spot.
+                if (Vector2.Distance(obj.pos, playerPos) <= 240f) return obj;
+            }
+        }
+        catch { }
+        return null;
     }
 
     // The object the game considers "in reach" for an E press (its highlighted interaction
