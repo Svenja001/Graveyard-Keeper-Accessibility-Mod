@@ -26,6 +26,17 @@ internal class GUIElement
     // (e.g. the vendor's Confirm/Cancel, which map to VendorGUI.FinishOffer / ResetOrder).
     internal Action OnActivate;
 
+    // Custom Left/Right handlers, used by the multiquality crafting view to cycle an
+    // ingredient's quality. When set, AdjustLeft/AdjustRight invoke these (and the handler
+    // does its own announcing) instead of driving dec/inc buttons.
+    internal Action OnAdjustLeft;
+    internal Action OnAdjustRight;
+
+    // Computed label, re-evaluated on every read. Used for rows whose text changes in place
+    // (e.g. an ingredient whose quality the player cycles with Left/Right). Takes precedence
+    // over the static Label/ValueLabel reading below.
+    internal Func<string> ReadDynamic;
+
     // Set for save-slot rows in SaveSlotsMenuGUI. Enter calls OnSlotSelect (load/new game);
     // the Delete key calls OnDeletePressed. This avoids the generic UIButton fallback picking
     // up the slot's child delete_button and wiring Enter to deletion instead of loading.
@@ -33,6 +44,12 @@ internal class GUIElement
 
     internal string ReadLabel()
     {
+        if (ReadDynamic != null)
+        {
+            var dyn = ReadDynamic();
+            if (!string.IsNullOrWhiteSpace(dyn)) return dyn;
+        }
+
         if (OptionsSwitcher != null && OptionsSwitcher.label != null)
         {
             var val = ScreenReader.StripNguiCodes(OptionsSwitcher.label.text);
@@ -278,6 +295,18 @@ internal static class GUIAccessibility
         if (gui is CraftGUI craftGui && MainGame.me?.build_mode_logics?.IsBuilding() == true)
         {
             DiscoverBuildCatalogItems(craftGui);
+            return;
+        }
+
+        // The regular crafting window (anvil, workbench, alchemy bench, ... — anything opened
+        // by walking up to a station and pressing E) also lists its recipes as CraftItemGUI
+        // rows, not UIButtons, so the generic heuristic below finds only the close button. This
+        // is what blocks e.g. repairing a sword at the anvil. Enumerate the recipe rows (and any
+        // category tabs) directly: each row reads its name, ingredients and whether you can
+        // afford it; activating it crafts (presses the row's cell -> OnItemAction -> OnCraft).
+        if (gui is CraftGUI regularCraftGui)
+        {
+            DiscoverCraftItems(regularCraftGui);
             return;
         }
 
@@ -759,6 +788,465 @@ internal static class GUIAccessibility
     }
 
     /// <summary>
+    /// List a regular crafting station's recipes as navigable rows: any category tabs first
+    /// (Enter switches tab), then one row per recipe in the current tab. Each recipe row reads
+    /// its name, ingredients and affordability; activating it crafts (presses the row's cell,
+    /// which the game routes to CraftItemGUI.OnItemAction -> OnCraft).
+    /// </summary>
+    private static void DiscoverCraftItems(CraftGUI craftGui)
+    {
+        var items = craftGui.GetItemsList();
+        if (items == null)
+        {
+            Plugin.Log.LogWarning("[CRAFT] CraftGUI has no items list");
+            return;
+        }
+
+        // A star-quality recipe can be "expanded" into a detailed view where you pick each
+        // ingredient's quality before crafting. While one is expanded, present only its
+        // ingredient/quality controls (drill-in), not the recipe list.
+        var expanded = items.FirstOrDefault(c => c != null && c.full_detailed_view);
+        if (expanded != null)
+        {
+            DiscoverCraftDetailedView(craftGui, expanded);
+            return;
+        }
+
+        DiscoverCraftTabs(craftGui);
+
+        int added = 0;
+        foreach (var cri in items)
+        {
+            // Only rows in the active tab are activeInHierarchy — this naturally filters to the
+            // currently selected category, so switching tabs (and re-discovering) lists the right set.
+            if (cri == null || !cri.gameObject.activeInHierarchy) continue;
+            var cell = cri.item_gui;
+            if (cell == null) continue;
+
+            // Star-quality recipes don't craft on Enter — they open a detailed quality picker.
+            // Route those through our own expand handler so we can re-list the controls and land
+            // focus sensibly; simple recipes keep the default cell-press (= craft).
+            var captured = cri;
+            Action onActivate = IsMultiquality(cri)
+                ? () => ExpandRecipe(craftGui, captured)
+                : (Action)null;
+
+            Elements.Add(new GUIElement
+            {
+                Go = cri.gameObject,
+                Label = CraftRecipeLabel(cri),
+                Type = ElementType.ItemCell,
+                Cell = cell,
+                OnActivate = onActivate
+            });
+            added++;
+        }
+
+        Plugin.Log.LogInfo($"[CRAFT] discovered {added} recipe(s)");
+    }
+
+    /// <summary>
+    /// The expanded star-quality view: one row per ingredient (Left/Right cycles its quality
+    /// when switchable), a read-out of the predicted output quality, a Craft action, and a
+    /// Back entry that returns to the recipe list.
+    /// </summary>
+    private static void DiscoverCraftDetailedView(CraftGUI craftGui, CraftItemGUI cri)
+    {
+        var needs = cri.current_craft?.needs;
+        var cells = GetIngredientCells(cri);
+        int count = needs?.Count ?? 0;
+
+        for (int i = 0; i < count; i++)
+        {
+            int idx = i;
+            BaseItemCellGUI cell = (cells != null && i < cells.Length) ? cells[i] : null;
+            var go = cell != null ? cell.gameObject : cri.gameObject;
+            bool switchable = IsSwitchableIngredient(cri, i);
+
+            var elem = new GUIElement
+            {
+                Go = go,
+                Type = switchable ? ElementType.Switcher : ElementType.Button,
+                Label = "Ingredient",
+                ReadDynamic = () => IngredientLabel(cri, idx, cell, switchable)
+            };
+            if (switchable)
+            {
+                // CraftItemGUI.OnChangeIngredient uses step +1 = "previous", -1 = "next"; map
+                // Right -> next, Left -> previous so the order feels natural, and re-announce.
+                elem.OnAdjustRight = () => { ChangeIngredient(cri, idx, -1); AnnounceFocused(); };
+                elem.OnAdjustLeft = () => { ChangeIngredient(cri, idx, 1); AnnounceFocused(); };
+            }
+            Elements.Add(elem);
+        }
+
+        Elements.Add(new GUIElement
+        {
+            Go = cri.gameObject,
+            Type = ElementType.Button,
+            Label = "Predicted quality",
+            ReadDynamic = () => PredictedQualityLabel(cri),
+            OnActivate = () => ScreenReader.Say(PredictedQualityLabel(cri))
+        });
+
+        Elements.Add(new GUIElement
+        {
+            Go = cri.gameObject,
+            Type = ElementType.Button,
+            Label = $"Craft {OutputName(cri)}" + (CanCraftRecipe(cri) ? "" : ", not enough materials"),
+            OnActivate = () => CraftMultiquality(craftGui, cri)
+        });
+
+        Elements.Add(new GUIElement
+        {
+            Go = cri.gameObject,
+            Type = ElementType.Button,
+            Label = "Back to recipe list",
+            OnActivate = () => CollapseDetailedView(craftGui, cri)
+        });
+
+        Plugin.Log.LogInfo($"[CRAFT] detailed view: {count} ingredient(s)");
+    }
+
+    private static void AnnounceFocused()
+    {
+        var active = GetActiveElements();
+        if (SelectedIndex >= 0 && SelectedIndex < active.Count)
+            ScreenReader.Say(active[SelectedIndex].ReadLabel());
+    }
+
+    /// <summary>Enter the star-quality picker for a recipe and read out its first control.</summary>
+    private static void ExpandRecipe(CraftGUI craftGui, CraftItemGUI cri)
+    {
+        try { craftGui.ExpandItem(cri); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] expand failed: {ex.Message}"); }
+
+        Elements.Clear();
+        DiscoverElements(craftGui);
+
+        var active = GetActiveElements();
+        SelectedIndex = active.Count > 0 ? 0 : -1;
+        var lead = $"Choosing quality for {OutputName(cri)}";
+        ScreenReader.Say(active.Count > 0 ? $"{lead}. {active[0].ReadLabel()}" : lead);
+    }
+
+    /// <summary>Leave the star-quality picker and return focus to the recipe in the list.</summary>
+    private static void CollapseDetailedView(CraftGUI craftGui, CraftItemGUI cri)
+    {
+        try { craftGui.CollapseItem(cri); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] collapse failed: {ex.Message}"); }
+
+        Elements.Clear();
+        DiscoverElements(craftGui);
+
+        var active = GetActiveElements();
+        var idx = active.FindIndex(e => e.Go == cri.gameObject);
+        SelectedIndex = idx >= 0 ? idx : (active.Count > 0 ? 0 : -1);
+        if (SelectedIndex >= 0)
+            ScreenReader.Say($"Recipe list. {active[SelectedIndex].ReadLabel()}");
+    }
+
+    /// <summary>Craft the expanded recipe at the chosen ingredient qualities.</summary>
+    private static void CraftMultiquality(CraftGUI craftGui, CraftItemGUI cri)
+    {
+        if (!CanCraftRecipe(cri))
+        {
+            ScreenReader.Say("Not enough materials");
+            return;
+        }
+
+        try
+        {
+            _onCraftPressedMethod ??= AccessTools.Method(typeof(CraftItemGUI), "OnCraftPressed");
+            _onCraftPressedMethod?.Invoke(cri, null);
+        }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] craft failed: {ex.Message}"); }
+
+        // Stay in the detailed view (the game keeps it open) so the player can craft again,
+        // possibly at a different quality. Re-read the now-current affordability.
+        Elements.Clear();
+        DiscoverElements(craftGui);
+        var active = GetActiveElements();
+        SelectedIndex = Mathf.Clamp(SelectedIndex, 0, Mathf.Max(0, active.Count - 1));
+        ScreenReader.Say($"Crafting {OutputName(cri)}");
+    }
+
+    // --- Multiquality reflection helpers (CraftItemGUI internals) ---
+    private static FieldInfo _ingredientsField;
+    private static FieldInfo _multiqualityIdsField;
+    private static MethodInfo _onChangeIngredientMethod;
+    private static MethodInfo _isSwitchableMethod;
+    private static MethodInfo _onCraftPressedMethod;
+
+    private static bool IsMultiquality(CraftItemGUI cri)
+    {
+        try { return cri.current_craft?.IsMultiqualityOutput() == true; }
+        catch { return false; }
+    }
+
+    private static BaseItemCellGUI[] GetIngredientCells(CraftItemGUI cri)
+    {
+        try
+        {
+            _ingredientsField ??= AccessTools.Field(typeof(CraftItemGUI), "_ingredients");
+            return _ingredientsField?.GetValue(cri) as BaseItemCellGUI[];
+        }
+        catch { return null; }
+    }
+
+    private static List<string> GetMultiqualityIds(CraftItemGUI cri)
+    {
+        try
+        {
+            _multiqualityIdsField ??= AccessTools.Field(typeof(CraftItemGUI), "_multiquality_ids");
+            return _multiqualityIdsField?.GetValue(cri) as List<string>;
+        }
+        catch { return null; }
+    }
+
+    private static bool IsSwitchableIngredient(CraftItemGUI cri, int index)
+    {
+        try
+        {
+            _isSwitchableMethod ??= AccessTools.Method(typeof(CraftItemGUI), "IsSwitchableIngredient", new[] { typeof(int) });
+            if (_isSwitchableMethod != null)
+                return (bool)_isSwitchableMethod.Invoke(cri, new object[] { index });
+        }
+        catch { }
+        return false;
+    }
+
+    private static void ChangeIngredient(CraftItemGUI cri, int index, int step)
+    {
+        try
+        {
+            _onChangeIngredientMethod ??= AccessTools.Method(typeof(CraftItemGUI), "OnChangeIngredient", new[] { typeof(int), typeof(int) });
+            _onChangeIngredientMethod?.Invoke(cri, new object[] { index, step });
+        }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] change ingredient failed: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Spoken label for one ingredient in the detailed view: the chosen variant's name + quality
+    /// + required amount. The chosen variant lives in CraftItemGUI._multiquality_ids (the cell's
+    /// own item stays the base "group" item, so reading the cell would miss the picked quality).
+    /// </summary>
+    private static string IngredientLabel(CraftItemGUI cri, int index, BaseItemCellGUI cell, bool switchable)
+    {
+        var needs = cri.current_craft?.needs;
+        var need = (needs != null && index < needs.Count) ? needs[index] : null;
+
+        var ids = GetMultiqualityIds(cri);
+        string id = (ids != null && index < ids.Count) ? ids[index] : null;
+        if (string.IsNullOrEmpty(id)) id = need?.id;
+
+        string desc = DescribeItemId(id) ?? "ingredient";
+
+        // Required amount (the recipe's per-craft need, e.g. "2 malt, gold quality").
+        try
+        {
+            if (need != null && need.value > 1) desc = $"{need.value} {desc}";
+        }
+        catch { }
+
+        return switchable ? $"{desc}. Left or right to change quality" : desc;
+    }
+
+    /// <summary>Resolve an item id to "name" or "name, tier quality" (for star items).</summary>
+    private static string DescribeItemId(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return null;
+        try
+        {
+            var def = GameBalance.me.GetDataOrNull<ItemDefinition>(id);
+            var name = ScreenReader.StripNguiCodes(def?.GetItemName() ?? id)?.Trim();
+            if (string.IsNullOrWhiteSpace(name)) name = id;
+
+            if (def != null && def.quality_type == ItemDefinition.QualityType.Stars)
+            {
+                int stars = Mathf.FloorToInt(def.quality);
+                string tier = stars switch
+                {
+                    1 => "bronze quality",
+                    2 => "silver quality",
+                    3 => "gold quality",
+                    _ => stars > 3 ? $"{stars} stars" : null
+                };
+                if (!string.IsNullOrEmpty(tier)) name = $"{name}, {tier}";
+            }
+            return name;
+        }
+        catch { return id; }
+    }
+
+    /// <summary>Predicted output-quality odds for the current ingredient choices.</summary>
+    private static string PredictedQualityLabel(CraftItemGUI cri)
+    {
+        try
+        {
+            var ids = GetMultiqualityIds(cri);
+            var result = cri.current_craft.GetMultiqualityResult(ids);
+            var p = result.quality_probabilities;
+            if (p != null && p.Length >= 3)
+            {
+                int bronze = Mathf.RoundToInt(p[0] * 100f);
+                int silver = Mathf.RoundToInt(p[1] * 100f);
+                int gold = Mathf.RoundToInt(p[2] * 100f);
+                return $"Predicted quality: bronze {bronze} percent, silver {silver} percent, gold {gold} percent";
+            }
+        }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] predicted quality failed: {ex.Message}"); }
+        return "Predicted quality unavailable";
+    }
+
+    private static string OutputName(CraftItemGUI cri)
+    {
+        try
+        {
+            var def = cri.current_craft;
+            if (def != null)
+            {
+                var n = ScreenReader.StripNguiCodes(GJL.L(def.GetNameNonLocalized()) ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(n)) return n;
+            }
+        }
+        catch { }
+        try { return ScreenReader.StripNguiCodes(cri.label_name?.text)?.Trim() ?? "item"; }
+        catch { return "item"; }
+    }
+
+    /// <summary>Add each visible category tab as a navigable button; Enter switches to it.</summary>
+    private static void DiscoverCraftTabs(CraftGUI craftGui)
+    {
+        CraftTabGUI[] tabs;
+        try { tabs = craftGui.GetComponentsInChildren<CraftTabGUI>(false); }
+        catch { return; }
+        if (tabs == null || tabs.Length < 2) return; // a single (or no) tab isn't worth navigating
+
+        foreach (var tab in tabs)
+        {
+            if (tab == null || !tab.gameObject.activeInHierarchy) continue;
+            if (Elements.Any(e => e.Go == tab.gameObject)) continue;
+
+            var captured = tab;
+            Elements.Add(new GUIElement
+            {
+                Go = tab.gameObject,
+                Label = $"Category: {CraftTabLabel(tab)}",
+                Type = ElementType.Button,
+                OnActivate = () => SwitchCraftTab(craftGui, captured)
+            });
+        }
+    }
+
+    /// <summary>Switch the crafting window to a tab, then re-list and announce its recipes.</summary>
+    private static void SwitchCraftTab(CraftGUI craftGui, CraftTabGUI tab)
+    {
+        try { tab.OnTabClicked(); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] tab switch failed: {ex.Message}"); }
+
+        Elements.Clear();
+        DiscoverElements(craftGui);
+
+        var active = GetActiveElements();
+        var name = CraftTabLabel(tab);
+        if (active.Count == 0)
+        {
+            SelectedIndex = -1;
+            ScreenReader.Say($"{name}. Empty");
+            return;
+        }
+
+        // Land on the first recipe so the player immediately hears the tab's contents.
+        var idx = active.FindIndex(e => e.Type == ElementType.ItemCell);
+        SelectedIndex = idx >= 0 ? idx : 0;
+        ScreenReader.Say($"{name}. {active[SelectedIndex].ReadLabel()}");
+    }
+
+    private static string CraftTabLabel(CraftTabGUI tab)
+    {
+        var id = tab?.tab_id ?? "";
+        if (id.StartsWith("?")) id = id.Substring(1);
+        if (string.IsNullOrEmpty(id)) return "Other";
+        try
+        {
+            var loc = ScreenReader.StripNguiCodes(GJL.L("tab_" + id) ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(loc) && !loc.Contains("!") && loc != "tab_" + id)
+                return loc;
+        }
+        catch { }
+        return id;
+    }
+
+    /// <summary>Spoken label for a recipe row: name, ingredients, and whether it's craftable.</summary>
+    private static string CraftRecipeLabel(CraftItemGUI cri)
+    {
+        string name = null;
+        try
+        {
+            var def = cri.current_craft;
+            if (def != null)
+                name = ScreenReader.StripNguiCodes(GJL.L(def.GetNameNonLocalized()) ?? "").Trim();
+        }
+        catch { }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            try { name = ScreenReader.StripNguiCodes(cri.label_name?.text)?.Trim(); }
+            catch { }
+        }
+
+        if (string.IsNullOrWhiteSpace(name)) name = "Recipe";
+
+        var label = name;
+        var needs = CraftNeedsText(cri);
+        if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
+        label += CanCraftRecipe(cri) ? ". Ready" : ". Not enough materials";
+        // Star-quality recipes open a quality picker on Enter rather than crafting directly.
+        if (IsMultiquality(cri)) label += ". Enter to choose quality";
+        return label;
+    }
+
+    /// <summary>
+    /// Whether the player can currently afford this recipe. Uses CraftItemGUI.CanCraft (which
+    /// checks the player's inventory), NOT <see cref="CanBuild"/> — that one consults the build
+    /// zone's stock and only applies while placing buildings.
+    /// </summary>
+    private static bool CanCraftRecipe(CraftItemGUI cri)
+    {
+        try
+        {
+            _canCraftMethod ??= AccessTools.Method(typeof(CraftItemGUI), "CanCraft", new[] { typeof(int?) });
+            if (_canCraftMethod != null)
+                return (bool)_canCraftMethod.Invoke(cri, new object[] { null });
+        }
+        catch { }
+        return true;
+    }
+
+    /// <summary>Comma-separated "amount item" list of a recipe's ingredients, or null.</summary>
+    private static string CraftNeedsText(CraftItemGUI cri)
+    {
+        try
+        {
+            var craft = cri.current_craft;
+            if (craft?.needs == null || craft.needs.Count == 0) return null;
+
+            var parts = new List<string>();
+            foreach (var need in craft.needs)
+            {
+                if (need == null) continue;
+                var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
+                if (string.IsNullOrWhiteSpace(iname)) continue;
+                var amt = need.value;
+                parts.Add(amt > 1 ? $"{amt} {iname}" : iname);
+            }
+            return parts.Count > 0 ? string.Join(", ", parts) : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
     /// Build the navigable element list for the vendor (trade) screen: every item cell
     /// (vendor stock, the player's inventory, and both offer widgets — labelled Buy/Sell/
     /// Your offer/Vendor offer by InventoryItemHandler), followed by clearly-named
@@ -1049,6 +1537,11 @@ internal static class GUIAccessibility
                 RefreshCurrentGUI(prevIndex);
             else if (_currentGUI is VendorGUI vendor)
                 RefreshVendorAfterMove(vendor, prevIndex);
+            else if (_currentGUI is CraftGUI && !(MainGame.me?.build_mode_logics?.IsBuilding() == true))
+                // Crafting consumes ingredients, so re-read the row: the player hears whether they
+                // can still make another (". Ready" -> ". Not enough materials"). Skipped in build
+                // mode, where activating a row starts placement and closes the catalog.
+                RefreshCurrentGUI(prevIndex);
             return;
         }
 
@@ -1125,7 +1618,11 @@ internal static class GUIAccessibility
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
         var elem = active[SelectedIndex];
-        if (elem.Type == ElementType.Switcher && elem.OptionsSwitcher != null)
+        if (elem.OnAdjustLeft != null)
+        {
+            elem.OnAdjustLeft();
+        }
+        else if (elem.Type == ElementType.Switcher && elem.OptionsSwitcher != null)
         {
             elem.OptionsSwitcher.Dec();
             ScreenReader.Say(elem.ReadLabel());
@@ -1150,7 +1647,11 @@ internal static class GUIAccessibility
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
         var elem = active[SelectedIndex];
-        if (elem.Type == ElementType.Switcher && elem.OptionsSwitcher != null)
+        if (elem.OnAdjustRight != null)
+        {
+            elem.OnAdjustRight();
+        }
+        else if (elem.Type == ElementType.Switcher && elem.OptionsSwitcher != null)
         {
             elem.OptionsSwitcher.Inc();
             ScreenReader.Say(elem.ReadLabel());
