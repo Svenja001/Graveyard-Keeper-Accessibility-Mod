@@ -290,11 +290,38 @@ internal static class InventoryItemHandler
             if (string.IsNullOrEmpty(name)) name = item.id;
             if (string.IsNullOrEmpty(name)) return null;
 
+            // GetItemName() strips the quality suffix (e.g. "beer:3" -> "beer"), so the star tier
+            // is otherwise inaudible. Append it as a spoken tier ("gold quality") for star items.
+            var quality = QualityTierName(item.definition);
+            if (!string.IsNullOrEmpty(quality))
+                name = $"{name}, {quality}";
+
             return item.value > 1 ? $"{name}, {item.value}" : name;
         }
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Spoken quality tier for an item, or null if it has no star quality. Graveyard Keeper rates
+    /// craftable goods (beer, wine, food, etc.) with 1-3 stars; the game colours these bronze /
+    /// silver / gold (see WorldGameObject.DropStory(bronze, silver, gold) and the ITEM_STAR_1..3
+    /// tokens). Items without a star rating (quality_type == Default) return null.
+    /// </summary>
+    private static string QualityTierName(ItemDefinition def)
+    {
+        if (def == null || def.quality_type != ItemDefinition.QualityType.Stars) return null;
+
+        int stars = Mathf.FloorToInt(def.quality);
+        switch (stars)
+        {
+            case 1: return "bronze quality";
+            case 2: return "silver quality";
+            case 3: return "gold quality";
+            case <= 0: return null;
+            default: return $"{stars} stars";
         }
     }
 
