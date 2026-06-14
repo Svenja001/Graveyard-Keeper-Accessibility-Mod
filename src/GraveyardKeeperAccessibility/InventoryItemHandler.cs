@@ -4,7 +4,6 @@ internal static class InventoryItemHandler
 {
     private static ManualLogSource _log;
     private static BaseGUI _currentInventoryGUI;
-    private static HashSet<string> _announcedItems = new();
 
     internal static void Init(ManualLogSource log)
     {
@@ -22,7 +21,6 @@ internal static class InventoryItemHandler
         if (IsInventoryGUI(guiTypeName))
         {
             _currentInventoryGUI = gui;
-            _announcedItems.Clear();
             AnnounceAllInventoryItems(gui);
         }
     }
@@ -31,17 +29,13 @@ internal static class InventoryItemHandler
     {
         if (gui == _currentInventoryGUI)
         {
+            // Only the player's own inventory gets a spoken close; chests/containers close
+            // silently as before. (We say this here rather than scraping labels — see below.)
+            if (_currentInventoryGUI is InventoryGUI)
+                ScreenReader.Say("Inventory closed");
+
             _currentInventoryGUI = null;
-            _announcedItems.Clear();
         }
-    }
-
-    internal static void Update()
-    {
-        if (_currentInventoryGUI == null) return;
-
-        // Check for items that were added/removed
-        CheckForItemChanges();
     }
 
     private static bool IsInventoryGUI(string guiTypeName)
@@ -66,10 +60,7 @@ internal static class InventoryItemHandler
 
                 var cleaned = ScreenReader.StripNguiCodes(label).Trim();
                 if (!string.IsNullOrEmpty(cleaned) && cleaned.Length > 1)
-                {
                     announcements.Add(cleaned);
-                    _announcedItems.Add(cleaned);
-                }
             }
 
             string announcement;
@@ -88,62 +79,6 @@ internal static class InventoryItemHandler
         catch (Exception ex)
         {
             _log?.LogError($"[INVENTORY] Error announcing items: {ex.Message}");
-        }
-    }
-
-    private static void CheckForItemChanges()
-    {
-        try
-        {
-            if (_currentInventoryGUI == null) return;
-
-            var currentItems = GetInventoryItemLabels(_currentInventoryGUI);
-            var newItems = new List<string>();
-
-            foreach (var item in currentItems)
-            {
-                if (string.IsNullOrWhiteSpace(item)) continue;
-
-                var cleaned = ScreenReader.StripNguiCodes(item).Trim();
-                if (!string.IsNullOrEmpty(cleaned) && cleaned.Length > 1)
-                {
-                    if (!_announcedItems.Contains(cleaned))
-                    {
-                        newItems.Add(cleaned);
-                        _announcedItems.Add(cleaned);
-                    }
-                }
-            }
-
-            // Check for removed items
-            var removedItems = _announcedItems.Where(item =>
-            {
-                var currentText = string.Join(" ", currentItems
-                    .Select(l => ScreenReader.StripNguiCodes(l).Trim())
-                    .Where(l => !string.IsNullOrWhiteSpace(l)));
-                return !currentText.Contains(item);
-            }).ToList();
-
-            if (newItems.Count > 0)
-            {
-                var announcement = "Added: " + string.Join(", ", newItems);
-                _log?.LogInfo($"[INVENTORY] {announcement}");
-                ScreenReader.Say(announcement);
-            }
-
-            if (removedItems.Count > 0)
-            {
-                var announcement = "Removed: " + string.Join(", ", removedItems);
-                _log?.LogInfo($"[INVENTORY] {announcement}");
-                ScreenReader.Say(announcement);
-
-                foreach (var item in removedItems)
-                    _announcedItems.Remove(item);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log?.LogError($"[INVENTORY] Error checking for changes: {ex.Message}");
         }
     }
 
@@ -400,5 +335,97 @@ internal static class InventoryItemHandler
         {
             _log?.LogWarning($"[INVENTORY] item cell press threw after action (harmless): {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Activate an item cell in the player's own inventory (InventoryGUI). The generic
+    /// <see cref="PressItemCell"/> maps to the game's left-click, which only equips or assigns
+    /// to the toolbar — it does nothing for a usable item like the teleport stone (those are
+    /// "used" via the right-click context menu, not left-click). Instead pick the item's primary
+    /// action the way that menu / gamepad Select would: bags open, usable items are used,
+    /// equipment is equipped or unequipped.
+    /// </summary>
+    /// <returns>
+    /// A spoken summary (null if the item had no sensible action) and whether the inventory was
+    /// closed as a result (a close-on-use item like the teleport stone hides the inventory, so
+    /// the caller must not try to re-discover its now-gone cells).
+    /// </returns>
+    internal static (string summary, bool closedInventory) ActivateInventoryItem(BaseItemCellGUI cell)
+    {
+        if (cell == null) return (null, false);
+        var item = cell.item;
+        if (item == null || item.IsEmpty()) return (null, false);
+
+        // Register the cell as the panel's current selection, mirroring a real mouse hovering
+        // before it acts. The game's inventory logic reads panel.selected_item, so this keeps
+        // its state consistent with what we're about to do.
+        try { cell.OnOver(false); } catch { }
+
+        // The owning panel, so we can redraw it after using/equipping. UseItemFromInventory
+        // removes the item from inventory data synchronously, but the on-screen cells keep
+        // showing the old item until the panel redraws (the game's own UseItem calls Redraw()
+        // right after) — without this, our caller re-discovers stale cells.
+        var panel = cell.GetComponentInParent<InventoryPanelGUI>();
+
+        var def = item.definition;
+        var name = ScreenReader.StripNguiCodes(def?.GetItemName() ?? item.id)?.Trim();
+        if (string.IsNullOrEmpty(name)) name = item.id;
+
+        try
+        {
+            // Bags open/close; their contents become a separate panel. The cell press is the
+            // game's own open/close toggle, and the caller re-discovers the cells afterwards.
+            if (item.is_bag)
+            {
+                PressItemCell(cell);
+                return ($"Opened {name}", false);
+            }
+
+            // Usable items (teleport stone, food, potions): use via the game's own path, mirroring
+            // InventoryGUI.UseItem — including close_inv_on_use, which hides the inventory so e.g.
+            // the teleport map can open cleanly.
+            if (def != null && def.can_be_used)
+            {
+                if (item.GetGrayedCooldownPercent() > 0)
+                    return ($"{name} on cooldown", false);
+
+                if (def.close_inv_on_use)
+                {
+                    GUIElements.me.game_gui.Hide();
+                    MainGame.me.player.UseItemFromInventory(item);
+                    return ($"Used {name}", true);
+                }
+
+                MainGame.me.player.UseItemFromInventory(item);
+                try { panel?.Redraw(); } catch { }
+                return ($"Used {name}", false);
+            }
+
+            // Weapons / equipment: equip, or unequip if already worn.
+            if (def != null && (def.IsWeapon() || def.IsEquipment()))
+            {
+                if (item.durability_state == Item.DurabilityState.Broken)
+                    return ($"{name} is broken", false);
+
+                bool equipped = item.is_equipped ||
+                                MainGame.me.player.data.secondary_inventory.Contains(item);
+                if (equipped)
+                {
+                    MainGame.me.player.UnEquipItem(item);
+                    try { panel?.Redraw(); } catch { }
+                    return ($"Unequipped {name}", false);
+                }
+
+                MainGame.me.player.EquipItem(item, -1, null);
+                try { panel?.Redraw(); } catch { }
+                return ($"Equipped {name}", false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INVENTORY] activate '{name}' threw: {ex.Message}");
+        }
+
+        return (null, false);
     }
 }

@@ -91,9 +91,6 @@ public class Plugin : BaseUnityPlugin
             // Handle click input (Z/X keys)
             ClickHandler.Update();
 
-            // Check inventory for item changes
-            InventoryItemHandler.Update();
-
             // Update persistent navigation system
             ObjectNavigator.Update();
 

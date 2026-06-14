@@ -811,9 +811,11 @@ internal static class GUIAccessibility
         ScreenReader.Say(elem.ReadLabel());
     }
 
-    // Re-discover the current GUI's elements in place (used after a chest move mutates the
-    // grids) and keep focus near where it was, re-announcing the now-current row.
-    private static void RefreshCurrentGUI(int focusIndex)
+    // Re-discover the current GUI's elements in place (used after a chest move or an inventory
+    // use mutates the grids) and keep focus near where it was, re-announcing the now-current row.
+    // An optional prefix (e.g. "Used teleport stone") leads the announcement so a single,
+    // uninterrupted Say carries both what happened and where focus landed.
+    private static void RefreshCurrentGUI(int focusIndex, string prefix = null)
     {
         if (_currentGUI == null) return;
 
@@ -827,13 +829,21 @@ internal static class GUIAccessibility
         if (active.Count == 0)
         {
             SelectedIndex = -1;
-            ScreenReader.Say(string.IsNullOrEmpty(emptyDesc) ? "Empty" : emptyDesc);
+            ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? "Empty" : emptyDesc));
             return;
         }
 
         SelectedIndex = Mathf.Clamp(focusIndex, 0, active.Count - 1);
         var label = active[SelectedIndex].ReadLabel();
-        ScreenReader.Say(string.IsNullOrEmpty(emptyDesc) ? label : $"{emptyDesc}. {label}");
+        ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? label : $"{emptyDesc}. {label}"));
+    }
+
+    // Join an optional lead-in (e.g. "Used teleport stone") to the main announcement.
+    private static string Join(string prefix, string body)
+    {
+        if (string.IsNullOrEmpty(prefix)) return body;
+        if (string.IsNullOrEmpty(body)) return prefix;
+        return $"{prefix}. {body}";
     }
 
     // After a vendor move the offer/stock grids are redrawn in place, so re-discover the
@@ -912,9 +922,32 @@ internal static class GUIAccessibility
 
         if (elem.Type == ElementType.ItemCell)
         {
+            var prevIndex = SelectedIndex;
+
+            // The player's own inventory: pick the item's primary action (use/equip/open bag)
+            // rather than the generic left-click press, which does nothing for usable items like
+            // the teleport stone. Re-announce and refresh afterwards (using consumes a stack), but
+            // skip the refresh when the item closed the inventory (e.g. teleport opens the map).
+            if (_currentGUI is InventoryGUI)
+            {
+                var (summary, closed) = InventoryItemHandler.ActivateInventoryItem(elem.Cell);
+                if (closed || !(_currentGUI is InventoryGUI))
+                {
+                    // The item closed the inventory (e.g. teleport opens the map). Just speak the
+                    // summary; CheckForNewGUI will announce whatever GUI opens next.
+                    if (!string.IsNullOrEmpty(summary)) ScreenReader.Say(summary);
+                }
+                else
+                {
+                    // Re-discover the (possibly mutated) grid and lead the announcement with the
+                    // summary so it isn't interrupted by the refreshed row.
+                    RefreshCurrentGUI(prevIndex, summary);
+                }
+                return;
+            }
+
             // Press the item cell, which fires its on-action callback (e.g. the autopsy
             // table's "extract this body part" flow → confirm dialog the mod reads next).
-            var prevIndex = SelectedIndex;
             InventoryItemHandler.PressItemCell(elem.Cell);
 
             // A chest moves the item and redraws both grids in place — same GUI, but our
