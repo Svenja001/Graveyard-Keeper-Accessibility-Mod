@@ -59,6 +59,16 @@ public class Plugin : BaseUnityPlugin
             typeof(GameSave), "SetTaskState",
             new[] { typeof(string), typeof(string), typeof(KnownNPC.TaskState.State), typeof(Action) });
 
+        // Read out the corpse's skull bar each time the autopsy/preparation table opens, so
+        // the player can tell whether extracting a part changed the red/white skull counts.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.AutopsyGUI_Open_Postfix),
+            typeof(AutopsyGUI), "Open", new[] { typeof(WorldGameObject) });
+
+        // Also read the skull bar the instant a part is extracted (before the GUI hides), so
+        // the player gets direct feedback. See Patches.AutopsyGUI_RemoveBodyPartFromBody_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.AutopsyGUI_RemoveBodyPartFromBody_Postfix),
+            typeof(AutopsyGUI), "RemoveBodyPartFromBody", new[] { typeof(Item), typeof(Item) });
+
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
 

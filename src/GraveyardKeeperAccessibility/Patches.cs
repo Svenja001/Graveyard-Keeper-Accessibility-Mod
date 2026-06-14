@@ -78,6 +78,57 @@ internal static class Patches
         GUIAccessibility.OnHover(__instance, isOver);
     }
 
+    // AutopsyGUI._body holds the corpse being prepared. Cached so we don't reflect every open.
+    private static System.Reflection.FieldInfo _autopsyBodyField;
+
+    // Speak the corpse's skull bar whenever the autopsy/preparation table opens. The skull
+    // bar (red = q_minus, white = q_plus, plus freshness) is the whole point of preparing a
+    // body, but it's purely visual. Extracting a part calls AutopsyGUI.Hide(), so the player
+    // reopens the table to take the next part — reading the current red/white/fresh on every
+    // Open lets a blind player tell whether the last extraction lowered or raised the skulls.
+    public static void AutopsyGUI_Open_Postfix(AutopsyGUI __instance)
+    {
+        try
+        {
+            _autopsyBodyField ??= AccessTools.Field(typeof(AutopsyGUI), "_body");
+            var body = _autopsyBodyField?.GetValue(__instance) as Item;
+
+            var desc = SkullInfo.Describe(body);
+            if (string.IsNullOrEmpty(desc)) return;
+
+            Plugin.Log.LogInfo($"[AUTOPSY] {desc}");
+            ScreenReader.Say(desc, interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[AUTOPSY_HOOK] Error: {ex.Message}");
+        }
+    }
+
+    // Speak the corpse's skull bar the instant a part is extracted. RemoveBodyPartFromBody
+    // strips the part from the body before the (timed) craft runs and before the GUI hides,
+    // so __0 already reflects the new red/white skull counts — giving direct "now X red,
+    // Y white" feedback without waiting for the table to be reopened.
+    public static void AutopsyGUI_RemoveBodyPartFromBody_Postfix(Item __0, Item __1)
+    {
+        try
+        {
+            var desc = SkullInfo.Describe(__0);
+            if (string.IsNullOrEmpty(desc)) return;
+
+            string part = null;
+            try { part = __1?.definition?.GetItemName(); } catch { }
+
+            var spoken = string.IsNullOrEmpty(part) ? $"Now {desc}" : $"Removed {part}, now {desc}";
+            Plugin.Log.LogInfo($"[AUTOPSY] {spoken}");
+            ScreenReader.Say(spoken, interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[AUTOPSY_HOOK] Error: {ex.Message}");
+        }
+    }
+
     // Auto-announce a newly visible quest objective. The game raises
     // GameSave.SetTaskState(npc, task, state) and flashes a "Neue Aufgabe" bubble when an
     // objective appears (e.g. after the bishop intro), but a blind player gets no readable
