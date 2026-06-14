@@ -80,6 +80,11 @@ internal static class ObjectNavigator
     // to the nearest exit door and prompt them to press E to step outside, then retry.
     private static bool _exitAssisting = false;
     private static string _exitAssistLabel;
+    // Island pull-back: some targets sit on a graph-0 component disconnected from the rest of the
+    // map (the player's house — you cross a threshold the NPC navmesh doesn't bake). The route
+    // errors. We then pull the destination toward the player and retry until it lands on reachable
+    // navmesh (the island's edge nearest the target), walk there, and report the remaining gap.
+    private static int _pullbackTries = 0;
     private static Vector2 _longWalkDest;            // route end (approach point near the target)
     // Partial-route chaining: when the target is unreachable on the navmesh (e.g. an NPC inside
     // a building), graph 0 returns a path to the closest reachable node — the entrance/outside.
@@ -121,6 +126,12 @@ internal static class ObjectNavigator
     // A* approach. ProgressDistance/StuckTickLimit detect being boxed in.
     private const float LongWalkStartDistance = 14f * TileSize;
     private const float FinalApproachDistance = 11f * TileSize;
+    // After the native walk, if we're within AtTargetDistance of the target we're effectively
+    // there (just face + "Arrived"). If we ended further short (pulled back to an island edge) but
+    // within FinalApproachReach, finish the last stretch onto the door with player-graph A* so the
+    // player only needs to press E.
+    private const float AtTargetDistance = 3f * TileSize;
+    private const float FinalApproachReach = 16f * TileSize;
     private const float ProgressDistance = 3f * TileSize;
     private const float AnnounceProgressDistance = 10f * TileSize;
     // TickLongWalk runs every frame, so this is in frames: how long the player may make less
@@ -135,6 +146,10 @@ internal static class ObjectNavigator
     // limit (as close as walking can get) and stop at the entrance.
     private const float EndGapImprove = 3f * TileSize;
     private const int StalledRecomputeLimit = 2;
+    // Island pull-back tuning (see _pullbackTries).
+    private const float PullbackStep = 6f * TileSize;
+    private const int MaxPullbackTries = 12;
+    private const float PullbackMinToPlayer = 12f * TileSize;
 
     // Beacon (manual fallback) thresholds.
     private const float BeaconHandoffDistance = 15f * TileSize;
@@ -453,6 +468,7 @@ internal static class ObjectNavigator
         _longWalkStuckTicks = 0;
         _routeNeedsRecompute = false;
         _exitAssisting = false;
+        _pullbackTries = 0;
         _routeReachesTarget = true;
         _finalPartial = false;
         _bestEndGap = float.MaxValue;
@@ -480,6 +496,17 @@ internal static class ObjectNavigator
         try
         {
             if (AstarPath.active == null) return;
+
+            // Snap the destination onto an actual graph-0 node first. A landmark anchor (a door
+            // at a building wall, a zone object) can sit on a navmesh VOID — then the path query's
+            // own GetNearest finds nothing and errors out ("route unavailable"). Snapping with our
+            // own search pulls the target onto the nearest real walkable node so a route exists.
+            if (TrySnapGraph0(to, out var snappedTo, out var snapDist))
+            {
+                if (snapDist > 1f)
+                    _log?.LogInfo($"[NAVIGATOR] Snapped route dest {to} -> {snappedTo} ({snapDist:F0}u, graph 0)");
+                to = snappedTo;
+            }
 
             var path = Pathfinding.ABPath.Construct(
                 new Vector3(from.x, from.y, 0f),
@@ -624,16 +651,38 @@ internal static class ObjectNavigator
 
         if (_routeReachesTarget)
         {
-            // The native walk already landed at the approach point right next to the target. Do
-            // NOT run a graph-2 "final approach" here: the player A* graph can't path onto
-            // teleport/door tiles, so it fails and falsely says "Could not reach" even though we
-            // arrived. Just face the target so vanilla E interacts, and announce arrival.
+            // The native walk landed at the approach point next to the target. Do NOT run a
+            // graph-2 "final approach": the player A* graph can't path onto teleport/door tiles,
+            // so it fails and falsely says "Could not reach" even though we arrived. Just face the
+            // target so vanilla E interacts. If we only got to a pulled-back island edge, the
+            // player is still some way off — report the remaining gap instead of "Arrived".
             _longWalkActive = false;
             var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
-            _walkFacePos = target.Position;
-            FacePlayerAtTarget();
-            ScreenReader.Say($"Arrived at {target.Label}, {DistanceText(Vector2.Distance(playerPos, target.Position))}", interrupt: true);
-            _log?.LogInfo($"[NAVIGATOR] Arrived at {target.Label} (native walk)");
+            var remaining = Vector2.Distance(playerPos, target.Position);
+            _log?.LogInfo($"[NAVIGATOR] Native walk ended {remaining:F0}u from {target.Label}");
+
+            if (remaining <= AtTargetDistance)
+            {
+                // At the door's approach point. Face it (don't graph-2 onto teleport tiles, which
+                // fails) so vanilla E works.
+                _walkFacePos = target.Position;
+                FacePlayerAtTarget();
+                ScreenReader.Say($"Arrived at {target.Label}, {DistanceText(remaining)}", interrupt: true);
+            }
+            else if (remaining <= FinalApproachReach)
+            {
+                // Ended short (pulled back to an island edge near the target). Finish onto the door
+                // with the player-graph A* so the player only needs to press E. WalkToTarget faces
+                // the target and announces arrival, or "Could not reach" if even that last bit fails.
+                _log?.LogInfo($"[NAVIGATOR] Final approach to {target.Label} ({remaining:F0}u)");
+                WalkToTarget(target);
+            }
+            else
+            {
+                _walkFacePos = target.Position;
+                FacePlayerAtTarget();
+                ScreenReader.Say($"As close as auto-walk can get to {target.Label}, {DistanceText(remaining)}. It's {DirectionTo(target)}walk the rest yourself.", interrupt: true);
+            }
         }
         else if (_finalPartial)
         {
@@ -688,6 +737,25 @@ internal static class ObjectNavigator
                 ScreenReader.Say($"You are inside a building. Walking to the nearest door — press E to step outside, then go to {_exitAssistLabel} again.", interrupt: true);
                 _log?.LogInfo($"[NAVIGATOR] Inside building; exit-assist to {door.Value.Label}");
                 RequestGraph0Route(MainGame.me.player.pos, _longWalkDest);
+                return;
+            }
+        }
+
+        // Target on a graph-0 island (e.g. the house): pull the destination toward the player and
+        // retry. The first point that routes is the reachable navmesh nearest the target; we walk
+        // there and OnNativeWalkComplete reports the remaining gap to the real target.
+        var player = MainGame.me?.player;
+        if (player != null && _pullbackTries < MaxPullbackTries)
+        {
+            var pp = player.pos;
+            var toPlayer = pp - _longWalkDest;
+            var d = toPlayer.magnitude;
+            if (d > PullbackMinToPlayer)
+            {
+                _pullbackTries++;
+                _longWalkDest += toPlayer / d * Mathf.Min(PullbackStep, d - PullbackMinToPlayer);
+                _log?.LogInfo($"[NAVIGATOR] Unreachable; pulling dest toward player (try {_pullbackTries}) -> {_longWalkDest}");
+                RequestGraph0Route(pp, _longWalkDest);
                 return;
             }
         }
@@ -958,6 +1026,39 @@ internal static class ObjectNavigator
             _log?.LogWarning($"[NAVIGATOR] SnapToWalkable failed: {ex.Message}");
         }
         return p;
+    }
+
+    /// <summary>
+    /// Snap a world point to the nearest walkable node on graph 0 (the whole-map NPC navmesh,
+    /// always scanned — no RefreshPlayerGraph needed). Used to pull a landmark anchor that sits
+    /// on a navmesh void (building wall/interior) onto a real node so a route can be found, and
+    /// to tell whether a candidate door is actually on the navmesh. Returns false if no node.
+    /// </summary>
+    private static bool TrySnapGraph0(Vector2 p, out Vector2 snapped, out float dist)
+    {
+        snapped = p;
+        dist = float.MaxValue;
+        try
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return false;
+
+            var constraint = Pathfinding.NNConstraint.Default;
+            constraint.graphMask = 1 << 0;  // graph 0 only
+
+            var nn = astar.GetNearest(new Vector3(p.x, p.y, 0f), constraint);
+            if (nn.node != null && nn.node.Walkable)
+            {
+                snapped = new Vector2(nn.clampedPosition.x, nn.clampedPosition.y);
+                dist = Vector2.Distance(p, snapped);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] TrySnapGraph0 failed: {ex.Message}");
+        }
+        return false;
     }
 
     private static void StartWalk(Vector2 dest, string label, MovementComponent.GoToMethod method)
@@ -1244,13 +1345,11 @@ internal static class ObjectNavigator
 
     // Building landmarks anchored on their EXTERIOR entrance door (a teleport WGO), not an interior
     // NPC/zone — interiors are separate, navmesh-disconnected regions auto-walk can't reach. The
-    // door's place comes from its custom_tag (InteractionDetector.DoorPlaceFromTag). The game names
-    // the world-side door inconsistently per building (tavern = "outside", house = "inside"), so we
-    // specify which obj_id side is the exterior one. (place, objIdSide, spoken label).
-    private static readonly (string doorPlace, string objIdSide, string label)[] DoorLandmarks =
+    // door's place comes from its custom_tag (InteractionDetector.DoorPlaceFromTag). (place, label).
+    private static readonly (string doorPlace, string label)[] DoorLandmarks =
     {
-        ("Tavern", "outside", "Tavern"),
-        ("House", "inside", "Home"),
+        ("Tavern", "Tavern"),
+        ("House", "Home"),
     };
 
     // World-zone ids NOT to add as landmarks — superseded by a door landmark above (the zone's
@@ -1295,9 +1394,9 @@ internal static class ObjectNavigator
             }
 
             // Building entrances (Tavern, Home), anchored on the exterior door you press E on.
-            foreach (var (doorPlace, objIdSide, label) in DoorLandmarks)
+            foreach (var (doorPlace, label) in DoorLandmarks)
             {
-                var door = FindEntranceDoor(allObjects, doorPlace, objIdSide);
+                var door = FindEntranceDoor(allObjects, doorPlace, playerPos);
                 if (door == null) continue;
                 list.Add(new NavigationTarget
                 {
@@ -1366,15 +1465,22 @@ internal static class ObjectNavigator
 
     /// <summary>
     /// Find a building's exterior entrance door — the teleport WGO whose custom_tag resolves to
-    /// <paramref name="place"/> (via the same logic that labels doors in the Doors category) and
-    /// whose obj_id marks it as the "outside" door (the one you walk up to and press E on). The
-    /// interior-side door (obj_id "inside") and sub-area doors (cellar/2nd floor, which resolve to
-    /// a longer place name) are skipped, so we get the open-world entrance auto-walk can reach.
+    /// <paramref name="place"/> (via the same logic that labels doors in the Doors category).
+    ///
+    /// Critically this uses the SAME filter the Doors category does: a USABLE door has
+    /// <c>interaction_type != None</c>. The <c>None</c> teleports are non-interactive arrival
+    /// ANCHORS (where you land), some of which sit inside the building — and a door's anchor is
+    /// what the old snap-distance heuristic kept latching onto, sending "Home" to an interior spot.
+    /// Among the usable same-place doors we pick the one NEAREST the player, exactly like browsing
+    /// the Doors list and walking to the house door you can see: when you're outside, the exterior
+    /// entrance is the nearer one (the interior door is further in / often not even loaded). This is
+    /// why the Doors category walks to the right door while the old Landmark heuristic didn't.
     /// </summary>
-    private static WorldGameObject FindEntranceDoor(WorldGameObject[] allObjects, string place, string objIdSide)
+    private static WorldGameObject FindEntranceDoor(WorldGameObject[] allObjects, string place, Vector2 playerPos)
     {
         if (allObjects == null) return null;
-        WorldGameObject sided = null, fallback = null;
+        WorldGameObject best = null;
+        float bestSq = float.MaxValue;
         foreach (var w in allObjects)
         {
             if (w == null) continue;
@@ -1383,11 +1489,17 @@ internal static class ObjectNavigator
                                StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            fallback = w;
-            var id = (w.obj_id ?? "").ToLowerInvariant();
-            if (id.Contains(objIdSide)) sided = w;
+            // Skip the non-usable arrival anchors (interaction_type None) exactly as the Doors
+            // category does — those are landing spots, not the door you press E on, and some sit
+            // inside the building.
+            if (w.obj_def == null ||
+                w.obj_def.interaction_type == ObjectDefinition.InteractionType.None)
+                continue;
+
+            float distSq = (w.pos - playerPos).sqrMagnitude;
+            if (distSq < bestSq) { bestSq = distSq; best = w; }
         }
-        return sided ?? fallback;
+        return best;
     }
 
     private static string ZoneLabel(string zoneId)
