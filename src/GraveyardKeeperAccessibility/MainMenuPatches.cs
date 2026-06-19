@@ -310,6 +310,20 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The "resource based" crafting station (anvil repair, decompose-for-science, the
+        // sharpening/processing benches, ...) works differently from CraftGUI: instead of a
+        // recipe list you first pick the item to process from a separate resource picker, then
+        // the matching recipe's extra materials appear and a single craft button finishes it.
+        // The entry point is the "main ingredient" slot, which starts EMPTY — so the generic
+        // item-cell discovery (which skips empty cells) finds only the close/craft buttons and
+        // the player has no way to start. This is exactly what blocks repairing the sword at the
+        // smith's anvil. Expose the pick slot, the required materials and the craft button.
+        if (gui is ResourceBasedCraftGUI resourceCraftGui)
+        {
+            DiscoverResourceBasedCraft(resourceCraftGui);
+            return;
+        }
+
         // The vendor (trade) screen is built from two inventory panels plus two offer
         // widgets, and its confirm/cancel are UIButtons whose children are named only
         // "btn"/"spr" — meaningless to read out. Discover the item cells (labelled
@@ -855,6 +869,122 @@ internal static class GUIAccessibility
         }
 
         Plugin.Log.LogInfo($"[CRAFT] discovered {added} recipe(s)");
+    }
+
+    /// <summary>
+    /// The resource-based crafting station (anvil repair, science decompose, sharpening bench,
+    /// ...): a pick slot, the chosen recipe's extra materials and one craft button. The flow is
+    /// (1) activate the pick slot -> a resource picker opens (a CraftResourcesSelectGUI, handled
+    /// generically as an item grid) -> choose the item; (2) the station re-draws with the item in
+    /// the slot and its required materials; (3) activate the craft button to do the work.
+    /// </summary>
+    private static void DiscoverResourceBasedCraft(ResourceBasedCraftGUI gui)
+    {
+        // The pick slot. Pressing it fires the cell's select callback (OnChooseItem), which opens
+        // the resource picker; CheckForNewGUI then announces that picker. When an item is already
+        // chosen the slot shows it, and pressing it again re-opens the picker to change it.
+        var main = gui.main_ingredient;
+        if (main != null)
+        {
+            string PickLabel()
+            {
+                if (main.id_empty)
+                {
+                    var hint = ScreenReader.StripNguiCodes(gui.label_resourse_hint?.text)?.Trim();
+                    return string.IsNullOrEmpty(hint) ? "Choose item" : $"Choose item. {hint}";
+                }
+                var chosen = InventoryItemHandler.DescribeItemCell(main);
+                return string.IsNullOrEmpty(chosen)
+                    ? "Choose item"
+                    : $"Selected {chosen}. Enter to choose a different item";
+            }
+
+            Elements.Add(new GUIElement
+            {
+                Go = main.gameObject,
+                Label = PickLabel(),
+                ReadDynamic = PickLabel,
+                Type = ElementType.ItemCell,
+                Cell = main
+            });
+        }
+
+        // Once an item is picked the recipe's extra materials are drawn into the ingredient
+        // cells. They aren't interactive — read them out as the materials the craft consumes so
+        // the player knows what's needed (the craft button reports whether they have enough).
+        if (gui.ingredients != null)
+        {
+            foreach (var ing in gui.ingredients)
+            {
+                if (ing == null || ing == main) continue;
+                if (!ing.gameObject.activeInHierarchy || ing.is_inactive_state || ing.id_empty) continue;
+                var desc = InventoryItemHandler.DescribeItemCell(ing);
+                if (string.IsNullOrEmpty(desc)) continue;
+                Elements.Add(new GUIElement
+                {
+                    Go = ing.gameObject,
+                    Label = $"Requires {desc}",
+                    Type = ElementType.Button,
+                    OnActivate = () => ScreenReader.Say($"Requires {desc}")
+                });
+            }
+        }
+
+        // The craft button. Its UIButton.isEnabled mirrors the game's CanCraft check (an item is
+        // chosen and the player has the materials), so use it both to label availability and to
+        // gate the press. OnCraftButtonPressed is the game's own handler (repair / decompose).
+        if (gui.craft_button != null)
+        {
+            bool CanCraftNow() => gui.craft_button.ui_button != null && gui.craft_button.ui_button.isEnabled;
+            string CraftLabel()
+            {
+                var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
+                if (string.IsNullOrEmpty(verb)) verb = "Craft";
+                if (CanCraftNow()) return verb;
+                return main != null && main.id_empty
+                    ? $"{verb}, choose an item first"
+                    : $"{verb}, not enough materials";
+            }
+
+            Elements.Add(new GUIElement
+            {
+                Go = gui.craft_button.gameObject,
+                Label = CraftLabel(),
+                ReadDynamic = CraftLabel,
+                Type = ElementType.Button,
+                OnActivate = () =>
+                {
+                    if (!CanCraftNow())
+                    {
+                        ScreenReader.Say(main != null && main.id_empty
+                            ? "Choose an item first"
+                            : "Not enough materials");
+                        return;
+                    }
+                    try { gui.OnCraftButtonPressed(); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[RESCRAFT] craft failed: {ex.Message}"); }
+                    // The craft is queued/performed; the station usually stays open. Re-read so
+                    // affordability and the slot update (the item may have been consumed).
+                    var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
+                    ScreenReader.Say(string.IsNullOrEmpty(verb) ? "Crafting" : verb);
+                    if (_currentGUI is ResourceBasedCraftGUI)
+                        RefreshCurrentGUI(SelectedIndex);
+                }
+            });
+        }
+
+        // Close button.
+        if (gui.close_btn != null)
+        {
+            Elements.Add(new GUIElement
+            {
+                Go = gui.close_btn,
+                Label = "Close",
+                Type = ElementType.Button
+            });
+        }
+
+        Plugin.Log.LogInfo($"[RESCRAFT] discovered station, {Elements.Count} element(s)");
     }
 
     /// <summary>

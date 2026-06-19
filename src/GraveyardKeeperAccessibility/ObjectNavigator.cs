@@ -29,6 +29,10 @@ internal enum NavCategory
     People,
     Storage,
     Stations,
+    Trees,
+    Stones,
+    Bushes,
+    Gatherables,
     Other
 }
 
@@ -50,6 +54,10 @@ internal static class ObjectNavigator
         NavCategory.People,
         NavCategory.Storage,
         NavCategory.Stations,
+        NavCategory.Trees,
+        NavCategory.Stones,
+        NavCategory.Bushes,
+        NavCategory.Gatherables,
         NavCategory.Other
     };
 
@@ -366,6 +374,10 @@ internal static class ObjectNavigator
         NavCategory.People => "People",
         NavCategory.Storage => "Storage",
         NavCategory.Stations => "Crafting stations",
+        NavCategory.Trees => "Trees",
+        NavCategory.Stones => "Stones",
+        NavCategory.Bushes => "Bushes",
+        NavCategory.Gatherables => "Gatherables",
         _ => "Other"
     };
 
@@ -1874,6 +1886,14 @@ internal static class ObjectNavigator
                 category = def.has_craft ? NavCategory.Stations : NavCategory.Other;
                 return true;
             default:
+                // Resource nodes worked with a tool (chop a tree, mine a stone, dig out a
+                // bush) or gathered/picked up by hand: these have no special interaction_type
+                // (None) but carry a non-empty tool_actions list. Sort them into Trees /
+                // Stones / Bushes / Gatherables so the player can head straight to e.g. a
+                // bush to dig out (improving the graveyard rating).
+                if (TryClassifyHarvestable(obj, def, out category))
+                    return true;
+
                 // Non-interactive grave fixtures (empty grave grounds, graveyard zone
                 // markers) have no Grave interaction but read as graves by id — keep them
                 // navigable under Graves. Everything else (grass, scenery) is skipped.
@@ -1884,6 +1904,63 @@ internal static class ObjectNavigator
                     return true;
                 }
                 return false;
+        }
+    }
+
+    /// <summary>
+    /// Classify a tool-worked / hand-gathered resource node into Trees, Stones, Bushes or the
+    /// catch-all Gatherables. The game marks what tool a node needs in
+    /// <c>obj_def.tool_actions.action_tools</c> (Axe = chop, Pickaxe = mine, Shovel = dig,
+    /// Hand = gather); we lead with the obj_id keyword (bush/tree/stone) so a node that takes
+    /// several tools (e.g. a tree you chop then dig the stump) still lands in the right bucket,
+    /// then fall back to the tool. Pure-Hammer nodes (construction/repair) are not harvestables
+    /// and are skipped. Returns false when the object isn't a resource node.
+    /// </summary>
+    private static bool TryClassifyHarvestable(WorldGameObject obj, ObjectDefinition def, out NavCategory category)
+    {
+        category = NavCategory.Other;
+        try
+        {
+            var tools = def.tool_actions;
+            if (tools == null || tools.no_actions) return false;
+
+            bool axe = tools.HasToolK(ItemDefinition.ItemType.Axe);
+            bool pickaxe = tools.HasToolK(ItemDefinition.ItemType.Pickaxe);
+            bool shovel = tools.HasToolK(ItemDefinition.ItemType.Shovel);
+            bool hand = tools.HasToolK(ItemDefinition.ItemType.Hand);
+
+            // A node you can only build/repair on (Hammer) is not something to harvest.
+            if (!axe && !pickaxe && !shovel && !hand) return false;
+
+            var id = obj.obj_id ?? "";
+            if (id.IndexOf("bush", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Bushes;
+                return true;
+            }
+            if (axe || id.IndexOf("tree", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("stump", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Trees;
+                return true;
+            }
+            if (pickaxe || id.IndexOf("stone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("rock", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("boulder", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("ore", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Stones;
+                return true;
+            }
+
+            // Anything else worked by shovel/hand (dig out or pick up with F): flowers,
+            // mushrooms, herbs, fallen branches, etc.
+            category = NavCategory.Gatherables;
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
