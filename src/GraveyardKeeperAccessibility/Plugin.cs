@@ -13,6 +13,7 @@ public class Plugin : BaseUnityPlugin
         MovementFeedback.Init(Log);
         InteractionDetector.Init(Log);
         InventoryItemHandler.Init(Log);
+        ItemPickupAnnouncer.Init(Log);
         ClickHandler.Init(Log);
         ObjectNavigator.Init(Log);
         DayTimeAnnouncer.Init(Log);
@@ -78,6 +79,16 @@ public class Plugin : BaseUnityPlugin
             nameof(Patches.VendorGUI_FinishOffer_Prefix), nameof(Patches.VendorGUI_FinishOffer_Postfix),
             typeof(VendorGUI), "FinishOffer", Type.EmptyTypes);
 
+        // Speak "Got 4 wood" whenever an item lands in the player's inventory (ground pickups,
+        // finished crafts, fishing, vendor buys). See Patches.WorldGameObject_AddToInventory_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.WorldGameObject_AddToInventory_Postfix),
+            typeof(WorldGameObject), "AddToInventory", new[] { typeof(Item) });
+
+        // Speak earned tech points ("Got 3 green tech points") at the award moment.
+        // See Patches.TechPointsDrop_Drop_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.TechPointsDrop_Drop_Postfix),
+            typeof(TechPointsDrop), "Drop", new[] { typeof(Vector3), typeof(int), typeof(int), typeof(int) });
+
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
 
@@ -95,6 +106,10 @@ public class Plugin : BaseUnityPlugin
                 Log.LogInfo($"[SCENE CHANGE] {_lastSceneName ?? "null"} -> {currentScene}");
                 _lastSceneName = currentScene;
             }
+
+            // Speak any items the player just received ("Got 4 wood"). Runs regardless of GUI
+            // state so a craft finished with the station window open still announces its output.
+            ItemPickupAnnouncer.Update();
 
             // Accessible build placement: while the build ghost is live, this owns the
             // keyboard (arrows move, Enter places, etc.). Skip the rest of the update so the

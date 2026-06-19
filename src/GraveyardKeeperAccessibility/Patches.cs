@@ -78,6 +78,24 @@ internal static class Patches
         GUIAccessibility.OnHover(__instance, isOver);
     }
 
+    // Announce items the player gains. Every way the player receives an item — ground pickup
+    // (DropResGameObject -> player.AddToInventory), a finished craft, a caught fish, a vendor
+    // buy — funnels through WorldGameObject.AddToInventory on the player object, but none of
+    // them voice the item. Speak "Got 4 wood" when the add succeeds on the player. The (string,
+    // int) and (List) overloads delegate to this Item overload, so this one hook covers them all.
+    public static void WorldGameObject_AddToInventory_Postfix(WorldGameObject __instance, Item __0, bool __result)
+    {
+        try
+        {
+            if (!__result || __instance == null || !__instance.is_player) return;
+            ItemPickupAnnouncer.OnItemGained(__0);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[PICKUP] AddToInventory postfix: {ex.Message}");
+        }
+    }
+
     // AutopsyGUI._body holds the corpse being prepared. Cached so we don't reflect every open.
     private static System.Reflection.FieldInfo _autopsyBodyField;
 
@@ -126,6 +144,24 @@ internal static class Patches
         catch (Exception ex)
         {
             Plugin.Log.LogError($"[AUTOPSY_HOOK] Error: {ex.Message}");
+        }
+    }
+
+    // Announce tech points the player just earned ("Got 3 green tech points"). TechPointsDrop.Drop
+    // with explicit r/g/b counts is the award moment — studying/crafting (WorldGameObject.DropItems
+    // aggregates the points into one call) and collecting a dropped tech-point item both route
+    // here with full totals. The physics-pickup path uses the string overload instead, so this
+    // int overload fires exactly once per award and never double-counts.
+    public static void TechPointsDrop_Drop_Postfix(int __1, int __2, int __3)
+    {
+        try
+        {
+            if (__1 + __2 + __3 <= 0) return;
+            ItemPickupAnnouncer.OnTechPointsGained(__1, __2, __3);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[PICKUP] TechPointsDrop.Drop postfix: {ex.Message}");
         }
     }
 
