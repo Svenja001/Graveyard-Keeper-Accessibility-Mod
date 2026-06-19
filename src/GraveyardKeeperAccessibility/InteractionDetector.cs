@@ -6,6 +6,12 @@ internal static class InteractionDetector
     private static int _lastHighlightedDropId = 0;
     private static bool _wasCarrying = false;
     private static bool _wasCrafting = false;
+    // Completion tracking — remembers the specific station last seen mid-craft so we can voice
+    // the outcome even after a repair replaces the object out from under us (change_wgo).
+    private static bool _craftPending = false;
+    private static WorldGameObject _craftStation = null;
+    private static bool _craftIsFixing = false;
+    private static string _craftOutputName = null;
     private static WorldGameObject _lastWorkHighlight = null;
     private static bool _wasWorking = false;
     private static float _workAnnounceAccum = 0f;
@@ -52,7 +58,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = GetObjectLabel(target);
+                        var label = WithRepairInfo(GetObjectLabel(target), target);
                         ScreenReader.Say(label, interrupt: true);
                         _lastAnnouncedObject = target.name;
                     }
@@ -65,7 +71,7 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var label = GetObjectLabel(nearby);
+                    var label = WithRepairInfo(GetObjectLabel(nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
@@ -226,19 +232,42 @@ internal static class InteractionDetector
             }
             _wasWorking = working;
 
-            // 3) "Finished" — when a station craft (autopsy etc.) completes. Crafts clear
-            //    is_crafting on completion; dig/chop completion announces itself naturally
-            //    (the grave opens, drops appear), so we only add a cue for crafts.
-            CraftComponent craft = null;
-            if (nearby != null && nearby.obj_def != null && nearby.obj_def.has_craft)
-                craft = nearby.components?.craft;
-            bool crafting = craft != null && craft.is_crafting && craft.current_craft != null;
-            if (crafting != _wasCrafting)
+            // 3) Completion cue. A station craft (workbench, autopsy) and a broken-object
+            //    repair both run through CraftComponent.is_crafting, but a repair finishes by
+            //    REPLACING the object (change_wgo) — so by the time the craft clears, `nearby`
+            //    is already the new, repaired WGO and the old one is destroyed. We therefore
+            //    remember the exact station we saw working and report when THAT craft ends,
+            //    rather than watching `nearby`. This also means walking away from a half-done
+            //    craft (which leaves is_crafting set) doesn't trigger a false completion.
+            var station = (nearby != null && nearby.obj_def != null && nearby.obj_def.has_craft)
+                ? nearby.components?.craft : null;
+            bool stationCrafting = station != null && station.is_crafting && station.current_craft != null;
+
+            if (stationCrafting)
             {
-                _wasCrafting = crafting;
-                if (!crafting)
-                    ScreenReader.Say("Finished", interrupt: false);
+                // Refresh what's cooking each frame so we can name it once it's done. A repair
+                // craft is the one the game tags Fixing (see GetFixingCraft).
+                _craftPending = true;
+                _craftStation = nearby;
+                _craftIsFixing = station.current_craft.craft_type == CraftDefinition.CraftType.Fixing;
+                _craftOutputName = _craftIsFixing ? null : CraftOutputName(station.current_craft);
             }
+            else if (_craftPending && !IsStationStillCrafting(_craftStation))
+            {
+                // The remembered craft is no longer running: it finished, or its object was
+                // swapped for the repaired version (the old WGO now reads as destroyed/null).
+                if (_craftIsFixing)
+                    ScreenReader.Say("Repaired", interrupt: false);
+                else
+                    ScreenReader.Say(string.IsNullOrEmpty(_craftOutputName) ? "Finished" : $"{_craftOutputName} crafted", interrupt: false);
+                _craftPending = false;
+                _craftStation = null;
+                _craftIsFixing = false;
+                _craftOutputName = null;
+            }
+
+            // Keep IsPlayerCrafting (navigator's auto-walk guard) tracking the live state.
+            _wasCrafting = stationCrafting;
         }
         catch (Exception ex)
         {
@@ -252,6 +281,10 @@ internal static class InteractionDetector
     {
         try
         {
+            // A broken station carries a Fixing craft — the action that rebuilds it. Name it
+            // "repair" rather than the generic Hammer "build" so the prompt matches the task.
+            if (GetFixingCraft(wgo) != null) return "repair";
+
             var craft = (wgo.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
             if (craft != null && craft.is_crafting && craft.current_craft != null)
             {
@@ -278,6 +311,116 @@ internal static class InteractionDetector
         }
         catch { }
         return "work";
+    }
+
+    // True while the given station still has a live, running craft. A destroyed/replaced WGO
+    // (e.g. a repaired object swapped via change_wgo) reads as Unity-null and counts as "done".
+    private static bool IsStationStillCrafting(WorldGameObject wgo)
+    {
+        try
+        {
+            if (wgo == null) return false;
+            var craft = wgo.components?.craft;
+            return craft != null && craft.is_crafting && craft.current_craft != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // Readable name of a craft's main output, for the "X crafted" completion cue. Null when the
+    // craft has no nameable output (then the caller falls back to a bare "Finished").
+    private static string CraftOutputName(CraftDefinition craft)
+    {
+        try
+        {
+            var name = ScreenReader.StripNguiCodes(craft?.GetFirstRealOutput()?.definition?.GetItemName() ?? "").Trim();
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // Broken tables/machines are repaired by a craft the game tags CraftType.Fixing. While the
+    // object is still broken that craft is present in its craft list; once rebuilt it changes
+    // into a different object that no longer has it. So the presence of a Fixing craft is our
+    // "this is broken and repairable" signal, and its needs are the repair materials. The
+    // floating material icons a sighted player reads are invisible to a blind one, so we voice them.
+    internal static CraftDefinition GetFixingCraft(WorldGameObject wgo)
+    {
+        try
+        {
+            if (wgo == null || wgo.obj_def == null || !wgo.obj_def.has_craft) return null;
+            var crafts = wgo.components?.craft?.crafts;
+            if (crafts == null || crafts.Count == 0) return null;
+
+            CraftDefinition fallback = null;
+            foreach (var c in crafts)
+            {
+                if (c == null || c.craft_type != CraftDefinition.CraftType.Fixing) continue;
+                if (fallback == null) fallback = c;
+                // Prefer a craft whose condition is currently satisfiable; fall back to the
+                // first Fixing craft if none evaluate cleanly.
+                try { if (c.condition.EvaluateBoolean(wgo, MainGame.me.player)) return c; }
+                catch { }
+            }
+            return fallback;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Append repair guidance to a broken object's label: the materials its repair consumes and
+    /// what the player is still short of. Returns the bare label unchanged for non-repairable
+    /// objects. See <see cref="GetFixingCraft"/>.
+    /// </summary>
+    private static string WithRepairInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            var fix = GetFixingCraft(wgo);
+            if (fix == null) return label;
+
+            var needs = fix.needs;
+            if (needs == null || needs.Count == 0)
+                return $"{label}. Repairable, press F to repair";
+
+            var all = new List<string>();
+            var missing = new List<string>();
+            foreach (var need in needs)
+            {
+                if (need == null || string.IsNullOrEmpty(need.id)) continue;
+
+                var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
+                if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+                all.Add(need.value > 1 ? $"{need.value} {iname}" : iname);
+
+                int have = 0;
+                try { have = MainGame.me.player.data.GetItemsCount(need.id, count_secondary_inventory: true); }
+                catch { }
+                int shortfall = need.value - have;
+                if (shortfall > 0)
+                    missing.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
+            }
+
+            if (all.Count == 0)
+                return $"{label}. Repairable, press F to repair";
+
+            var tail = missing.Count > 0
+                ? $"You still need {string.Join(", ", missing)}"
+                : "You have the materials, press F to repair";
+            return $"{label}. Repairable, needs {string.Join(", ", all)}. {tail}";
+        }
+        catch
+        {
+            return label;
+        }
     }
 
     /// <summary>
