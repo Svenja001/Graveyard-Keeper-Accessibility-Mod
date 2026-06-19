@@ -17,9 +17,34 @@ internal static class DayTimeAnnouncer
     private static readonly string[] WeekdayDayNames =
         { "Tag der Faulheit", "Tag des Zorns", "Tag des Neids", "Tag der Völlerei", "Tag der Wollust", "Tag des Hochmuts" };
 
+    // The six town-visiting NPCs each arrive on one fixed weekday, named after that day's
+    // sin. Flow_GetDayOfWeek is the authoritative mapping: Sloth→Astrologer, Wrath→Inquisitor,
+    // Envy→Cultist, Gluttony→Merchant, Lust→Actress, Pride→Bishop. WeekdayDayNames is indexed
+    // in that same sin order (Sloth=0 … Pride=5), so each NPC maps straight to an index.
+    private static readonly Dictionary<string, int> VisitingNpcDayIndex = new Dictionary<string, int>
+    {
+        { "npc_astrologer", 0 },
+        { "npc_inquisitor", 1 },
+        { "npc_cultist",    2 },
+        { "npc_merchant",   3 },
+        { "npc_actress",    4 },
+        { "npc_bishop",     5 },
+    };
+
     internal static void Init(ManualLogSource log)
     {
         _log = log;
+    }
+
+    /// <summary>
+    /// The weekday a town-visiting NPC appears on (e.g. "Tag der Völlerei" for the merchant),
+    /// or null for NPCs that have no fixed visiting day.
+    /// </summary>
+    internal static string VisitingDayForNpc(string npcId)
+    {
+        if (npcId != null && VisitingNpcDayIndex.TryGetValue(npcId, out int idx))
+            return WeekdayDayNames[idx];
+        return null;
     }
 
     /// <summary>

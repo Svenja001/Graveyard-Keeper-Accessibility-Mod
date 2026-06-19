@@ -719,10 +719,20 @@ internal static class GUIAccessibility
         if (string.IsNullOrWhiteSpace(name)) name = card.name;
 
         var relation = ScreenReader.StripNguiCodes(card.relation_txt?.text)?.Trim();
+        // The relationship is the 0–100 reputation the game draws as a bare number; spell out
+        // "out of 100" so it isn't mistaken for a quest counter like "0 of 10".
         if (card.go_relation != null && card.go_relation.activeInHierarchy && !string.IsNullOrWhiteSpace(relation))
-            parts.Add($"{name}, relationship {relation}");
+            parts.Add($"{name}, relationship {relation} out of 100");
         else
             parts.Add(name);
+
+        // The six town-visiting NPCs (merchant, astrologer, …) only appear on one fixed weekday;
+        // the card shows it as a day icon we otherwise can't read. Name it from the linked NPC's
+        // id. Other characters have no fixed day, so VisitingDayForNpc returns null and we skip.
+        var npcId = GetLinkedNpcId(card);
+        var visitingDay = DayTimeAnnouncer.VisitingDayForNpc(npcId);
+        if (!string.IsNullOrEmpty(visitingDay))
+            parts.Add($"Appears on {visitingDay}");
 
         var descr = ScreenReader.StripNguiCodes(card.npc_descr?.text)?.Trim();
         if (!string.IsNullOrWhiteSpace(descr) && descr.IndexOf('!') < 0)
@@ -741,6 +751,24 @@ internal static class GUIAccessibility
             parts.Add($"Quests: {string.Join(". ", quests)}");
 
         return string.Join(". ", parts);
+    }
+
+    // NPCItemGUI keeps the character it drew in a private _linked_npc field; read its npc_id so
+    // we can name the weekday a visiting NPC appears on. Returns null if it can't be resolved.
+    private static FieldInfo _linkedNpcField;
+    private static string GetLinkedNpcId(NPCItemGUI card)
+    {
+        try
+        {
+            _linkedNpcField ??= AccessTools.Field(typeof(NPCItemGUI), "_linked_npc");
+            var npc = _linkedNpcField?.GetValue(card) as KnownNPC;
+            return npc?.npc_id;
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[NPCs] could not read linked npc id: {ex.Message}");
+            return null;
+        }
     }
 
     // --- New-technology popup & tutorial windows ---------------------------------------------
