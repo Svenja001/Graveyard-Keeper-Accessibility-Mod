@@ -134,8 +134,32 @@ internal static class ScreenReader
 
     internal static string StripNguiCodes(string text)
     {
-        if (string.IsNullOrEmpty(text) || !text.Contains('[')) return text;
+        if (string.IsNullOrEmpty(text)) return text;
+        // The game embeds skull/cross counts as inline sprite tokens, e.g.
+        // "(wskull)20", "(rskull)5", "(cross)10" (the number always immediately
+        // follows the token). Spoken literally these are unintelligible, so turn
+        // them into words like "20 white skulls" / "5 red skulls" / "10 crosses".
+        if (text.Contains('('))
+            text = Regex.Replace(text, @"\((wskull|rskull|skull|cross)\)(-?\d+(?:\.\d+)?)?", SkullTokenToWords);
         // Strip NGUI color codes: [XXXXXX], [-], [c], [/c], etc.
-        return Regex.Replace(text, @"\[[\da-fA-F]{6}\]|\[-\]|\[/?c\]", "");
+        if (text.Contains('['))
+            text = Regex.Replace(text, @"\[[\da-fA-F]{6}\]|\[-\]|\[/?c\]", "");
+        return text;
+    }
+
+    private static string SkullTokenToWords(Match m)
+    {
+        string token = m.Groups[1].Value;
+        string num = m.Groups[2].Success ? m.Groups[2].Value : null;
+        // "(skull)" and "(wskull)" are both the white skull; "(rskull)" is red.
+        bool plural = num == null || num != "1";
+        string label;
+        switch (token)
+        {
+            case "rskull": label = plural ? "red skulls" : "red skull"; break;
+            case "cross":  label = plural ? "crosses" : "cross"; break;
+            default:       label = plural ? "white skulls" : "white skull"; break;
+        }
+        return num != null ? num + " " + label : label;
     }
 }
