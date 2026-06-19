@@ -1824,6 +1824,24 @@ internal static class GUIAccessibility
         }
     }
 
+    // Confirm the open amount/price picker by invoking its private OnConfirm, which fires the
+    // game's own confirm delegate with the current slider value (moving the chosen amount into
+    // the vendor offer / chest) and then hides the picker. Done via reflection because the
+    // keyboard has no binding for GameKey.Select, so the native confirm path never runs for us.
+    private static System.Reflection.MethodInfo _itemCountConfirm;
+    private static void ConfirmCountPicker(ItemCountGUI picker)
+    {
+        try
+        {
+            _itemCountConfirm ??= AccessTools.Method(typeof(ItemCountGUI), "OnConfirm");
+            _itemCountConfirm?.Invoke(picker, null);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[VENDOR] count picker confirm failed: {ex.Message}");
+        }
+    }
+
     // After a vendor move the offer/stock grids are redrawn in place, so re-discover the
     // element list (like RefreshCurrentGUI) and keep focus near where it was. Lead the
     // announcement with the new running balance so the player hears the cost/gain of the
@@ -1885,6 +1903,20 @@ internal static class GUIAccessibility
 
     internal static void ActivateSelected()
     {
+        // The amount/price picker (ItemCountGUI) confirms through its DialogButtonsGUI "ok"
+        // button, which only responds to a mouse click or the gamepad Select key. GameKey.Select
+        // has NO keyboard binding (see KeyBindings), so a keyboard player can't confirm it
+        // natively, and pressing a "discovered" button is unreliable (the slider's own
+        // inc/dec buttons get discovered too, so index 0 isn't necessarily "ok"). That's why a
+        // chosen stack never moved into the vendor offer. Invoke the picker's own confirm
+        // directly so Enter always applies the chosen amount; the SetOnHide callback redraws the
+        // vendor and CheckForNewGUI (called right after) re-announces the trade screen.
+        if (_currentGUI is ItemCountGUI picker)
+        {
+            ConfirmCountPicker(picker);
+            return;
+        }
+
         var active = GetActiveElements();
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
