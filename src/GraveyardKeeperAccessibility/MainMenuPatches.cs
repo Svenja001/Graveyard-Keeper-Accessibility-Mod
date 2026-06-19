@@ -339,6 +339,18 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The technology tree (opened with T) draws its techs as a scrollable graph of
+        // TechTreeGUIItem nodes spread across branches — invisible to a screen reader, and the
+        // generic heuristic finds only the close button. List every branch as a "Category" row
+        // (Enter switches branch) followed by one row per tech in the current branch, each
+        // reading its name, what it unlocks, cost and state; Enter buys an available tech (the
+        // game's own confirm dialog then opens). See DiscoverTechTree.
+        if (gui is TechTreeGUI techTree)
+        {
+            DiscoverTechTree(techTree);
+            return;
+        }
+
         var buttons = gui.GetComponentsInChildren<UIButton>(true);
         Plugin.Log.LogInfo($"[DiscoverElements] Found {buttons.Length} UIButton components in {gui.GetType().Name}");
         Plugin.Log.LogInfo($"[DiscoverElements] Button names: {string.Join(", ", buttons.Select(b => b.name))}");
@@ -1246,6 +1258,246 @@ internal static class GUIAccessibility
         catch { return null; }
     }
 
+    // --- Technology tree --------------------------------------------------------------------
+
+    /// <summary>
+    /// List the tech tree as navigable rows: first one "Category" row per visible branch (Enter
+    /// switches branch), then one row per tech in the currently selected branch. Each tech row
+    /// reads its name, what it unlocks, cost and state; Enter buys an available tech (which opens
+    /// the game's own confirm dialog, announced by the normal flow).
+    /// </summary>
+    private static void DiscoverTechTree(TechTreeGUI techTree)
+    {
+        int branch = techTree.current_branch;
+
+        // Branch tabs. Mirror TechTreeGUI.Draw: branch ids 0.._maxBranch, kept if the save says
+        // the branch is visible. Each shows its localized name; the active one is marked.
+        int maxBranch = 0;
+        try
+        {
+            foreach (var t in GameBalance.me.techs_data)
+                if (t.branch_type > maxBranch) maxBranch = t.branch_type;
+        }
+        catch { }
+
+        for (int j = 0; j <= maxBranch; j++)
+        {
+            bool visible;
+            try { visible = MainGame.me.save.IsTechBranchVisible(j); }
+            catch { visible = false; }
+            if (!visible) continue;
+
+            int captured = j;
+            var name = TechBranchName(j);
+            var label = j == branch ? $"Category: {name}, current" : $"Category: {name}";
+            Elements.Add(new GUIElement
+            {
+                Go = techTree.gameObject,
+                Label = label,
+                Type = ElementType.Button,
+                OnActivate = () => SwitchTechBranch(techTree, captured)
+            });
+        }
+
+        // Techs in the current branch (everything the game would draw — i.e. not Invisible),
+        // read in a stable order: by column (prerequisite depth), then row.
+        var techs = new List<TechDefinition>();
+        try
+        {
+            foreach (var t in GameBalance.me.techs_data)
+            {
+                if (t.branch_type != branch) continue;
+                if (t.GetState() == TechDefinition.TechState.Invisible) continue;
+                techs.Add(t);
+            }
+        }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[TECH] enumerate failed: {ex.Message}"); }
+
+        techs.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+
+        foreach (var tech in techs)
+        {
+            var captured = tech;
+            Elements.Add(new GUIElement
+            {
+                Go = techTree.gameObject,
+                Label = TechLabel(tech),
+                Type = ElementType.Button,
+                OnActivate = () => ClickTech(techTree, captured)
+            });
+        }
+
+        Plugin.Log.LogInfo($"[TECH] branch {branch}: {techs.Count} tech(s)");
+    }
+
+    /// <summary>Localized name of a tech branch (the "tbranch_N" token), or a fallback.</summary>
+    private static string TechBranchName(int branchId)
+    {
+        try
+        {
+            var loc = ScreenReader.StripNguiCodes(GJL.L("tbranch_" + branchId) ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(loc) && !loc.Contains("!")) return loc;
+        }
+        catch { }
+        return $"Branch {branchId}";
+    }
+
+    /// <summary>
+    /// Spoken label for one tech: name, what it unlocks, its cost in tech points, and its state
+    /// (unlocked / available / locked / not enough points / hidden).
+    /// </summary>
+    private static string TechLabel(TechDefinition tech)
+    {
+        TechDefinition.TechState state;
+        try { state = tech.GetState(); }
+        catch { state = TechDefinition.TechState.Unavailable; }
+
+        // Hidden techs show only as a question mark in-game — don't leak their contents.
+        if (state == TechDefinition.TechState.Hidden)
+            return "Locked technology, not yet revealed";
+
+        var parts = new List<string>();
+
+        var name = ScreenReader.StripNguiCodes(GJL.L(tech.id) ?? tech.id)?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name.Contains("!")) name = tech.id;
+        parts.Add(name);
+
+        var unlocks = TechUnlocksText(tech);
+        if (!string.IsNullOrEmpty(unlocks)) parts.Add($"Unlocks {unlocks}");
+
+        var cost = TechPriceText(tech);
+
+        switch (state)
+        {
+            case TechDefinition.TechState.Purchased:
+                parts.Add("already unlocked");
+                break;
+            case TechDefinition.TechState.AvailableForPurchase:
+                parts.Add(string.IsNullOrEmpty(cost) ? "available" : $"available, costs {cost}");
+                break;
+            default: // Unavailable
+                bool affordable = false;
+                try { affordable = MainGame.me.player.IsEnough(tech.price); }
+                catch { }
+                if (!affordable && !string.IsNullOrEmpty(cost))
+                    parts.Add($"locked, costs {cost}, not enough points");
+                else
+                    parts.Add("locked, requires earlier technologies");
+                break;
+        }
+
+        return string.Join(". ", parts);
+    }
+
+    /// <summary>Comma-separated names of what a tech unlocks (recipes, perks, gathering, …).</summary>
+    private static string TechUnlocksText(TechDefinition tech)
+    {
+        try
+        {
+            var list = tech.GetVisibleUnlocksList();
+            if (list == null || list.Count == 0) return null;
+
+            var parts = new List<string>();
+            foreach (var u in list)
+            {
+                if (u == null) continue;
+                var n = ScreenReader.StripNguiCodes(u.GetData()?.name ?? "")?.Trim();
+                if (!string.IsNullOrWhiteSpace(n) && !n.Contains("!")) parts.Add(n);
+            }
+            return parts.Count > 0 ? string.Join(", ", parts) : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>A tech's cost spoken as tech points, e.g. "2 red, 1 green".</summary>
+    private static string TechPriceText(TechDefinition tech)
+    {
+        try
+        {
+            var price = tech.price;
+            if (price == null || price.IsEmpty()) return null;
+
+            var parts = new List<string>();
+            foreach (var type in price.Types)
+            {
+                var v = Mathf.RoundToInt(price.Get(type));
+                if (v <= 0) continue;
+                parts.Add($"{v} {TechPointName(type)}");
+            }
+            return parts.Count > 0 ? string.Join(", ", parts) : null;
+        }
+        catch { return null; }
+    }
+
+    // The three tech-point colours (and the rarer ones) spoken as words. These are the (r)/(g)/(b)
+    // coin-style sprites the on-screen cost label uses, which don't convert to speech.
+    private static string TechPointName(string type)
+    {
+        switch (type)
+        {
+            case "r": return "red points";
+            case "g": return "green points";
+            case "b": return "blue points";
+            case "v": return "violet points";
+            case "gratitude_points": return "gratitude points";
+            default: return type;
+        }
+    }
+
+    /// <summary>Switch the tech tree to a branch, then re-list and announce its techs.</summary>
+    private static void SwitchTechBranch(TechTreeGUI techTree, int branchId)
+    {
+        try { techTree.SelectTechBranch(branchId); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[TECH] branch switch failed: {ex.Message}"); }
+
+        Elements.Clear();
+        DiscoverElements(techTree);
+
+        var active = GetActiveElements();
+        var name = TechBranchName(branchId);
+
+        // Land on the first tech in the branch (skip past the category rows) so the player hears
+        // the branch's contents straight away.
+        var idx = active.FindIndex(e => e.OnActivate != null && !e.Label.StartsWith("Category:"));
+        if (idx < 0) idx = active.Count > 0 ? 0 : -1;
+        SelectedIndex = idx;
+
+        if (idx >= 0)
+            ScreenReader.Say($"{name}. {active[idx].ReadLabel()}");
+        else
+            ScreenReader.Say($"{name}. Empty");
+    }
+
+    /// <summary>
+    /// Click a tech, exactly as the mouse would. An available tech opens the game's buy-confirm
+    /// dialog; a hidden / un-unlockable tech opens an info dialog — both are picked up and
+    /// announced by CheckForNewGUI. Only when no dialog opens (e.g. an already-purchased tech)
+    /// do we re-read the row in place so the press still gives feedback.
+    /// </summary>
+    private static void ClickTech(TechTreeGUI techTree, TechDefinition tech)
+    {
+        try { techTree.OnClickTech(tech); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[TECH] click failed: {ex.Message}"); }
+
+        if (TechDialogOpen()) return;
+
+        RefreshCurrentGUI(SelectedIndex);
+    }
+
+    // True if the tech buy-confirm dialog or a generic OK dialog is currently shown (so the
+    // tech click opened a modal that the normal GUI flow will announce next).
+    private static bool TechDialogOpen()
+    {
+        try
+        {
+            if (!GUIElements.me) return false;
+            if (GUIElements.me.tech_dialog != null && GUIElements.me.tech_dialog.is_shown) return true;
+            if (GUIElements.me.dialog != null && GUIElements.me.dialog.is_shown) return true;
+        }
+        catch { }
+        return false;
+    }
+
     /// <summary>
     /// Build the navigable element list for the vendor (trade) screen: every item cell
     /// (vendor stock, the player's inventory, and both offer widgets — labelled Buy/Sell/
@@ -1281,36 +1533,36 @@ internal static class GUIAccessibility
         });
     }
 
-    // Accept the assembled offer. FinishOffer completes the trade when CanAcceptOffer is
-    // true (offer clears, grids redraw, coins sound) and otherwise pops a "can't accept"
-    // dialog that CheckForNewGUI will read. The vendor screen intentionally stays open so
-    // the player can keep trading; we re-announce so they know what happened.
+    // Accept the assembled offer. All announcements (reject reason, "No offer to confirm",
+    // "Trade complete") and the post-trade re-discovery are handled by the FinishOffer Harmony
+    // patch (Patches.VendorGUI_FinishOffer_*), so the game's own confirm key gets the same
+    // feedback as our nav button. Here we just trigger it.
     private static void ConfirmVendorTrade(VendorGUI vendor)
+    {
+        try { vendor.FinishOffer(); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[VENDOR] confirm failed: {ex.Message}"); }
+    }
+
+    // Why CanAcceptOffer rejected the assembled deal, mirroring its four checks in
+    // Trading.CanAcceptOffer. Falls back to the game's own localized message.
+    internal static string VendorRejectReason(Trading trading)
     {
         try
         {
-            var trading = vendor.trading;
-            if (trading == null) return;
-
-            bool empty;
-            try { empty = trading.player_offer.inventory.Count == 0 && trading.trader.cur_offer.inventory.Count == 0; }
-            catch { empty = false; }
-            if (empty)
-            {
-                ScreenReader.Say("No offer to confirm");
-                return;
-            }
-
-            bool accepted = trading.CanAcceptOffer();
-            vendor.FinishOffer();
-
-            if (accepted)
-                AnnounceVendorState(vendor, $"Trade complete. You have {MoneyToSpeech(trading.player_money)}");
+            if (!trading.player_inventory.CanAddItems(trading.trader.cur_offer.inventory, include_bags: true))
+                return "Your inventory is full";
+            if (!trading.trader.inventory.CanAddItems(trading.player_offer.inventory))
+                return "The vendor can't carry these items";
+            float balance = trading.GetTotalBalance();
+            if (trading.player_money + balance < 0f)
+                return "You don't have enough money";
+            if (trading.trader.cur_money - balance < 0f)
+                return "The vendor doesn't have enough money";
         }
-        catch (Exception ex)
-        {
-            Plugin.Log.LogWarning($"[VENDOR] confirm failed: {ex.Message}");
-        }
+        catch { }
+
+        var loc = ScreenReader.StripNguiCodes(GJL.L("cant_accept_offer") ?? "").Trim();
+        return string.IsNullOrEmpty(loc) ? "Trade not possible" : loc;
     }
 
     // Return all offered items to their owners and re-announce the cleared state.
@@ -1329,7 +1581,7 @@ internal static class GUIAccessibility
 
     // Re-discover the vendor screen after a confirm/cancel mutated it, focus the first row,
     // and speak the given prefix followed by that row.
-    private static void AnnounceVendorState(VendorGUI vendor, string prefix)
+    internal static void AnnounceVendorState(VendorGUI vendor, string prefix)
     {
         Elements.Clear();
         DiscoverElements(vendor);
@@ -1425,6 +1677,23 @@ internal static class GUIAccessibility
         return $"{prefix}. {body}";
     }
 
+    // True if a count/price picker (ItemCountGUI) is currently shown. Used right after pressing
+    // a vendor item: a stack opens the picker instead of moving, and _currentGUI hasn't updated
+    // yet (CheckForNewGUI runs next frame), so we'd otherwise announce a stale "Even trade".
+    private static bool CountPickerOpen()
+    {
+        try
+        {
+            if (!GUIElements.me) return false;
+            var picker = GUIElements.me.GetComponentInChildren<ItemCountGUI>(true);
+            return picker != null && picker.is_shown;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     // After a vendor move the offer/stock grids are redrawn in place, so re-discover the
     // element list (like RefreshCurrentGUI) and keep focus near where it was. Lead the
     // announcement with the new running balance so the player hears the cost/gain of the
@@ -1470,7 +1739,7 @@ internal static class GUIAccessibility
     // Decompose a money value into spoken gold/silver/bronze, matching Trading.FormatMoney's
     // arithmetic (1 gold = 100 silver, 1 silver = 100 bronze) but voiced as words instead of
     // the (gld)/(slv)/(brz) coin sprites the on-screen label uses.
-    private static string MoneyToSpeech(float value)
+    internal static string MoneyToSpeech(float value)
     {
         value = Mathf.Round(Mathf.Abs(value) * 100f) / 100f;
         int gold = Mathf.FloorToInt(value / 100f);
@@ -1536,7 +1805,13 @@ internal static class GUIAccessibility
             if (_currentGUI is ChestGUI)
                 RefreshCurrentGUI(prevIndex);
             else if (_currentGUI is VendorGUI vendor)
-                RefreshVendorAfterMove(vendor, prevIndex);
+            {
+                // A stackable item opens a count/price picker (a new GUI the normal flow
+                // announces) instead of moving immediately. Don't speak a premature "Even
+                // trade" balance over it — nothing has moved yet, so the balance is still zero.
+                if (!CountPickerOpen())
+                    RefreshVendorAfterMove(vendor, prevIndex);
+            }
             else if (_currentGUI is CraftGUI && !(MainGame.me?.build_mode_logics?.IsBuilding() == true))
                 // Crafting consumes ingredients, so re-read the row: the player hears whether they
                 // can still make another (". Ready" -> ". Not enough materials"). Skipped in build

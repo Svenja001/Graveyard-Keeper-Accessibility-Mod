@@ -60,6 +60,14 @@ internal static class ObjectNavigator
     private static int _updateCounter = 0;
     private static int _walkWatchdog = 0;
 
+    // Teleport detection: the player's position the previous busy frame. If it jumps by more
+    // than TeleportJumpDistance in a single frame while navigation is active, the player was
+    // teleported (Ruhestein, fast-travel, sleep respawn, dungeon transition) and the stale walk
+    // state must be torn down — otherwise the stuck watchdog mistakes the jump for "no progress"
+    // and the beacon re-announces a now-wrong target endlessly.
+    private static Vector2 _lastBusyPos;
+    private static bool _hasBusyPos = false;
+
     // Long-distance auto-walk: targets too far for the A* player-graph to path to in one go
     // (e.g. the Tavern from home) are walked in short hops. Each tick we aim a chunk-sized
     // step toward the target, snap it to walkable ground, and let native A* route that hop;
@@ -124,6 +132,17 @@ internal static class ObjectNavigator
     private static bool _escalatePending = false;
     private static NavigationTarget _shortWalkTarget;
 
+    // After teleport, only the patch of navmesh around the landing spot is active; a nearby target
+    // (e.g. the bed across the room) reports no walkable node and A* fails, even though it becomes
+    // reachable once the player walks toward it and that area streams in. Without a guard the beacon
+    // hands straight back to A* (target is within handoff distance), A* fails, it re-escalates and
+    // bails back to the beacon: an infinite in-place "walking…" loop. So we record where A* last
+    // failed and only let the beacon retry the handoff once the player has moved HandoffRetryDistance
+    // closer (the area has likely activated) — breaking the stationary loop while still auto-finishing
+    // as the player approaches. Reset on a fresh user walk (WalkToSelected).
+    private static bool _astarFailedForWalk = false;
+    private static Vector2 _astarFailPos;
+
     // World coordinates use 96 units per tile. Only surface points of interest
     // within a generous radius so the per-category lists stay manageable.
     private const float TileSize = 96f;
@@ -144,6 +163,9 @@ internal static class ObjectNavigator
     private const float FinalApproachReach = 16f * TileSize;
     private const float ProgressDistance = 3f * TileSize;
     private const float AnnounceProgressDistance = 10f * TileSize;
+    // A single-frame position change larger than this means the player teleported (no walk speed
+    // covers 6 tiles in one frame); real teleports jump hundreds-to-thousands of units.
+    private const float TeleportJumpDistance = 6f * TileSize;
     // TickLongWalk runs every frame, so this is in frames: how long the player may make less
     // than ProgressDistance of headway before we treat the native follow as stuck. Generous so
     // brief pauses at waypoints / slow stretches don't trip it.
@@ -164,6 +186,9 @@ internal static class ObjectNavigator
     // Beacon (manual fallback) thresholds.
     private const float BeaconHandoffDistance = 15f * TileSize;
     private const float BeaconReannounceDistance = 6f * TileSize;
+    // How far the player must move after an A* failure before the beacon retries the A* handoff
+    // (enough to have streamed in / activated the destination area; small enough to keep finishing).
+    private const float HandoffRetryDistance = 3f * TileSize;
 
     internal static bool IsWalking => _isWalking;
     internal static bool IsBeaconActive => _beaconActive;
@@ -188,6 +213,30 @@ internal static class ObjectNavigator
 
         try
         {
+            // Teleport guard: if the player jumped a long way in a single frame while a walk/beacon
+            // is active, they were teleported (Ruhestein, etc.). Tear down the stale navigation so
+            // it doesn't mistake the jump for a stuck walk and chatter at a now-wrong target.
+            if (IsBusy)
+            {
+                var pl = MainGame.me?.player;
+                if (pl != null)
+                {
+                    var pos = pl.pos;
+                    if (_hasBusyPos && Vector2.Distance(pos, _lastBusyPos) >= TeleportJumpDistance)
+                    {
+                        _log?.LogWarning($"[NAVIGATOR] Teleport detected (jump {Vector2.Distance(pos, _lastBusyPos):F0}u), aborting navigation");
+                        AbortForTeleport();
+                        return;
+                    }
+                    _lastBusyPos = pos;
+                    _hasBusyPos = true;
+                }
+            }
+            else
+            {
+                _hasBusyPos = false;
+            }
+
             // A* failed on a short walk — retry through the fence-aware graph-0 route (gates)
             // before resorting to the straight line. Runs next frame so the game's OnPathFailed
             // has finished clobbering the previous request.
@@ -424,6 +473,9 @@ internal static class ObjectNavigator
 
         if (_selectedIndex >= list.Count) _selectedIndex = 0;
         var target = list[_selectedIndex];
+
+        // Fresh user walk: clear the "A* already failed" guard so this attempt may use A*/handoff.
+        _astarFailedForWalk = false;
 
         // For a faraway target (e.g. the Tavern from home) the A* player graph can't path
         // there in one shot, so auto-walk it in short hops instead of a single GoTo.
@@ -910,8 +962,14 @@ internal static class ObjectNavigator
         var playerPos = player.pos;
         var dist = Vector2.Distance(playerPos, _beaconTarget.Position);
 
-        // Close enough for the player graph to path the rest of the way: finish with A*.
-        if (dist <= BeaconHandoffDistance)
+        // Close enough for the player graph to path the rest of the way: finish with A*. If A* just
+        // failed for this target, don't hand straight back to it (that re-escalates, bails here, and
+        // loops in place). Wait until the player has moved HandoffRetryDistance closer — by then the
+        // destination area has usually streamed in/activated, so the retry succeeds. Until then the
+        // beacon keeps giving manual guidance as the player walks the last stretch.
+        bool astarRetryReady = !_astarFailedForWalk ||
+            Vector2.Distance(playerPos, _astarFailPos) >= HandoffRetryDistance;
+        if (dist <= BeaconHandoffDistance && astarRetryReady)
         {
             var target = _beaconTarget;
             _beaconActive = false;
@@ -1112,6 +1170,11 @@ internal static class ObjectNavigator
                 {
                     if (method == MovementComponent.GoToMethod.AStar)
                     {
+                        // Remember A* couldn't reach this target, and from where, so the beacon won't
+                        // keep handing back to it in place (which would re-escalate and loop forever)
+                        // but WILL retry once the player has walked closer and the area has activated.
+                        _astarFailedForWalk = true;
+                        _astarFailPos = MainGame.me?.player?.pos ?? Vector2.zero;
                         // A* failed (no path / endpoint too far) — typically the target sits
                         // behind a fence the player graph can't path through. Escalate to the
                         // fence-aware graph-0 route (threads gates like an NPC) instead of a
@@ -1171,6 +1234,40 @@ internal static class ObjectNavigator
         if (_longWalkActive) StopLongWalk(announce: true);
         else if (_beaconActive) StopBeacon();
         else if (_isWalking) StopWalking();
+    }
+
+    /// <summary>
+    /// Full navigation teardown after a teleport. Unlike CancelNavigation (which only handles the
+    /// three top-level states), this clears every pending/in-flight flag so no stale route, hop, or
+    /// beacon survives the position jump, releases scripted control, and gives a single short notice.
+    /// </summary>
+    private static void AbortForTeleport()
+    {
+        try
+        {
+            _longWalkActive = false;
+            _beaconActive = false;
+            _isWalking = false;
+            _routePending = false;
+            _routeNeedsRecompute = false;
+            _exitAssisting = false;
+            _fallbackPending = false;
+            _escalatePending = false;
+            _walkWatchdog = 0;
+            _longWalkStuckTicks = 0;
+            _pullbackTries = 0;
+            _stalledRecomputes = 0;
+            _astarFailedForWalk = false;
+            _exitAssisting = false;
+            _hasBusyPos = false;
+            ReleaseScriptControl();
+            ScreenReader.Say("Navigation cancelled", interrupt: true);
+            _log?.LogInfo("[NAVIGATOR] Navigation aborted after teleport");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] Error aborting navigation after teleport: {ex.Message}");
+        }
     }
 
     internal static void StopWalking()

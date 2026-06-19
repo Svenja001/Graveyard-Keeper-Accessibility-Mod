@@ -158,6 +158,13 @@ internal static class InventoryItemHandler
                 if (!string.IsNullOrEmpty(panel))
                     label = $"{panel}: {label}";
 
+                // Vendor cells: append each item's per-unit price so the player knows what it's
+                // worth ("Sell: Bestattungsurkunde, 3, sells for 2 silver each"). Without this the
+                // bare name + stack count explains nothing about the deal.
+                var price = DescribeVendorPrice(cell, gui, panel);
+                if (!string.IsNullOrEmpty(price))
+                    label = $"{label}, {price}";
+
                 discovered.Add(new GUIElement
                 {
                     Go = cell.gameObject,
@@ -297,6 +304,42 @@ internal static class InventoryItemHandler
                 name = $"{name}, {quality}";
 
             return item.value > 1 ? $"{name}, {item.value}" : name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Per-unit price for a vendor item cell, spoken: "costs 12 bronze" on the buy side (what
+    /// the player pays) or "sells for 2 silver" on the sell side (what the vendor pays). The
+    /// offer widgets are priced by which side owns them ("Your offer" = you're selling, "Vendor
+    /// offer" = you're buying). Returns null for non-vendor cells or panels we don't price.
+    /// Uses the game's own cost functions so the spoken price matches the on-screen coin sprites
+    /// (which never voice). See <see cref="GUIAccessibility.MoneyToSpeech"/>.
+    /// </summary>
+    private static string DescribeVendorPrice(BaseItemCellGUI cell, BaseGUI gui, string panel)
+    {
+        try
+        {
+            if (!(gui is VendorGUI vendor) || vendor.trading == null) return null;
+            if (cell?.item == null || cell.item.IsEmpty()) return null;
+
+            bool buySide = panel == "Buy" || panel == "Vendor offer";
+            bool sellSide = panel == "Sell" || panel == "Your offer";
+            if (!buySide && !sellSide) return null;
+
+            float per = buySide
+                ? vendor.trading.GetSingleItemCostInTraderInventory(cell.item, 0)
+                : vendor.trading.GetSingleItemCostInPlayerInventory(cell.item, 0);
+
+            var money = GUIAccessibility.MoneyToSpeech(per);
+            if (money == "nothing")
+                return sellSide ? "vendor pays nothing" : null;
+
+            var suffix = cell.item.value > 1 ? " each" : "";
+            return buySide ? $"costs {money}{suffix}" : $"sells for {money}{suffix}";
         }
         catch
         {

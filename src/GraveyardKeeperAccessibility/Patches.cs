@@ -129,6 +129,58 @@ internal static class Patches
         }
     }
 
+    // Vendor "Confirm trade". Both our nav button and the game's own confirm key route through
+    // VendorGUI.FinishOffer, which silently pops an unread "cant_accept_offer" modal when the
+    // deal can't go through (e.g. the vendor has no money to pay for what you're selling). Speak
+    // the reason instead and skip the original so no orphan modal is left open. __state carries
+    // "this is a valid deal" to the postfix, which announces completion after the trade runs.
+    public static bool VendorGUI_FinishOffer_Prefix(VendorGUI __instance, out bool __state)
+    {
+        __state = false;
+        try
+        {
+            var trading = __instance.trading;
+            if (trading == null) return true;
+
+            bool empty;
+            try { empty = trading.player_offer.inventory.Count == 0 && trading.trader.cur_offer.inventory.Count == 0; }
+            catch { empty = false; }
+            if (empty)
+            {
+                ScreenReader.Say("No offer to confirm");
+                return false;
+            }
+
+            if (!trading.CanAcceptOffer())
+            {
+                ScreenReader.Say(GUIAccessibility.VendorRejectReason(trading));
+                return false;
+            }
+
+            __state = true; // valid deal — let it run, announce in the postfix
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[VENDOR] FinishOffer prefix: {ex.Message}");
+        }
+        return true;
+    }
+
+    public static void VendorGUI_FinishOffer_Postfix(VendorGUI __instance, bool __state)
+    {
+        if (!__state) return;
+        try
+        {
+            var trading = __instance.trading;
+            if (trading != null)
+                GUIAccessibility.AnnounceVendorState(__instance, $"Trade complete. You have {GUIAccessibility.MoneyToSpeech(trading.player_money)}");
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[VENDOR] FinishOffer postfix: {ex.Message}");
+        }
+    }
+
     // Auto-announce a newly visible quest objective. The game raises
     // GameSave.SetTaskState(npc, task, state) and flashes a "Neue Aufgabe" bubble when an
     // objective appears (e.g. after the bishop intro), but a blind player gets no readable

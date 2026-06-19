@@ -70,6 +70,13 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.AutopsyGUI_RemoveBodyPartFromBody_Postfix),
             typeof(AutopsyGUI), "RemoveBodyPartFromBody", new[] { typeof(Item), typeof(Item) });
 
+        // Vendor confirm: announce why a trade was rejected (e.g. vendor out of money) instead
+        // of the silent unread "cant_accept_offer" modal, and announce completion otherwise.
+        // Patching FinishOffer covers both our nav button and the game's own confirm key.
+        TryPatchPrefixPostfix(harmony, typeof(Patches),
+            nameof(Patches.VendorGUI_FinishOffer_Prefix), nameof(Patches.VendorGUI_FinishOffer_Postfix),
+            typeof(VendorGUI), "FinishOffer", Type.EmptyTypes);
+
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
 
@@ -238,6 +245,33 @@ public class Plugin : BaseUnityPlugin
             var prefix = new HarmonyMethod(AccessTools.Method(patchClass, methodName));
             harmony.Patch(original, prefix: prefix);
             Log.LogInfo($"Patched (prefix) {targetType.Name}.{targetMethod}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"Failed to patch {targetType.Name}.{targetMethod}: {ex.Message}");
+            return false;
+        }
+    }
+
+    // Patch one method with both a prefix and a postfix in a single Patch call, so they share
+    // Harmony __state (the prefix tells the postfix whether the trade actually went through).
+    private static bool TryPatchPrefixPostfix(HarmonyLib.Harmony harmony, Type patchClass,
+        string prefixName, string postfixName, Type targetType, string targetMethod, Type[] parameters)
+    {
+        try
+        {
+            var original = AccessTools.Method(targetType, targetMethod, parameters);
+            if (original == null)
+            {
+                Log.LogWarning($"Method {targetType.Name}.{targetMethod} not found, skipping");
+                return false;
+            }
+
+            var prefix = new HarmonyMethod(AccessTools.Method(patchClass, prefixName));
+            var postfix = new HarmonyMethod(AccessTools.Method(patchClass, postfixName));
+            harmony.Patch(original, prefix: prefix, postfix: postfix);
+            Log.LogInfo($"Patched (prefix+postfix) {targetType.Name}.{targetMethod}");
             return true;
         }
         catch (Exception ex)
