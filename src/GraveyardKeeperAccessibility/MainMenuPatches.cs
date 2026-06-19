@@ -1077,6 +1077,24 @@ internal static class GUIAccessibility
             added++;
         }
 
+        // A window with no listed recipes is silent and baffling to a blind player. Most often
+        // it's a broken object whose repair is still tech-locked (e.g. the broken beehive). Add a
+        // single readable line explaining the situation so Up/Down lands on something to hear.
+        if (added == 0)
+        {
+            var info = EmptyCraftWindowInfo(craftGui);
+            if (!string.IsNullOrEmpty(info))
+            {
+                Elements.Add(new GUIElement
+                {
+                    Go = craftGui.gameObject,
+                    Label = info,
+                    Type = ElementType.Button,
+                    OnActivate = () => ScreenReader.Say(info)
+                });
+            }
+        }
+
         Plugin.Log.LogInfo($"[CRAFT] discovered {added} recipe(s)");
     }
 
@@ -1550,6 +1568,18 @@ internal static class GUIAccessibility
         if (string.IsNullOrWhiteSpace(name)) name = "Recipe";
 
         var label = name;
+
+        // A craft with no item output that swaps the object for another (change_wgo) doesn't make
+        // an item — it rebuilds the station itself. On a broken object that's its repair, so say so
+        // rather than just naming the result (e.g. "Repair: Beehive" not a bare "Beehive").
+        try
+        {
+            var cd = cri.current_craft;
+            if (cd != null && !string.IsNullOrEmpty(cd.change_wgo) && cd.GetFirstRealOutput() == null)
+                label = $"Repair: {name}";
+        }
+        catch { }
+
         var needs = CraftNeedsText(cri);
         if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
         label += CanCraftRecipe(cri) ? ". Ready" : ". Not enough materials";
@@ -1578,9 +1608,15 @@ internal static class GUIAccessibility
     /// <summary>Comma-separated "amount item" list of a recipe's ingredients, or null.</summary>
     private static string CraftNeedsText(CraftItemGUI cri)
     {
+        try { return CraftDefNeedsText(cri?.current_craft); }
+        catch { return null; }
+    }
+
+    /// <summary>Comma-separated "amount item" list of a craft definition's needs, or null.</summary>
+    private static string CraftDefNeedsText(CraftDefinition craft)
+    {
         try
         {
-            var craft = cri.current_craft;
             if (craft?.needs == null || craft.needs.Count == 0) return null;
 
             var parts = new List<string>();
@@ -1595,6 +1631,59 @@ internal static class GUIAccessibility
             return parts.Count > 0 ? string.Join(", ", parts) : null;
         }
         catch { return null; }
+    }
+
+    private static readonly System.Reflection.FieldInfo _crafteryWgoField =
+        AccessTools.Field(typeof(BaseCraftGUI), "craftery_wgo");
+
+    /// <summary>
+    /// Describe why a craft window opened with no recipes, so a blind player hears more than
+    /// silence. The common case is a broken object (e.g. beegarden_table_broken — the broken
+    /// beehive) whose repair craft the game hides until its technology is unlocked: a sighted
+    /// player sees a locked/empty window, but we get nothing to read. We reach past the GUI's
+    /// filtered list to the station's full craft list (which still holds the locked repair) and
+    /// report whether it's a repair, whether it's locked, and the materials it will consume.
+    /// </summary>
+    private static string EmptyCraftWindowInfo(CraftGUI craftGui)
+    {
+        try
+        {
+            var wgo = _crafteryWgoField?.GetValue(craftGui) as WorldGameObject;
+            if (wgo == null) return null;
+
+            var objName = InteractionDetector.LocalizedObjectName(wgo.obj_id);
+            var crafts = (wgo.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft?.crafts : null;
+            if (crafts == null || crafts.Count == 0)
+                return $"{objName}. Nothing to make here";
+
+            // A craft that swaps the object for another (change_wgo) is its repair/upgrade.
+            CraftDefinition repair = null;
+            bool anyLocked = false;
+            foreach (var c in crafts)
+            {
+                if (c == null) continue;
+                if (c.IsLocked()) anyLocked = true;
+                if (repair == null && !string.IsNullOrEmpty(c.change_wgo)) repair = c;
+            }
+
+            if (repair != null)
+            {
+                var needs = CraftDefNeedsText(repair);
+                var msg = repair.IsLocked()
+                    ? $"{objName}. Repair is locked, research it in the technology tree first"
+                    : $"{objName}. Repairable";
+                if (!string.IsNullOrEmpty(needs)) msg += $". Repair needs {needs}";
+                return msg;
+            }
+
+            return anyLocked
+                ? $"{objName}. No recipes available yet, research them in the technology tree"
+                : $"{objName}. Nothing to make here";
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // --- Technology tree --------------------------------------------------------------------
