@@ -165,6 +165,13 @@ internal static class InventoryItemHandler
                 if (!string.IsNullOrEmpty(price))
                     label = $"{label}, {price}";
 
+                // Greyed (inactive) cells can't be moved into an offer: on the Buy side the item
+                // is tier-locked (vendor won't sell it yet), on the Sell side the vendor won't buy
+                // it. The game disables the press, so without this marker the player just hears a
+                // misleading "even trade" after pressing. Call it out up front instead.
+                if (gui is VendorGUI && cell.is_inactive_state)
+                    label = $"{label}, not available";
+
                 discovered.Add(new GUIElement
                 {
                     Go = cell.gameObject,

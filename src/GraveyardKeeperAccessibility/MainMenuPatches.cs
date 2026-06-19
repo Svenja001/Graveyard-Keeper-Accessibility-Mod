@@ -792,7 +792,11 @@ internal static class GUIAccessibility
 
         if (string.IsNullOrWhiteSpace(name)) name = "Build option";
 
-        return CanBuild(cri) ? name : $"{name}, not enough materials";
+        var label = name;
+        var needs = CraftNeedsText(cri);
+        if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
+        label += CanBuild(cri) ? ". Ready" : ". Not enough materials";
+        return label;
     }
 
     private static bool CanBuild(CraftItemGUI cri)
@@ -1953,6 +1957,16 @@ internal static class GUIAccessibility
                     // summary so it isn't interrupted by the refreshed row.
                     RefreshCurrentGUI(prevIndex, summary);
                 }
+                return;
+            }
+
+            // A greyed vendor cell can't be moved into an offer (tier-locked buy item, or an
+            // item the vendor won't buy) — the game disables its press, so PressItemCell would
+            // no-op and RefreshVendorAfterMove would then misread the unchanged balance as "Even
+            // trade". Say why instead and stop.
+            if (_currentGUI is VendorGUI && elem.Cell != null && elem.Cell.is_inactive_state)
+            {
+                ScreenReader.Say("Not available to trade");
                 return;
             }
 

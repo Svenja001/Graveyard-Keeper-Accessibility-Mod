@@ -25,6 +25,7 @@ internal static class BuildPlacementHandler
     // Reflection into BuildModeLogics' private placement internals (see decompiled source).
     private static FieldInfo _modeField;     // private enum Mode _mode
     private static FieldInfo _cdField;       // private ObjectCraftDefinition _cd
+    private static FieldInfo _miField;       // private MultiInventory _multi_inventory (build-zone stock)
     private static MethodInfo _doPlace;      // private void DoPlace()
     private static MethodInfo _cancelPlacing; // private void CancelPlacing()
 
@@ -39,6 +40,7 @@ internal static class BuildPlacementHandler
             var t = typeof(BuildModeLogics);
             _modeField = AccessTools.Field(t, "_mode");
             _cdField = AccessTools.Field(t, "_cd");
+            _miField = AccessTools.Field(t, "_multi_inventory");
             _doPlace = AccessTools.Method(t, "DoPlace");
             _cancelPlacing = AccessTools.Method(t, "CancelPlacing");
             _log?.LogInfo("[BUILD] BuildPlacementHandler initialized");
@@ -170,7 +172,12 @@ internal static class BuildPlacementHandler
         var cd = CurrentCraft();
         if (cd != null && !logics.CanBuild(cd))
         {
-            ScreenReader.Say("Not enough materials", interrupt: true);
+            var missing = MissingMaterialsText(cd);
+            ScreenReader.Say(
+                string.IsNullOrEmpty(missing)
+                    ? "Not enough materials"
+                    : $"Not enough materials. You still need {missing}",
+                interrupt: true);
             return;
         }
 
@@ -287,6 +294,44 @@ internal static class BuildPlacementHandler
         try
         {
             return _cdField?.GetValue(Logics) as ObjectCraftDefinition;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Comma-separated list of the materials still missing for this build, with the shortfall
+    /// amount each (e.g. "3 wood, 2 stone"). Materials are drawn from the build zone's own stock
+    /// (the same <c>_multi_inventory</c> <see cref="BuildModeLogics.CanBuild"/> checks), so the
+    /// count reflects what's actually deposited in the zone. Falls back to the full requirement
+    /// list if the zone inventory can't be read.
+    /// </summary>
+    private static string MissingMaterialsText(CraftDefinition cd)
+    {
+        try
+        {
+            var needs = cd?.needs;
+            if (needs == null || needs.Count == 0) return null;
+
+            var stock = _miField?.GetValue(Logics) as MultiInventory;
+
+            var parts = new List<string>();
+            foreach (var need in needs)
+            {
+                if (need == null || string.IsNullOrEmpty(need.id)) continue;
+
+                int have = stock != null ? stock.GetTotalCount(need.id) : 0;
+                int shortfall = need.value - have;
+                if (shortfall <= 0) continue;
+
+                var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
+                if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+                parts.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
+            }
+
+            return parts.Count > 0 ? string.Join(", ", parts) : null;
         }
         catch
         {

@@ -23,6 +23,7 @@ public class Plugin : BaseUnityPlugin
         MoneyAnnouncer.Init(Log);
         BuildPlacementHandler.Init(Log);
         DialogueChoiceHandler.Init(Log);
+        CombatAssist.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -131,6 +132,9 @@ public class Plugin : BaseUnityPlugin
             {
                 // MovementFeedback temporarily disabled - needs debugging
                 InteractionDetector.Update();
+
+                // Real-time combat assistance (auto-aim, enemy radar, one-key attack).
+                CombatAssist.Update();
             }
 
             // Only check title screen if no BaseGUI is active
