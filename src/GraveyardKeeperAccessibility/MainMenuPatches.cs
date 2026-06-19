@@ -121,6 +121,22 @@ internal static class GUIAccessibility
         if (!string.IsNullOrEmpty(textContent))
             Plugin.Log.LogInfo($"[GUI TEXT] {textContent}");
 
+        // New-technology popup: read the full unlock text, then land on the first button (OK /
+        // unlock) so Enter confirms. Must run before the generic "Dialog" branch below, which
+        // would otherwise read only the tech name and return.
+        if (gui is TechUnlockDialogGUI techUnlock)
+        {
+            AnnounceTechUnlock(techUnlock);
+            return;
+        }
+
+        // Tutorial windows: read the whole instruction text, then focus Close (or a help topic).
+        if (gui is TutorialGUI || gui is BaseTutorialGUI)
+        {
+            AnnounceTutorial(gui);
+            return;
+        }
+
         // Special handling for dialogue GUIs
         if (guiName.Contains("Dialog") || guiName.Contains("Subtitle") || guiName.Contains("Caption"))
         {
@@ -284,6 +300,27 @@ internal static class GUIAccessibility
                 DiscoverMenuItems(menu, menuItems);
                 return;
             }
+        }
+
+        // The "new technology unlocked" popup. It's built from a header, an unlocks list and a
+        // DialogButtonsGUI (OK / unlock / cancel). The generic UIButton path would find the
+        // buttons, but OnGUIOpened's "Dialog" branch reads only the first label and returns, so
+        // the unlock text and the other buttons are lost. Expose the dialog buttons explicitly;
+        // the full text is spoken by AnnounceTechUnlock.
+        if (gui is TechUnlockDialogGUI)
+        {
+            DiscoverDialogButtons(gui);
+            return;
+        }
+
+        // Tutorial pop-ups (TutorialGUI, opened automatically as you progress) and the help-topics
+        // list (TutorialWindowsGUI). The instruction body is plain UILabels, not buttons, so the
+        // generic path finds only a stray button and never the text. List the help topics (if any)
+        // and always add an explicit Close; AnnounceTutorial reads the whole body.
+        if (gui is TutorialGUI || gui is BaseTutorialGUI)
+        {
+            DiscoverTutorialButtons(gui);
+            return;
         }
 
         // The build-desk catalog reuses the regular CraftGUI in "build" mode. Its generic
@@ -703,6 +740,160 @@ internal static class GUIAccessibility
         if (quests.Count > 0)
             parts.Add($"Quests: {string.Join(". ", quests)}");
 
+        return string.Join(". ", parts);
+    }
+
+    // --- New-technology popup & tutorial windows ---------------------------------------------
+
+    // Expose a tech-unlock dialog's buttons (OK / unlock / cancel) as navigable rows. Each is a
+    // DialogButtonGUI; activating it calls the game's own OnClick, which fires the configured
+    // delegate (buy the tech, reveal it, or just close). The unlock text is spoken separately.
+    private static void DiscoverDialogButtons(BaseGUI gui)
+    {
+        foreach (var btn in gui.GetComponentsInChildren<DialogButtonGUI>(true))
+        {
+            if (btn == null || !btn.gameObject.activeInHierarchy) continue;
+            var label = ScreenReader.StripNguiCodes(btn.GetComponentInChildren<UILabel>()?.text)?.Trim();
+            if (string.IsNullOrWhiteSpace(label)) continue;
+
+            var captured = btn;
+            Elements.Add(new GUIElement
+            {
+                Go = btn.gameObject,
+                Label = label,
+                Type = ElementType.Button,
+                OnActivate = () =>
+                {
+                    try { captured.OnClick(); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[TECH] button click failed: {ex.Message}"); }
+                }
+            });
+        }
+    }
+
+    // Speak the entire new-technology popup: the "you've unlocked" subheader (when shown), the
+    // tech name, every unlock's name and description, and the cost (for the optional buy variant).
+    // Then land focus on the first button so Enter confirms without arrowing.
+    private static void AnnounceTechUnlock(TechUnlockDialogGUI gui)
+    {
+        var parts = new List<string>();
+        void Add(string s)
+        {
+            var t = ScreenReader.StripNguiCodes(s)?.Trim();
+            if (!string.IsNullOrWhiteSpace(t) && t.Length > 1 && t.IndexOf('!') < 0)
+                parts.Add(t);
+        }
+
+        if (gui.subheader != null && gui.subheader.gameObject.activeInHierarchy)
+            Add(gui.subheader.text);
+        if (gui.label_header != null)
+            Add(gui.label_header.text);
+
+        foreach (var unlock in gui.GetComponentsInChildren<TechTreeGUIUnlockItem>(true))
+        {
+            if (unlock == null || !unlock.gameObject.activeInHierarchy) continue;
+            Add(unlock.label_name?.text);
+            if (unlock.label_description != null && unlock.label_description.gameObject.activeInHierarchy)
+                Add(unlock.label_description.text);
+        }
+
+        if (gui.label_cost != null && gui.label_cost.gameObject.activeInHierarchy)
+        {
+            var cost = ScreenReader.StripNguiCodes(gui.label_cost.text)?.Trim();
+            if (!string.IsNullOrWhiteSpace(cost))
+                parts.Add($"Cost {cost}");
+        }
+
+        var body = string.Join(". ", parts);
+        var active = GetActiveElements();
+        SelectedIndex = active.Count > 0 ? 0 : -1;
+
+        if (active.Count > 0)
+            ScreenReader.Say(string.IsNullOrEmpty(body) ? active[0].ReadLabel() : $"{body}. {active[0].ReadLabel()}");
+        else
+            ScreenReader.Say(string.IsNullOrEmpty(body) ? "New technology unlocked" : body);
+    }
+
+    // Build navigable rows for a tutorial window. A content pop-up (TutorialGUI) has no real
+    // buttons — it closes on a key press — so we add an explicit Close. The help-topics list
+    // (TutorialWindowsGUI) instead lists each TutorialItemGUI topic; activating one opens it.
+    private static void DiscoverTutorialButtons(BaseGUI gui)
+    {
+        // Help-topics list: each topic is a TutorialItemGUI (not a UIButton). Activating it
+        // opens that topic's tutorial window.
+        foreach (var item in gui.GetComponentsInChildren<TutorialItemGUI>(true))
+        {
+            if (item == null || !item.gameObject.activeInHierarchy) continue;
+            if (Elements.Any(e => e.Go == item.gameObject)) continue;
+
+            var captured = item;
+            var label = ScreenReader.StripNguiCodes(item.GetComponentInChildren<UILabel>()?.text)?.Trim();
+            if (string.IsNullOrWhiteSpace(label)) label = item.name;
+            Elements.Add(new GUIElement
+            {
+                Go = item.gameObject,
+                Label = label,
+                Type = ElementType.Button,
+                OnActivate = () =>
+                {
+                    try { captured.OnTutorialItemSelect(); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[TUTORIAL] topic select failed: {ex.Message}"); }
+                }
+            });
+        }
+
+        // Always offer an explicit keyboard close (GameKey.Select has no key binding, so the
+        // native "press to dismiss" never fires for us). OnClosePressed is the same path the
+        // window's own select/back uses, so it dismisses cleanly and resumes any pending flow.
+        Elements.Add(new GUIElement
+        {
+            Go = gui.gameObject,
+            Label = "Close",
+            Type = ElementType.Button,
+            OnActivate = () =>
+            {
+                try { gui.OnClosePressed(); }
+                catch (Exception ex) { Plugin.Log.LogWarning($"[TUTORIAL] close failed: {ex.Message}"); }
+            }
+        });
+    }
+
+    // Speak the full body text of a tutorial window (all visible instruction labels, in order,
+    // de-duplicated) and then land on the first navigable row (a help topic, or Close).
+    private static void AnnounceTutorial(BaseGUI gui)
+    {
+        var body = CollectVisibleText(gui);
+        var active = GetActiveElements();
+        SelectedIndex = active.Count > 0 ? 0 : -1;
+
+        var lead = string.IsNullOrEmpty(body) ? "Tutorial" : body;
+        if (active.Count > 0)
+            ScreenReader.Say($"{lead}. {active[SelectedIndex].ReadLabel()}");
+        else
+            ScreenReader.Say(lead);
+    }
+
+    // Concatenate every visible UILabel in a window (skipping labels that belong to a discovered
+    // button row, and untranslated "!token!" markers) into one spoken string. Used to read the
+    // whole body of tutorial windows, whose instructions are plain labels rather than buttons.
+    private static string CollectVisibleText(BaseGUI gui)
+    {
+        var seen = new HashSet<string>();
+        var parts = new List<string>();
+        foreach (var label in gui.GetComponentsInChildren<UILabel>(true))
+        {
+            if (label == null || !label.gameObject.activeInHierarchy) continue;
+
+            // Skip labels that are part of a navigable button row, but NOT the synthetic Close
+            // (whose Go is the whole window — matching on it would exclude every label).
+            if (Elements.Any(e => e.Type == ElementType.Button && e.Go != gui.gameObject &&
+                    (label.transform == e.Go.transform || label.transform.IsChildOf(e.Go.transform))))
+                continue;
+
+            var t = ScreenReader.StripNguiCodes(label.text)?.Trim();
+            if (string.IsNullOrWhiteSpace(t) || t.Length < 2 || t.IndexOf('!') >= 0) continue;
+            if (seen.Add(t)) parts.Add(t);
+        }
         return string.Join(". ", parts);
     }
 
