@@ -771,6 +771,20 @@ internal static class GUIAccessibility
     /// <summary>Spoken label for a build catalog row: the object name + affordability.</summary>
     private static string BuildCatalogLabel(CraftItemGUI cri)
     {
+        // The build catalog includes a special "_remove_" row: activating it switches the desk
+        // into demolish mode (handled by BuildPlacementHandler). It has no materials, so skip the
+        // Requires/affordability suffixes and give it a clear action hint instead.
+        try
+        {
+            if (cri.craft_definition?.id == "_remove_")
+            {
+                var rname = ScreenReader.StripNguiCodes(cri.label_name?.text)?.Trim();
+                if (string.IsNullOrWhiteSpace(rname)) rname = "Remove object";
+                return $"{rname}. Enter to choose what to demolish";
+            }
+        }
+        catch { }
+
         string name = null;
         try
         {
