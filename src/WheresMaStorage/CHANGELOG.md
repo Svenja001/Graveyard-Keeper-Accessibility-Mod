@@ -2,6 +2,7 @@
 
 ## 2.2.0 | 20 June 2026
 
+- Zombie work stations now pull ingredients from shared storage by default. Toggle off under Inventory to keep them limited to their own zone
 - The "Exclude Zombie Mill" inventory option now actually keeps that area out of shared storage
 
 ## 2.1.18 | 23 May 2026
