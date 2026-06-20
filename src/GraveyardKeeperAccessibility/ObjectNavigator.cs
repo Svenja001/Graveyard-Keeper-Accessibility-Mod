@@ -514,14 +514,13 @@ internal static class ObjectNavigator
     /// </summary>
     private static void WalkToTarget(NavigationTarget target)
     {
-        // Aim for a point ~1 tile short of the object, along the line from the
-        // object toward the player. Most points of interest sit ON an unwalkable
-        // tile; targeting their exact centre makes the player pathfinder reject the
-        // path ("end point too far", a hard 17-unit limit). The approach point lands
-        // on walkable ground right next to the object — where you'd stand anyway.
-        // Drops sit on walkable ground, so walk onto the exact tile (no offset) to land
-        // inside the game's pickup/highlight area.
-        var dest = target.IsDrop ? target.Position : ApproachPoint(target.Position);
+        // Prefer the game's own interaction tile (nearest dock point) so we land exactly
+        // where vanilla E/F works. Falls back to a point ~1 tile short of the object, along
+        // the line from the object toward the player: most points of interest sit ON an
+        // unwalkable tile, so targeting their exact centre makes the player pathfinder reject
+        // the path ("end point too far", a hard 17-unit limit). Drops sit on walkable ground,
+        // so we walk onto their exact tile to land inside the game's pickup/highlight area.
+        var dest = InteractionDest(target, out var facePos);
 
         // Pad the player-graph bounds for both the snap scan and the A* walk below,
         // so the search can route around fences/walls instead of failing.
@@ -540,7 +539,7 @@ internal static class ObjectNavigator
             _fallbackPending = false;
             _escalatePending = false;
             _shortWalkTarget = target;        // kept so an A* failure can escalate to fence-aware routing
-            _walkFacePos = target.Position;   // face it on arrival so plain E interacts/picks up
+            _walkFacePos = facePos;           // face it on arrival so plain E interacts/picks up
             ScreenReader.Say($"Walking to {target.Label}, {DistanceText(target.Distance)}", interrupt: true);
             StartWalk(dest, target.Label, MovementComponent.GoToMethod.AStar);
         }
@@ -570,9 +569,9 @@ internal static class ObjectNavigator
         ScreenReader.Say($"Walking to {target.Label}, {DirectionTo(target)}{DistanceText(Vector2.Distance(pp, target.Position))}", interrupt: true);
         _log?.LogInfo($"[NAVIGATOR] Long walk started to {target.Label}");
 
-        // Ask the whole-map NPC navmesh for an obstacle-aware route to the approach point;
+        // Ask the whole-map NPC navmesh for an obstacle-aware route to the interaction tile;
         // OnRouteComputed injects it into the native follower.
-        _longWalkDest = target.IsDrop ? target.Position : ApproachPoint(target.Position);
+        _longWalkDest = InteractionDest(target, out _);
         RequestGraph0Route(pp, _longWalkDest);
     }
 
@@ -1081,6 +1080,112 @@ internal static class ObjectNavigator
         var d = toPlayer.magnitude;
         if (d <= ApproachOffset) return playerPos;          // already adjacent
         return objPos + toPlayer / d * ApproachOffset;       // back off one tile
+    }
+
+    /// <summary>
+    /// The game's own "stand here to interact" tile for an object: the nearest usable
+    /// <see cref="DockPoint"/> to the player (same mechanism the player uses when you tap an
+    /// object). Walking onto the dock tile and facing its action direction lands you exactly
+    /// where vanilla E/F works, instead of <see cref="ApproachPoint"/>'s crude back-off toward
+    /// wherever you happen to be standing (which leaves you a tile off-axis on e.g. doors).
+    /// Returns false when the object has no dock points so callers fall back to ApproachPoint.
+    /// </summary>
+    private static bool TryDockDestination(WorldGameObject obj, out Vector2 dest, out Vector2 facePos)
+    {
+        dest = Vector2.zero;
+        facePos = Vector2.zero;
+        try
+        {
+            if (obj == null) return false;
+
+            var docks = obj.RefindDockPointsAndGet();
+            if (docks == null || docks.Length == 0)
+            {
+                _log?.LogInfo($"[NAVIGATOR] {obj.name} has no dock points; using approach offset");
+                return false;
+            }
+
+            var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+            DockPoint best = null;          // nearest reachable dock
+            float bestSq = float.MaxValue;
+            DockPoint fallback = null;      // nearest dock ignoring reachability
+            float fallbackSq = float.MaxValue;
+
+            foreach (var dp in docks)
+            {
+                if (dp == null || dp.tf == null) continue;
+                if (!dp.gameObject.activeInHierarchy) continue;
+                if (dp.shouldnt_be_used) continue;
+
+                float sq = ((Vector2)dp.tf.position - playerPos).sqrMagnitude;
+                if (sq < fallbackSq) { fallbackSq = sq; fallback = dp; }
+
+                if (dp.IsUnreachable(15.36f)) continue;   // blocked by another object
+                if (sq < bestSq) { bestSq = sq; best = dp; }
+            }
+
+            var chosen = best ?? fallback;   // prefer reachable; otherwise nearest anyway
+            if (chosen == null) return false;
+
+            dest = chosen.tf.position;
+            facePos = (Vector2)chosen.tf.position + chosen.GetActionDir().ToVec();
+            _log?.LogInfo($"[NAVIGATOR] {obj.name} dock dest={dest} (of {docks.Length}, reachable={best != null})");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] TryDockDestination failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Pick the destination tile to walk to for a target: ground drops land on their exact
+    /// tile; objects with dock points use the game's interaction tile (and report the point to
+    /// face on arrival); everything else falls back to <see cref="ApproachPoint"/>.
+    /// </summary>
+    private static Vector2 InteractionDest(NavigationTarget target, out Vector2? facePos)
+    {
+        facePos = target.Position;
+        if (target.IsDrop) return target.Position;
+        if (TryDockDestination(target.Object, out var dock, out var face))
+        {
+            facePos = face;
+            return dock;
+        }
+
+        // No dock points (doors/teleports and similar). Back off from the object's COLLIDER
+        // centre, not its pos: pos is the depth-sort anchor (often the top of a doorway), while
+        // the interactive collider sits offset from it (e.g. one tile south for a door). Backing
+        // off from pos lands the player too far from the collider — they'd still have to step
+        // toward it. The collider centre is where the game's interaction overlap actually happens.
+        var basis = InteractionBasis(target.Object, target.Position);
+        facePos = basis;
+        return ApproachPoint(basis);
+    }
+
+    /// <summary>
+    /// The point the player must reach to interact with a dock-less object: the centre of its
+    /// collider bounds (where the interaction overlap test fires), falling back to the object's
+    /// pos when it has no colliders. Differs from pos mainly for doors and other objects whose
+    /// sprite/collider is offset from the depth-sort anchor.
+    /// </summary>
+    private static Vector2 InteractionBasis(WorldGameObject obj, Vector2 pos)
+    {
+        try
+        {
+            if (obj == null) return pos;
+            var b = obj.GetTotalBounds();
+            if (b.size.sqrMagnitude <= 0.0001f) return pos;   // no colliders -> default bounds
+            var center = new Vector2(b.center.x, b.center.y);
+            _log?.LogInfo($"[NAVIGATOR] {obj.name} interaction basis: pos={pos} colliderCenter={center}");
+            return center;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] InteractionBasis failed: {ex.Message}");
+            return pos;
+        }
     }
 
     /// <summary>
