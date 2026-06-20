@@ -406,6 +406,16 @@ public static class Patches
             return;
         }
 
+        // Opening a craft or build desk is a deliberate, infrequent player action, so this is the
+        // safe spot to rebuild a stale pool. Covers every desk the player opens (apiary, cellar,
+        // storage, quarry, etc.) without making auto-craft ticks pay for a full rescan.
+        if (!Fields.InventoriesLoaded && Fields.LoadInventoriesCoroutine == null)
+        {
+            if (Plugin.DebugEnabled) Helpers.Log($"[BaseCraftGUI] pool stale → reloading before serving obj={crafteryObjId} zone={crafteryWzId}");
+            Fields.LoadInventoriesCoroutine = MainGame.me.StartCoroutine(Invents.LoadInventories());
+            MainGame.me.StartCoroutine(Invents.LoadWildernessInventories());
+        }
+
         __result = Invents.GetMiInventory($"[BaseCraftGUI.multi_inventory (Getter)]: {instanceName}, Craftery: {crafteryObjId}", crafteryWGO.GetMyWorldZoneId(), crafteryWGO.pos3);
         if (Plugin.DebugEnabled) Helpers.Log($"[BaseCraftGUI] injected shared multi ({__result.all.Count} inventories) panel={instanceName} obj={crafteryObjId} zone={crafteryWzId}");
     }
