@@ -19,6 +19,7 @@ public class Plugin : BaseUnityPlugin
         DayTimeAnnouncer.Init(Log);
         QuestAnnouncer.Init(Log);
         ZoneScoreAnnouncer.Init(Log);
+        ZoneAnnouncer.Init(Log);
         TechPointsAnnouncer.Init(Log);
         HealthEnergyAnnouncer.Init(Log);
         MoneyAnnouncer.Init(Log);
@@ -89,6 +90,11 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.TechPointsDrop_Drop_Postfix),
             typeof(TechPointsDrop), "Drop", new[] { typeof(Vector3), typeof(int), typeof(int), typeof(int) });
 
+        // Announce the map area the player walks into ("Town", "Graveyard") by voicing the game's
+        // own localized zone-name HUD banner. See Patches.HUD_UpdateZoneInfo_Postfix / ZoneAnnouncer.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.HUD_UpdateZoneInfo_Postfix),
+            typeof(HUD), "UpdateZoneInfo", new[] { typeof(string), typeof(string) });
+
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
 
@@ -105,6 +111,8 @@ public class Plugin : BaseUnityPlugin
             {
                 Log.LogInfo($"[SCENE CHANGE] {_lastSceneName ?? "null"} -> {currentScene}");
                 _lastSceneName = currentScene;
+                // Clear the zone de-dup so loading a save re-announces the current area once.
+                ZoneAnnouncer.Reset();
             }
 
             // Speak any items the player just received ("Got 4 wood"). Runs regardless of GUI

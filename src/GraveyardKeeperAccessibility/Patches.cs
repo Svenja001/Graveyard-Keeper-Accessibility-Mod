@@ -96,6 +96,21 @@ internal static class Patches
         }
     }
 
+    // Announce the map area the player walks into. HUD.UpdateZoneInfo gets the game's own
+    // localized zone-name banner (name = GJL.L("zone_"+id), or "..." for open wilderness) every
+    // 0.5s; ZoneAnnouncer speaks it when it changes so the player knows when they switch areas.
+    public static void HUD_UpdateZoneInfo_Postfix(string __0, string __1)
+    {
+        try
+        {
+            ZoneAnnouncer.OnZoneBanner(__0);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[ZONE] UpdateZoneInfo postfix: {ex.Message}");
+        }
+    }
+
     // AutopsyGUI._body holds the corpse being prepared. Cached so we don't reflect every open.
     private static System.Reflection.FieldInfo _autopsyBodyField;
 
