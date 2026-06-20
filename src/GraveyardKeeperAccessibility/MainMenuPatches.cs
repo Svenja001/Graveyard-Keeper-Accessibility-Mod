@@ -402,6 +402,18 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The grave menu (E on a grave). It shows the buried body plus the grave's cross and
+        // fence — both wear down over time and are restored with a repair kit. A sighted player
+        // clicks the fence/cross icon to open its repair/replace craft; those icons are
+        // BaseItemCellGUI cells with no readable label, so the generic path finds only the
+        // extract/close buttons. List each grave part as a navigable row whose label reads its
+        // condition; Enter opens the part's fix craft (the regular CraftGUI, already accessible).
+        if (gui is GraveGUI grave)
+        {
+            DiscoverGraveParts(grave);
+            return;
+        }
+
         var buttons = gui.GetComponentsInChildren<UIButton>(true);
         Plugin.Log.LogInfo($"[DiscoverElements] Found {buttons.Length} UIButton components in {gui.GetType().Name}");
         Plugin.Log.LogInfo($"[DiscoverElements] Button names: {string.Join(", ", buttons.Select(b => b.name))}");
@@ -1605,6 +1617,16 @@ internal static class GUIAccessibility
             var cd = cri.current_craft;
             if (cd != null && !string.IsNullOrEmpty(cd.change_wgo) && cd.GetFirstRealOutput() == null)
                 label = $"Repair: {name}";
+
+            // The grave-part window (OpenAsGrave) builds two synthetic crafts whose ids don't
+            // localize: a "fix_grave_craft_<part>" repair and a "_remove_" removal. Name them.
+            if (cd != null)
+            {
+                if (!string.IsNullOrEmpty(cd.id) && cd.id.StartsWith("fix_grave_craft_"))
+                    label = cd.id.EndsWith("cross") ? "Repair cross" : "Repair fence";
+                else if (cd.custom_name == "_remove_")
+                    label = "Remove part";
+            }
         }
         catch { }
 
@@ -1961,6 +1983,80 @@ internal static class GUIAccessibility
     /// "Confirm trade" and "Cancel offer" buttons. Activating an item moves it into/out of
     /// an offer; activating Confirm accepts the assembled offer.
     /// </summary>
+    // GraveGUI keeps the grave object and its parts in private fields, and routes a part click
+    // through the private OnGravePartPressed(UIButton, Item, ItemDefinition.ItemType). We read the
+    // fields and invoke that method so Enter does exactly what a mouse click does.
+    private static readonly System.Reflection.FieldInfo _graveWgoField =
+        AccessTools.Field(typeof(GraveGUI), "_grave_wgo");
+    private static readonly System.Reflection.FieldInfo _graveFenceField =
+        AccessTools.Field(typeof(GraveGUI), "_fence");
+    private static readonly System.Reflection.FieldInfo _graveCrossField =
+        AccessTools.Field(typeof(GraveGUI), "_cross");
+    private static readonly System.Reflection.MethodInfo _gravePartPressedMethod =
+        AccessTools.Method(typeof(GraveGUI), "OnGravePartPressed");
+
+    // List the grave's repairable parts (fence first — that's the worn-fence/repair-kit case the
+    // player came for — then cross). Each is a navigable row reading the part's condition; Enter
+    // opens its repair/replace craft. The body (exhumation) is left to the dedicated dig flow.
+    private static void DiscoverGraveParts(GraveGUI grave)
+    {
+        AddGravePartElement(grave, "Fence", _graveFenceField, ItemDefinition.ItemType.GraveFence);
+        AddGravePartElement(grave, "Cross", _graveCrossField, ItemDefinition.ItemType.GraveStone);
+        Plugin.Log.LogInfo($"[GRAVE] Discovered {Elements.Count} grave part element(s)");
+    }
+
+    private static void AddGravePartElement(GraveGUI grave, string name,
+        System.Reflection.FieldInfo field, ItemDefinition.ItemType type)
+    {
+        Elements.Add(new GUIElement
+        {
+            Go = grave.gameObject,
+            Label = GravePartLabel(grave, name, field),
+            Type = ElementType.Button,
+            // Re-read the part each time so the condition stays current after a redraw.
+            ReadDynamic = () => GravePartLabel(grave, name, field),
+            OnActivate = () => ActivateGravePart(grave, field, type)
+        });
+    }
+
+    // "Fence: wooden fence, condition 42 percent. Press Enter to repair", or "No fence, press
+    // Enter to add" when the slot is empty. Condition is the part item's durability (0..1).
+    private static string GravePartLabel(GraveGUI grave, string name, System.Reflection.FieldInfo field)
+    {
+        try
+        {
+            var item = field?.GetValue(grave) as Item;
+            if (item == null || item.IsEmpty())
+                return $"No {name.ToLowerInvariant()}, press Enter to add";
+
+            int pct = Mathf.RoundToInt(Mathf.Clamp01(item.durability) * 100f);
+            var itemName = ScreenReader.StripNguiCodes(item.definition?.GetItemName() ?? name)?.Trim();
+            if (string.IsNullOrWhiteSpace(itemName)) itemName = name;
+            return $"{name}: {itemName}, condition {pct} percent. Press Enter to repair";
+        }
+        catch
+        {
+            return name;
+        }
+    }
+
+    // Mirror a click on the grave-part cell: the game opens the fix/replace craft for a present
+    // part (CraftGUI via OpenAsGrave) or the resource picker to add a missing one. Re-read the
+    // field at activation time so we pass the current item.
+    private static void ActivateGravePart(GraveGUI grave, System.Reflection.FieldInfo field,
+        ItemDefinition.ItemType type)
+    {
+        try
+        {
+            var item = field?.GetValue(grave) as Item;
+            _gravePartPressedMethod?.Invoke(grave, new object[] { null, item, type });
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[GRAVE] grave-part activate failed: {ex.Message}");
+        }
+    }
+
     private static void DiscoverVendor(VendorGUI vendor)
     {
         InventoryItemHandler.DiscoverItemCells(vendor, Elements);
@@ -2324,6 +2420,9 @@ internal static class GUIAccessibility
             // exactly as clicking the slot does. Deletion is handled separately by the Delete key.
             if (elem.SaveSlot != null)
             {
+                // Loading a save / starting a new game makes the title screen flash back up during
+                // the transition; flag it so it announces "Loading" instead of "Title Screen".
+                TitleScreenAccessibility.LoadingStarted = true;
                 elem.SaveSlot.OnSlotSelect();
                 return;
             }

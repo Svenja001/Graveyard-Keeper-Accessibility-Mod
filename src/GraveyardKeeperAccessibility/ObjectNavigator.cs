@@ -33,6 +33,8 @@ internal enum NavCategory
     Stones,
     Bushes,
     Gatherables,
+    Fences,
+    GravesToDecorate,
     Other
 }
 
@@ -58,6 +60,8 @@ internal static class ObjectNavigator
         NavCategory.Stones,
         NavCategory.Bushes,
         NavCategory.Gatherables,
+        NavCategory.Fences,
+        NavCategory.GravesToDecorate,
         NavCategory.Other
     };
 
@@ -378,6 +382,8 @@ internal static class ObjectNavigator
         NavCategory.Stones => "Stones",
         NavCategory.Bushes => "Bushes",
         NavCategory.Gatherables => "Gatherables",
+        NavCategory.Fences => "Broken fences",
+        NavCategory.GravesToDecorate => "Graves to decorate",
         _ => "Other"
     };
 
@@ -1393,6 +1399,35 @@ internal static class ObjectNavigator
                         Distance = distance
                     });
                 }
+
+                // A grave's fence (and cross) wear down over time and can be repaired with a
+                // repair kit from the grave menu. Mirror graves whose fence is worn into the
+                // Fences list so the player can head straight to one that needs a kit. They stay
+                // under Graves too, so the general browse stays complete.
+                if (category == NavCategory.Graves && TryGetWornFence(obj, out var fenceDesc))
+                {
+                    _byCategory[NavCategory.Fences].Add(new NavigationTarget
+                    {
+                        Object = obj,
+                        Label = $"{fenceDesc}, {label}",
+                        Position = objPos,
+                        Distance = distance
+                    });
+                }
+
+                // Graves missing a fence and/or cross can have decoration added (open with E, pick
+                // the empty slot). Mirror them into a dedicated list so the player can go straight
+                // to one to decorate it instead of cycling every grave. They stay under Graves too.
+                if (category == NavCategory.Graves && TryGetMissingDecoration(obj, out var decoDesc))
+                {
+                    _byCategory[NavCategory.GravesToDecorate].Add(new NavigationTarget
+                    {
+                        Object = obj,
+                        Label = $"{decoDesc}, {label}",
+                        Position = objPos,
+                        Distance = distance
+                    });
+                }
             }
 
             // Active quest targets are gathered separately: they are resolved by
@@ -1866,6 +1901,20 @@ internal static class ObjectNavigator
             return true;
         }
 
+        // Broken/worn fences the player can fix with a repair kit. A fence is matched by its
+        // obj_id ("fence") and only listed while it is actually repairable — i.e. it still
+        // carries a repair craft (a Fixing craft, or a change_wgo craft that rebuilds the fence
+        // rather than producing an item). Once repaired it swaps to an obj without that craft and
+        // drops out of the list. Checked before the interaction_type switch because a repairable
+        // fence often has interaction_type Craft and would otherwise be filed under Stations.
+        if (!string.IsNullOrEmpty(obj.obj_id) &&
+            obj.obj_id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            IsRepairableFence(obj))
+        {
+            category = NavCategory.Fences;
+            return true;
+        }
+
         switch (def.interaction_type)
         {
             case ObjectDefinition.InteractionType.Chest:
@@ -1904,6 +1953,105 @@ internal static class ObjectNavigator
                     return true;
                 }
                 return false;
+        }
+    }
+
+    /// <summary>
+    /// True when a fence object is currently broken/worn and still repairable. The repair is a
+    /// craft the object only carries while damaged: either a <c>Fixing</c> craft, or a craft that
+    /// rebuilds the fence in place (<c>change_wgo</c> set) without producing a real item
+    /// (<c>GetFirstRealOutput() == null</c>) — the same "this is the broken variant" signal the
+    /// repair readout uses (see InteractionDetector.GetFixingCraft and the repair recipe rows).
+    /// An obj_id containing "broken" is treated as a fallback signal. Intact fences carry no such
+    /// craft and are skipped, so the category stays a short list of things actually needing a kit.
+    /// </summary>
+    // A grave fence below this durability (0..1) is "worn" enough to list for repair. Lenient on
+    // purpose (anything with visible wear); raise it if the list feels too noisy.
+    private const float WornFenceThreshold = 0.999f;
+
+    /// <summary>
+    /// True when a grave carries a fence item that has worn down (durability below
+    /// <see cref="WornFenceThreshold"/>). Outputs a spoken description with the wear percentage.
+    /// The fence item is the same one the grave menu shows; it decays over time and is restored
+    /// with a repair kit. Returns false for graves with no fence or a pristine one.
+    /// </summary>
+    private static bool TryGetWornFence(WorldGameObject grave, out string desc)
+    {
+        desc = null;
+        try
+        {
+            var fence = grave?.data?.GetItemOfType(ItemDefinition.ItemType.GraveFence);
+            if (fence == null) return false;
+            float dur = fence.durability;
+            if (dur >= WornFenceThreshold) return false;
+            desc = $"Worn fence {Mathf.RoundToInt(Mathf.Clamp01(dur) * 100f)} percent";
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// True when a real (interaction_type Grave) grave is missing a fence and/or a cross, so the
+    /// player can add decoration to it. Outputs what it still needs. Restricted to genuine graves —
+    /// the non-interactive grave scenery that lists under Graves by obj_id has no parts and would
+    /// otherwise all read as "needs everything".
+    /// </summary>
+    private static bool TryGetMissingDecoration(WorldGameObject grave, out string desc)
+    {
+        desc = null;
+        try
+        {
+            if (grave?.obj_def == null ||
+                grave.obj_def.interaction_type != ObjectDefinition.InteractionType.Grave)
+                return false;
+
+            var fence = grave.data?.GetItemOfType(ItemDefinition.ItemType.GraveFence);
+            var cross = grave.data?.GetItemOfType(ItemDefinition.ItemType.GraveStone);
+            bool noFence = fence == null || fence.IsEmpty();
+            bool noCross = cross == null || cross.IsEmpty();
+            if (!noFence && !noCross) return false;
+
+            desc = (noFence && noCross) ? "Undecorated grave, needs cross and fence"
+                 : noCross ? "Grave needs a cross"
+                 : "Grave needs a fence";
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsRepairableFence(WorldGameObject wgo)
+    {
+        try
+        {
+            if (wgo?.obj_def == null) return false;
+
+            if (!string.IsNullOrEmpty(wgo.obj_id) &&
+                wgo.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            if (!wgo.obj_def.has_craft) return false;
+            var crafts = wgo.components?.craft?.crafts;
+            if (crafts == null) return false;
+
+            foreach (var c in crafts)
+            {
+                if (c == null) continue;
+                if (c.craft_type == CraftDefinition.CraftType.Fixing) return true;
+                // A craft that swaps the object for another (change_wgo) and yields no real item
+                // is a rebuild/repair, not a production recipe.
+                if (!string.IsNullOrEmpty(c.change_wgo) && c.GetFirstRealOutput() == null) return true;
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
         }
     }
 

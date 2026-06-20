@@ -281,9 +281,9 @@ internal static class InteractionDetector
     {
         try
         {
-            // A broken station carries a Fixing craft — the action that rebuilds it. Name it
-            // "repair" rather than the generic Hammer "build" so the prompt matches the task.
-            if (GetFixingCraft(wgo) != null) return "repair";
+            // A broken station/fence carries a repair craft — the action that rebuilds it. Name
+            // it "repair" rather than the generic Hammer "build" so the prompt matches the task.
+            if (GetRepairCraft(wgo) != null) return "repair";
 
             var craft = (wgo.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
             if (craft != null && craft.is_crafting && craft.current_craft != null)
@@ -375,16 +375,61 @@ internal static class InteractionDetector
         }
     }
 
+    // The craft that repairs a broken object. Most broken stations use a Fixing craft
+    // (GetFixingCraft). Worn fences instead carry a craft that rebuilds the fence in place
+    // (change_wgo set, no real item output). We only fall back to that rebuild craft for objects
+    // whose id marks them as a fence or already-broken variant, so ordinary stations with an
+    // upgrade/grow change_wgo craft aren't mislabelled "repairable".
+    internal static CraftDefinition GetRepairCraft(WorldGameObject wgo)
+    {
+        try
+        {
+            var fix = GetFixingCraft(wgo);
+            if (fix != null) return fix;
+
+            if (wgo?.obj_def == null || !wgo.obj_def.has_craft) return null;
+            var id = wgo.obj_id ?? "";
+            bool fenceLike = id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!fenceLike) return null;
+
+            var crafts = wgo.components?.craft?.crafts;
+            if (crafts == null) return null;
+
+            CraftDefinition fallback = null;
+            foreach (var c in crafts)
+            {
+                if (c == null || string.IsNullOrEmpty(c.change_wgo) || c.GetFirstRealOutput() != null) continue;
+                if (fallback == null) fallback = c;
+                try { if (c.condition.EvaluateBoolean(wgo, MainGame.me.player)) return c; }
+                catch { }
+            }
+            return fallback;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Append repair guidance to a broken object's label: the materials its repair consumes and
     /// what the player is still short of. Returns the bare label unchanged for non-repairable
-    /// objects. See <see cref="GetFixingCraft"/>.
+    /// objects. See <see cref="GetRepairCraft"/>.
     /// </summary>
     private static string WithRepairInfo(string label, WorldGameObject wgo)
     {
         try
         {
-            var fix = GetFixingCraft(wgo);
+            // Graves are repaired through their own menu (press E to open it, then pick the worn
+            // part), never a hold-F world action. Point at E and flag a worn fence instead of
+            // appending the F-repair text below — which is what made graves wrongly say
+            // "press F to repair" when F does nothing for them.
+            if (wgo?.obj_def != null &&
+                wgo.obj_def.interaction_type == ObjectDefinition.InteractionType.Grave)
+                return WithGraveFenceInfo(label, wgo);
+
+            var fix = GetRepairCraft(wgo);
             if (fix == null) return label;
 
             var needs = fix.needs;
@@ -416,6 +461,26 @@ internal static class InteractionDetector
                 ? $"You still need {string.Join(", ", missing)}"
                 : "You have the materials, press F to repair";
             return $"{label}. Repairable, needs {string.Join(", ", all)}. {tail}";
+        }
+        catch
+        {
+            return label;
+        }
+    }
+
+    /// <summary>
+    /// Repair guidance for a grave: its fence (and cross) wear down over time and are restored
+    /// with a repair kit from the grave's own menu. If the fence is worn, append its condition and
+    /// point at E (the menu key) — not F. Returns the bare label for a pristine or fence-less grave.
+    /// </summary>
+    private static string WithGraveFenceInfo(string label, WorldGameObject grave)
+    {
+        try
+        {
+            var fence = grave.data?.GetItemOfType(ItemDefinition.ItemType.GraveFence);
+            if (fence == null || fence.durability >= 0.999f) return label;
+            int pct = Mathf.RoundToInt(Mathf.Clamp01(fence.durability) * 100f);
+            return $"{label}. Worn fence {pct} percent, press E to open the grave and repair it";
         }
         catch
         {

@@ -7,6 +7,11 @@ internal static class TitleScreenAccessibility
     internal static int SelectedIndex = -1;
     private static bool _announced;
 
+    // Set true when the player loads a save or starts a new game from the save-slots screen. The
+    // title screen flashes back up during the load transition, which would otherwise re-announce
+    // "Title Screen"; instead we say "Loading" once and clear the flag.
+    internal static bool LoadingStarted;
+
     internal static bool HasActiveScreen => _currentScreen != null;
 
     internal static void OnScreenOpened(TitleScreen screen)
@@ -19,6 +24,16 @@ internal static class TitleScreenAccessibility
         ScreenReader.ClearMenuContext();
         Elements.Clear();
         SelectedIndex = -1;
+
+        // The player just chose a save slot / new game: this is the load transition, not the menu
+        // coming back. Announce "Loading" rather than re-reading the title screen.
+        if (LoadingStarted)
+        {
+            LoadingStarted = false;
+            _announced = true;
+            ScreenReader.Say("Loading");
+            return;
+        }
 
         DiscoverElements(screen);
 
