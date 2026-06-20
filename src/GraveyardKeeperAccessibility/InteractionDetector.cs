@@ -705,7 +705,7 @@ internal static class InteractionDetector
 
             // Find closest object, filtering out inactive ones
             var nearby = allObjects
-                .Where(obj => obj != null && !IsPlayer(obj) && !IsPrefab(obj))
+                .Where(obj => obj != null && !obj.is_removed && !IsPlayer(obj) && !IsPrefab(obj))
                 .Where(obj => obj.gameObject.activeInHierarchy)
                 .OrderBy(obj => Vector3.Distance(obj.transform.position, playerPos))
                 .FirstOrDefault();

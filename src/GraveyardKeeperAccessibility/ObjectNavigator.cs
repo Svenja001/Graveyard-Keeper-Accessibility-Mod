@@ -1366,7 +1366,7 @@ internal static class ObjectNavigator
 
             foreach (var obj in allObjects)
             {
-                if (obj == null) continue;
+                if (obj == null || obj.is_removed) continue;
                 if (InteractionDetector.IsPlayer(obj) || InteractionDetector.IsPrefab(obj)) continue;
                 if (!obj.gameObject.activeInHierarchy) continue;
 
@@ -1561,6 +1561,40 @@ internal static class ObjectNavigator
     };
 
     /// <summary>
+    /// Which DLC (if any) a world zone belongs to, or null for base-game zones. DLC zones
+    /// (the Stranger Sins player tavern, the Game of Crone refugee camp, etc.) ship in the
+    /// scene as always-active GameObjects even when you don't own the DLC — the game gates
+    /// them by quest-unlock / DisableWorldZone, NOT by deactivating the object — so neither
+    /// IsDisabled() nor activeInHierarchy filters them. We map the zone id to its DLC and
+    /// hide it unless <see cref="DLCEngine.IsDLCAvailable"/> says you own it.
+    ///
+    /// IsDLCAvailable is a LIVE check for the DLC's gamedata_*.dat file, so this needs no code
+    /// change to keep working: the moment you buy a DLC its zones start appearing, and if you
+    /// don't own it they stay hidden. Match by substring so id variants (player_tavern_cellar,
+    /// players_tavern_2, ...) are all covered.
+    /// </summary>
+    private static DLCEngine.DLCVersion? ZoneRequiredDLC(string zoneId)
+    {
+        if (string.IsNullOrEmpty(zoneId)) return null;
+        var id = zoneId.ToLowerInvariant();
+
+        // Stranger Sins — the player-run tavern and its cellar (the town tavern is base game,
+        // so require BOTH "player" and "tavern" to avoid hiding any base-game tavern zone).
+        if (id.Contains("tavern") && id.Contains("player"))
+            return DLCEngine.DLCVersion.Stories;
+
+        // Game of Crone — the refugee camp and Alarich's tent.
+        if (id.Contains("refugee") || id.Contains("alarich") || id.Contains("crone"))
+            return DLCEngine.DLCVersion.Refugees;
+
+        // Better Save Soul — any soul-content zone (no base-game zone uses this word).
+        if (id.Contains("soul"))
+            return DLCEngine.DLCVersion.Souls;
+
+        return null;
+    }
+
+    /// <summary>
     /// Populate the Landmarks category with key NPC services (Tavern barman, Merchant) and
     /// every world zone. Zones are always loaded, and the named NPCs resolve map-wide, so
     /// these targets exist even from across the map; the compass/auto-walk then heads there.
@@ -1576,7 +1610,7 @@ internal static class ObjectNavigator
             foreach (var (objId, label) in NpcLandmarks)
             {
                 var wgo = WorldMap.GetWorldGameObjectByObjId(objId, ignore_not_found_error: true);
-                if (wgo == null) continue;
+                if (wgo == null || wgo.is_removed || !wgo.gameObject.activeInHierarchy) continue;
                 list.Add(new NavigationTarget
                 {
                     Object = wgo,
@@ -1606,6 +1640,12 @@ internal static class ObjectNavigator
             foreach (var zone in zones)
             {
                 if (zone == null || zone.IsDisabled()) continue;
+                // Hide zones that belong to a DLC the player doesn't own. These zones are present
+                // and active in the scene regardless of DLC, so we gate them on the live
+                // gamedata_*.dat check (see ZoneRequiredDLC); buying the DLC makes them appear
+                // automatically with no code change.
+                var reqDlc = ZoneRequiredDLC(zone.id);
+                if (reqDlc.HasValue && !DLCEngine.IsDLCAvailable(reqDlc.Value)) continue;
                 if (string.IsNullOrEmpty(zone.id) || !seenZones.Add(zone.id)) continue;
                 if (SkipZoneIds.Contains(zone.id)) continue;   // superseded by a door landmark
 
@@ -1676,7 +1716,11 @@ internal static class ObjectNavigator
         float bestSq = float.MaxValue;
         foreach (var w in allObjects)
         {
-            if (w == null) continue;
+            if (w == null || w.is_removed) continue;
+            // DLC buildings (e.g. the Stranger Sins tavern) deactivate their door WGOs when the
+            // DLC isn't installed; allObjects is scanned with includeInactive:true, so skip the
+            // inactive ones here too — re-activates automatically once the DLC is owned.
+            if (!w.gameObject.activeInHierarchy) continue;
             if (w.name.IndexOf("teleport", StringComparison.OrdinalIgnoreCase) < 0) continue;
             if (!string.Equals(InteractionDetector.DoorPlaceFromTag(w.custom_tag), place,
                                StringComparison.OrdinalIgnoreCase))
