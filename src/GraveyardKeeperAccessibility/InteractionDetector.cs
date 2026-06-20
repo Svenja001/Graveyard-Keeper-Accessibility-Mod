@@ -58,7 +58,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithRepairInfo(GetObjectLabel(target), target);
+                        var label = WithCraftStatus(WithRepairInfo(GetObjectLabel(target), target), target);
                         ScreenReader.Say(label, interrupt: true);
                         _lastAnnouncedObject = target.name;
                     }
@@ -71,7 +71,7 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var label = WithRepairInfo(GetObjectLabel(nearby), nearby);
+                    var label = WithCraftStatus(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
@@ -258,8 +258,12 @@ internal static class InteractionDetector
                 // swapped for the repaired version (the old WGO now reads as destroyed/null).
                 if (_craftIsFixing)
                     ScreenReader.Say("Repaired", interrupt: false);
+                else if (string.IsNullOrEmpty(_craftOutputName))
+                    ScreenReader.Say("Finished", interrupt: false);
                 else
-                    ScreenReader.Say(string.IsNullOrEmpty(_craftOutputName) ? "Finished" : $"{_craftOutputName} crafted", interrupt: false);
+                    // A station craft drops its output on the ground beside the station — a
+                    // sighted player sees it land, a blind one needs telling where it went.
+                    ScreenReader.Say($"{_craftOutputName} crafted, on the ground nearby", interrupt: false);
                 _craftPending = false;
                 _craftStation = null;
                 _craftIsFixing = false;
@@ -461,6 +465,33 @@ internal static class InteractionDetector
                 ? $"You still need {string.Join(", ", missing)}"
                 : "You have the materials, press F to repair";
             return $"{label}. Repairable, needs {string.Join(", ", all)}. {tail}";
+        }
+        catch
+        {
+            return label;
+        }
+    }
+
+    /// <summary>
+    /// Append the live production state of a crafting station that is mid-craft: "Making iron, 60
+    /// percent done". A blind player can't see the furnace's progress bar or smoke, so without
+    /// this they have no way to tell whether a smelt they started is finished or how far along it
+    /// is — they just hear the bare station name. Re-read on every approach/E-press so the number
+    /// is current. Returns the bare label for an idle station (and skips repair crafts, which the
+    /// repair-info / "Repaired" cues already cover).
+    /// </summary>
+    private static string WithCraftStatus(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            var craft = (wgo?.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
+            if (craft == null || !craft.is_crafting || craft.current_craft == null) return label;
+            if (craft.current_craft.craft_type == CraftDefinition.CraftType.Fixing) return label;
+
+            var outName = CraftOutputName(craft.current_craft);
+            int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
+            var what = string.IsNullOrEmpty(outName) ? "something" : outName;
+            return $"{label}. Making {what}, {pct} percent done";
         }
         catch
         {

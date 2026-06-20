@@ -1638,6 +1638,59 @@ internal static class GUIAccessibility
         return label;
     }
 
+    /// <summary>Just the recipe's display name (no "Requires…/Ready" tail), or null.</summary>
+    private static string RecipeDisplayName(CraftItemGUI cri)
+    {
+        if (cri == null) return null;
+        try
+        {
+            var def = cri.current_craft;
+            if (def != null)
+            {
+                var n = ScreenReader.StripNguiCodes(GJL.L(def.GetNameNonLocalized()) ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(n)) return n;
+            }
+        }
+        catch { }
+        try { return ScreenReader.StripNguiCodes(cri.label_name?.text)?.Trim(); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// What to say after a craft closes the station window. If the station is now running a timed
+    /// craft (e.g. a furnace smelt) report it as started; otherwise the craft already finished
+    /// instantly (adding fuel, a quick craft) so report it as crafted. A craft that yields a real
+    /// item drops it on the ground beside the station (CraftComponent drops player-craft output),
+    /// so point the player at it — they can't see it land and would otherwise lose track of it.
+    /// </summary>
+    private static string CraftStartedMessage(CraftGUI craftGui, CraftDefinition craft, string recipeName)
+    {
+        try
+        {
+            var wgo = _crafteryWgoField?.GetValue(craftGui) as WorldGameObject;
+            var station = wgo?.components?.craft;
+            if (station != null && station.is_crafting && station.current_craft != null)
+            {
+                string outName = null;
+                try { outName = ScreenReader.StripNguiCodes(station.current_craft.GetFirstRealOutput()?.definition?.GetItemName() ?? "").Trim(); }
+                catch { }
+                if (string.IsNullOrWhiteSpace(outName)) outName = recipeName;
+                int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
+                if (string.IsNullOrWhiteSpace(outName)) return "Crafting started";
+                return pct >= 1 ? $"Crafting {outName}, {pct} percent done" : $"Started crafting {outName}";
+            }
+        }
+        catch { }
+
+        // Instant craft, already finished. If it made a real item it's now on the ground.
+        bool dropsItem = false;
+        try { dropsItem = craft?.GetFirstRealOutput() != null; } catch { }
+        if (string.IsNullOrWhiteSpace(recipeName)) return "Crafted";
+        return dropsItem
+            ? $"{recipeName} crafted. It dropped on the ground, press E to pick it up"
+            : $"{recipeName} crafted";
+    }
+
     /// <summary>
     /// Whether the player can currently afford this recipe. Uses CraftItemGUI.CanCraft (which
     /// checks the player's inventory), NOT <see cref="CanBuild"/> — that one consults the build
@@ -2388,6 +2441,25 @@ internal static class GUIAccessibility
                 return;
             }
 
+            // A crafting station (furnace, etc.) closes its window after some crafts — adding
+            // fuel, or a single-shot craft. The hidden window has no active rows, so the refresh
+            // below would re-read it as "Nothing to make here". Capture what we're about to make
+            // so we can instead announce the outcome ("Brennstoff crafted" / "Started crafting …").
+            CraftGUI craftStation = null;
+            string pressedRecipeName = null;
+            CraftDefinition pressedCraftDef = null;
+            if (_currentGUI is CraftGUI cg && !(MainGame.me?.build_mode_logics?.IsBuilding() == true))
+            {
+                craftStation = cg;
+                try
+                {
+                    var cri = elem.Cell?.GetComponentInParent<CraftItemGUI>();
+                    pressedRecipeName = RecipeDisplayName(cri);
+                    pressedCraftDef = cri?.current_craft;
+                }
+                catch { }
+            }
+
             // Press the item cell, which fires its on-action callback (e.g. the autopsy
             // table's "extract this body part" flow → confirm dialog the mod reads next).
             InventoryItemHandler.PressItemCell(elem.Cell);
@@ -2406,11 +2478,17 @@ internal static class GUIAccessibility
                 if (!CountPickerOpen())
                     RefreshVendorAfterMove(vendor, prevIndex);
             }
-            else if (_currentGUI is CraftGUI && !(MainGame.me?.build_mode_logics?.IsBuilding() == true))
-                // Crafting consumes ingredients, so re-read the row: the player hears whether they
-                // can still make another (". Ready" -> ". Not enough materials"). Skipped in build
-                // mode, where activating a row starts placement and closes the catalog.
-                RefreshCurrentGUI(prevIndex);
+            else if (craftStation != null)
+            {
+                // If the craft closed the window (furnace fuel, single-shot crafts) there's
+                // nothing left to read — announce the result. Otherwise the station stays open,
+                // so re-read the row: crafting consumes ingredients, and the player hears whether
+                // they can still make another (". Ready" -> ". Not enough materials").
+                if (!craftStation.is_shown)
+                    ScreenReader.Say(CraftStartedMessage(craftStation, pressedCraftDef, pressedRecipeName), interrupt: true);
+                else
+                    RefreshCurrentGUI(prevIndex);
+            }
             return;
         }
 
