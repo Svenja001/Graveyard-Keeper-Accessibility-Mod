@@ -271,7 +271,13 @@ internal static class InteractionDetector
             }
 
             // Keep IsPlayerCrafting (navigator's auto-walk guard) tracking the live state.
-            _wasCrafting = stationCrafting;
+            // Only MANUAL crafts pin the player in place: an auto craft (current_craft.is_auto —
+            // furnaces smelting, item spawners, etc.) is advanced by the game itself, not by the
+            // player working it (DoAction even early-returns for the player on an auto craft), so
+            // walking away never cancels it. Don't make the player "stand still" for those.
+            bool isAutoCraft = false;
+            try { isAutoCraft = stationCrafting && station.current_craft.is_auto; } catch { }
+            _wasCrafting = stationCrafting && !isAutoCraft;
         }
         catch (Exception ex)
         {
