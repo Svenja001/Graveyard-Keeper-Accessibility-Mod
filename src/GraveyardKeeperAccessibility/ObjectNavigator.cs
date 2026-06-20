@@ -86,6 +86,12 @@ internal static class ObjectNavigator
     // on arrival we issue the next hop until close enough for the precise final approach.
     private static bool _longWalkActive = false;
     private static NavigationTarget _longWalkTarget;
+
+    // True while a game cutscene/cinematic owns the player (GS.SetPlayerEnable(false, cinematic)).
+    // During a cutscene we must NEVER set control_enabled = true or call StopMovement: doing so
+    // flips the body to Dynamic (UpdateBodyPhysics) and jams the cutscene's own scripted player
+    // GoTo against a fence/gate, freezing the scene forever. See OnGameSetPlayerEnable.
+    private static bool _gameOwnsPlayer = false;
     private static Vector2 _longWalkProgressPos;     // last position where we made real progress
     private static int _longWalkStuckTicks = 0;      // consecutive hops with no progress
     private static Vector2 _longWalkAnnouncePos;     // last position we announced remaining distance
@@ -720,6 +726,17 @@ internal static class ObjectNavigator
     private static void OnNativeWalkComplete()
     {
         _isWalking = false;
+
+        // A cutscene cancelled our walk (it calls StopMovement, which fires this completion).
+        // The cutscene now owns the player — leave control_enabled / the body alone, otherwise we
+        // re-Dynamic the body and freeze the cutscene's own scripted player walk against the gate.
+        if (_gameOwnsPlayer)
+        {
+            _longWalkActive = false;
+            _log?.LogInfo("[NAVIGATOR] Native walk completion ignored: cutscene owns the player");
+            return;
+        }
+
         // Restore player control / Dynamic body (we forced Kinematic for the scripted walk).
         var ch = MainGame.me?.player?.components?.character;
         if (ch != null) ch.control_enabled = true;
@@ -1413,12 +1430,46 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
+    /// Fired from a postfix on GS.SetPlayerEnable. A cutscene grabs the player with
+    /// SetPlayerEnable(false, affect_cinematic:true) and hands control back with
+    /// SetPlayerEnable(true, ...). If it fires mid auto-walk we must abandon our walk WITHOUT
+    /// touching control/the body — the cutscene drives the player itself and any control_enabled
+    /// = true from us would re-Dynamic the body and freeze the scene.
+    /// </summary>
+    internal static void OnGameSetPlayerEnable(bool playerEnabled, bool affectCinematic)
+    {
+        if (!playerEnabled && affectCinematic)
+        {
+            _gameOwnsPlayer = true;
+            if (_isWalking || _longWalkActive || _beaconActive)
+            {
+                // Drop every walk flag so our monitors stop poking the player, but leave
+                // control_enabled / cur_astar_path exactly as the cutscene set them.
+                _isWalking = false;
+                _longWalkActive = false;
+                _beaconActive = false;
+                _routePending = false;
+                _routeNeedsRecompute = false;
+                _exitAssisting = false;
+                _log?.LogInfo("[NAVIGATOR] Cutscene took the player mid-walk; releasing without touching control");
+            }
+        }
+        else if (playerEnabled)
+        {
+            _gameOwnsPlayer = false;
+        }
+    }
+
+    /// <summary>
     /// Stop scripted movement and hand control back to the player. Safe to call
     /// redundantly; this is the guard against the player being locked out of input
     /// when the game's own OnPathFailed leaves player_controlled_by_script set.
     /// </summary>
     private static void ReleaseScriptControl()
     {
+        // A cutscene owns the player right now — StopMovement would cancel its scripted walk and
+        // control_enabled = true would re-Dynamic the body and jam the scene. Stay out of its way.
+        if (_gameOwnsPlayer) return;
         try
         {
             var character = MainGame.me?.player?.components?.character;

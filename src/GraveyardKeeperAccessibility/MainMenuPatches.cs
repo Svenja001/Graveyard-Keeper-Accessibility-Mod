@@ -1302,7 +1302,7 @@ internal static class GUIAccessibility
         {
             Go = cri.gameObject,
             Type = ElementType.Button,
-            Label = $"Craft {OutputName(cri)}" + (CanCraftRecipe(cri) ? "" : ", not enough materials"),
+            Label = $"Craft {OutputName(cri)}" + (CanCraftRecipe(cri) ? "" : $", {CraftUnavailableReason(cri).ToLowerInvariant()}"),
             OnActivate = () => CraftMultiquality(craftGui, cri)
         });
 
@@ -1360,7 +1360,7 @@ internal static class GUIAccessibility
     {
         if (!CanCraftRecipe(cri))
         {
-            ScreenReader.Say("Not enough materials");
+            ScreenReader.Say(CraftUnavailableReason(cri));
             return;
         }
 
@@ -1632,7 +1632,7 @@ internal static class GUIAccessibility
 
         var needs = CraftNeedsText(cri);
         if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
-        label += CanCraftRecipe(cri) ? ". Ready" : ". Not enough materials";
+        label += CanCraftRecipe(cri) ? ". Ready" : $". {CraftUnavailableReason(cri)}";
         // Star-quality recipes open a quality picker on Enter rather than crafting directly.
         if (IsMultiquality(cri)) label += ". Enter to choose quality";
         return label;
@@ -1706,6 +1706,36 @@ internal static class GUIAccessibility
         }
         catch { }
         return true;
+    }
+
+    /// <summary>
+    /// Why a recipe can't be crafted right now, as spoken text. The game's CanCraft collapses every
+    /// shortfall into one boolean, so a furnace craft that has all its ingredients but no fuel would
+    /// otherwise read as the misleading "not enough materials". Fuel ("fire") lives in the craft's
+    /// needs_from_wgo and is stored on the station (wgo.data), not the player's bags — so check it
+    /// separately and, when the materials are all present and only the fuel is short, say "No fuel".
+    /// </summary>
+    private static string CraftUnavailableReason(CraftItemGUI cri)
+    {
+        try
+        {
+            var craft = cri?.current_craft;
+            if (craft?.needs_from_wgo != null && craft.needs_from_wgo.Count > 0)
+            {
+                bool needsFire = craft.needs_from_wgo.Any(n => n != null && n.id == "fire");
+                var wgo = cri.craft_gui_interface?.GetCrafteryWGO();
+                if (needsFire && wgo?.data != null && !wgo.data.IsEnoughItems(craft.needs_from_wgo, 1))
+                {
+                    // If the player's ingredients are all present too, the only thing missing is fuel.
+                    var inv = MainGame.me?.player?.GetMultiInventoryForInteraction();
+                    bool materialsOk = inv == null
+                        || inv.IsEnoughItems(craft.needs, MultiInventory.DestinationType.AllFromFirst, null, 1);
+                    if (materialsOk) return "No fuel";
+                }
+            }
+        }
+        catch { }
+        return "Not enough materials";
     }
 
     /// <summary>Comma-separated "amount item" list of a recipe's ingredients, or null.</summary>

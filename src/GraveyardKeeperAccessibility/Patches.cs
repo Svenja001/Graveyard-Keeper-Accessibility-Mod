@@ -111,6 +111,22 @@ internal static class Patches
         }
     }
 
+    // Track when a cutscene takes/returns the player. GS.SetPlayerEnable(false, affect_cinematic:true)
+    // grabs the player for a cinematic; SetPlayerEnable(true, ...) hands control back. The navigator
+    // needs to know so it never re-enables control mid-cutscene (which freezes the scene — e.g. the
+    // first-visit cellar cultist cutscene). __0 = player_enabled, __1 = affect_cinematic.
+    public static void GS_SetPlayerEnable_Postfix(bool __0, bool __1)
+    {
+        try
+        {
+            ObjectNavigator.OnGameSetPlayerEnable(__0, __1);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[NAVIGATOR] SetPlayerEnable postfix: {ex.Message}");
+        }
+    }
+
     // AutopsyGUI._body holds the corpse being prepared. Cached so we don't reflect every open.
     private static System.Reflection.FieldInfo _autopsyBodyField;
 

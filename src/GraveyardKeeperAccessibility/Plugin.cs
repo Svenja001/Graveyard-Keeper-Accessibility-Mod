@@ -95,6 +95,11 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.HUD_UpdateZoneInfo_Postfix),
             typeof(HUD), "UpdateZoneInfo", new[] { typeof(string), typeof(string) });
 
+        // Track cutscene takeovers so an in-progress auto-walk never re-enables control mid-cutscene
+        // (that re-Dynamics the body and freezes the scene). See Patches.GS_SetPlayerEnable_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.GS_SetPlayerEnable_Postfix),
+            typeof(GS), "SetPlayerEnable", new[] { typeof(bool), typeof(bool) });
+
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
 
