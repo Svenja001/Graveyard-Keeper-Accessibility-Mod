@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "Gesamtenergie, die du an einem Tag verbrauchen musst, bevor der Schlaf-Malus einsetzt (Vanilla: 300).",
   "cfg.speed_up_sleep.name": "Schlaf beschleunigen",
   "cfg.speed_up_sleep.desc": "Verkürzt die Spielzeit, die Schlafen benötigt.",
+  "cfg.sleep_anytime.name": "Jederzeit schlafen",
+  "cfg.sleep_anytime.desc": "Geh jederzeit ins Bett, auch völlig ausgeruht. Der Schlaf dauert bis zum Morgen; mit der Interaktionstaste wachst du früher auf.",
   "cfg.spend_half_energy.name": "Halber Energieverbrauch",
   "cfg.spend_half_energy.desc": "Halbiert die Energiekosten aller Aktionen. Aktivieren schaltet Unbegrenzte Energie aus.",
   "cfg.spend_half_gratitude.name": "Halber Dankbarkeitsverbrauch",

@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "Énergie totale à dépenser dans une journée avant que le malus de sommeil ne s'applique (vanilla : 300).",
   "cfg.speed_up_sleep.name": "Accélérer le sommeil",
   "cfg.speed_up_sleep.desc": "Réduit le temps en jeu nécessaire au sommeil.",
+  "cfg.sleep_anytime.name": "Dormir à tout moment",
+  "cfg.sleep_anytime.desc": "Couche-toi quand tu veux, même complètement reposé. Le sommeil dure jusqu'au matin ; appuie sur la touche d'interaction pour te réveiller plus tôt.",
   "cfg.spend_half_energy.name": "Énergie consommée de moitié",
   "cfg.spend_half_energy.desc": "Divise par deux le coût en énergie de chaque action. L'activer désactive Énergie illimitée.",
   "cfg.spend_half_gratitude.name": "Gratitude consommée de moitié",

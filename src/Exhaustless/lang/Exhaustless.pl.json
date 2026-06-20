@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "Łączna energia, jaką musisz wydać w ciągu dnia, zanim zacznie działać debuff snu (wanilia: 300).",
   "cfg.speed_up_sleep.name": "Przyspiesz sen",
   "cfg.speed_up_sleep.desc": "Skraca czas w grze potrzebny do snu.",
+  "cfg.sleep_anytime.name": "Śpij kiedy chcesz",
+  "cfg.sleep_anytime.desc": "Kładź się spać kiedy chcesz, nawet w pełni wypoczęty. Sen trwa do rana; naciśnij przycisk interakcji, aby obudzić się wcześniej.",
   "cfg.spend_half_energy.name": "Połowa zużycia energii",
   "cfg.spend_half_energy.desc": "Zmniejsza o połowę koszt energii każdej akcji. Włączenie wyłącza Nielimitowaną energię.",
   "cfg.spend_half_gratitude.name": "Połowa zużycia wdzięczności",

@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "수면 디버프가 적용되기 전까지 하루 동안 소모해야 하는 총 에너지량입니다 (기본값은 300).",
   "cfg.speed_up_sleep.name": "수면 속도 향상",
   "cfg.speed_up_sleep.desc": "수면에 걸리는 게임 내 시간을 단축합니다.",
+  "cfg.sleep_anytime.name": "언제든지 수면",
+  "cfg.sleep_anytime.desc": "완전히 회복한 상태에서도 잠자리에 들 수 있습니다. 수면은 아침까지 이어지며, 상호작용 버튼을 누르면 일찍 일어납니다.",
   "cfg.spend_half_energy.name": "에너지 소모 절반",
   "cfg.spend_half_energy.desc": "모든 행동의 에너지 소모량을 절반으로 줄입니다. 이 기능을 켜면 '무제한 에너지' 기능이 꺼집니다.",
   "cfg.spend_half_gratitude.name": "감사 소모 절반",

@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "睡眠デバフが付くまでに 1 日で消費する必要のある合計体力（バニラは 300）。",
   "cfg.speed_up_sleep.name": "睡眠を高速化",
   "cfg.speed_up_sleep.desc": "睡眠に必要なゲーム内時間を短縮します。",
+  "cfg.sleep_anytime.name": "いつでも睡眠",
+  "cfg.sleep_anytime.desc": "完全に回復していてもベッドで眠れるようにします。睡眠は朝まで続きます。早く起きるにはインタラクトボタンを押してください。",
   "cfg.spend_half_energy.name": "体力消費を半分に",
   "cfg.spend_half_energy.desc": "全行動の体力消費を半分にします。オンにすると「体力無制限」がオフになります。",
   "cfg.spend_half_gratitude.name": "感謝消費を半分に",
