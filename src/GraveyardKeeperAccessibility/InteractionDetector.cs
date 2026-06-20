@@ -473,29 +473,107 @@ internal static class InteractionDetector
     }
 
     /// <summary>
-    /// Append the live production state of a crafting station that is mid-craft: "Making iron, 60
-    /// percent done". A blind player can't see the furnace's progress bar or smoke, so without
-    /// this they have no way to tell whether a smelt they started is finished or how far along it
-    /// is — they just hear the bare station name. Re-read on every approach/E-press so the number
-    /// is current. Returns the bare label for an idle station (and skips repair crafts, which the
-    /// repair-info / "Repaired" cues already cover).
+    /// Append a crafting station's live state to its label: what it's making and how far along
+    /// ("Making iron, 60 percent done"), plus what it currently holds ("Contains 8 fuel"). A blind
+    /// player can't see the furnace's progress bar, its fuel gauge, or items sitting inside it, so
+    /// without this they only hear the bare station name and can't tell whether a smelt is done,
+    /// whether the oven is fuelled, or where the fuel/food they made went. Re-read on every
+    /// approach/E-press so the numbers stay current. Repair crafts are skipped (the repair-info /
+    /// "Repaired" cues already cover those).
     /// </summary>
     private static string WithCraftStatus(string label, WorldGameObject wgo)
     {
         try
         {
             var craft = (wgo?.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
-            if (craft == null || !craft.is_crafting || craft.current_craft == null) return label;
-            if (craft.current_craft.craft_type == CraftDefinition.CraftType.Fixing) return label;
+            if (craft == null) return label;
 
-            var outName = CraftOutputName(craft.current_craft);
-            int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
-            var what = string.IsNullOrEmpty(outName) ? "something" : outName;
-            return $"{label}. Making {what}, {pct} percent done";
+            if (craft.is_crafting && craft.current_craft != null &&
+                craft.current_craft.craft_type != CraftDefinition.CraftType.Fixing)
+            {
+                var outName = CraftOutputName(craft.current_craft);
+                int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
+                var what = string.IsNullOrEmpty(outName) ? "something" : outName;
+                label = $"{label}. Making {what}, {pct} percent done";
+            }
+
+            var contents = StationContents(wgo, craft);
+            if (!string.IsNullOrEmpty(contents))
+                label = $"{label}. {contents}";
+
+            return label;
         }
         catch
         {
             return label;
+        }
+    }
+
+    /// <summary>
+    /// Describe what a station is holding: resources its own crafts deposit into it (e.g. an oven's
+    /// fuel — stored as an object param, NOT a ground drop, which is why a crafted "Brennstoff"
+    /// seems to vanish) plus any items physically inside it. The fuel param can be named anything,
+    /// so we learn the resource names from the station's crafts' <c>output_res_wgo</c> and read the
+    /// object's current value of each. Returns null when the station holds nothing.
+    /// </summary>
+    private static string StationContents(WorldGameObject wgo, CraftComponent craft)
+    {
+        try
+        {
+            var parts = new List<string>();
+
+            // Resources the station's crafts add to the object itself (fuel, charge, …).
+            var resTypes = new HashSet<string>();
+            if (craft.crafts != null)
+            {
+                foreach (var c in craft.crafts)
+                {
+                    var types = c?.output_res_wgo?.Types;
+                    if (types == null) continue;
+                    foreach (var t in types)
+                        if (!string.IsNullOrEmpty(t)) resTypes.Add(t);
+                }
+            }
+            foreach (var t in resTypes)
+            {
+                float v = wgo.GetParam(t);
+                if (v > 0.01f)
+                    parts.Add($"{Mathf.RoundToInt(v)} {ResourceDisplayName(t)}");
+            }
+
+            // Items physically inside the station (loaded ingredients, a body on the table, …).
+            var inv = wgo.data?.inventory;
+            if (inv != null)
+            {
+                foreach (var it in inv)
+                {
+                    if (it == null || it.IsEmpty()) continue;
+                    var n = ScreenReader.StripNguiCodes(it.definition?.GetItemName() ?? it.id)?.Trim();
+                    if (string.IsNullOrEmpty(n)) continue;
+                    parts.Add(it.value > 1 ? $"{it.value} {n}" : n);
+                }
+            }
+
+            return parts.Count == 0 ? null : "Contains " + string.Join(", ", parts);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Readable name for a station's stored resource param. These internal param names aren't real
+    /// localization keys, so they'd otherwise read as the raw token — and the furnace's fuel charge
+    /// is unhelpfully called "fire". Map the ones we know to plain words; fall back to the localized
+    /// / cleaned token for anything else.
+    /// </summary>
+    private static string ResourceDisplayName(string resType)
+    {
+        switch (resType)
+        {
+            case "fire": return "fuel";
+            default: return LocalizedObjectName(resType);
         }
     }
 
