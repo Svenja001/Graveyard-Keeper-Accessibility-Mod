@@ -64,7 +64,9 @@ internal static class Patches
             {
                 var spoken = EnrichDayNumbers(cleanedText);
                 Plugin.Log.LogInfo($"[DIALOGUE] {spoken}");
-                ScreenReader.Say(spoken);
+                // Non-interrupting: ambient NPC bubbles (e.g. "the villagers are safe with me")
+                // fire constantly and would otherwise cut off navigation/pickup/combat speech.
+                ScreenReader.Say(spoken, interrupt: false);
             }
         }
         catch (Exception ex)
