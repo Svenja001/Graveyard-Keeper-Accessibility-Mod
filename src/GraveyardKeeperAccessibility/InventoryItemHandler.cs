@@ -147,6 +147,10 @@ internal static class InventoryItemHandler
             foreach (var cell in gui.GetComponentsInChildren<BaseItemCellGUI>(true))
             {
                 if (cell == null || !cell.gameObject.activeInHierarchy) continue;
+                // Only list cells that actually belong to this GUI. A just-closed chest's cells
+                // can linger a frame (Unity defers Destroy) or get caught by a stale current-GUI;
+                // without this guard they'd surface in the player's plain inventory as phantoms.
+                if (cell.GetComponentInParent<BaseGUI>() != gui) continue;
                 if (cell.id_empty) continue;
                 if (elements.Any(e => e.Go == cell.gameObject)) continue;
                 if (discovered.Any(e => e.Go == cell.gameObject)) continue;

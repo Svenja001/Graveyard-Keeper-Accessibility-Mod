@@ -2713,6 +2713,16 @@ internal static class GUIAccessibility
             topGUI = gui;
         }
 
+        // The raw iteration above just takes the last is_shown window in hierarchy order,
+        // which can land on a window still showing *underneath* another — e.g. a chest left
+        // open beneath the inventory. That makes us keep reading the wrong grid's item cells
+        // (the reported "inventory still shows the chest's contents" bug). BaseGUI.active_gui
+        // is the game's authoritative top-of-stack window, so prefer it when it's a real,
+        // shown, non-HUD window.
+        var activeGui = BaseGUI.active_gui;
+        if (activeGui != null && activeGui.is_shown)
+            topGUI = activeGui;
+
         if (topGUI == _currentGUI) return;
 
         if (_currentGUI != null)
