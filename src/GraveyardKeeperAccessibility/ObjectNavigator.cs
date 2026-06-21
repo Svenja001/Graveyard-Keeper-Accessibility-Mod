@@ -35,6 +35,7 @@ internal enum NavCategory
     Gatherables,
     Fences,
     GravesToDecorate,
+    Buildables,
     Other
 }
 
@@ -62,6 +63,7 @@ internal static class ObjectNavigator
         NavCategory.Gatherables,
         NavCategory.Fences,
         NavCategory.GravesToDecorate,
+        NavCategory.Buildables,
         NavCategory.Other
     };
 
@@ -390,6 +392,7 @@ internal static class ObjectNavigator
         NavCategory.Gatherables => "Gatherables",
         NavCategory.Fences => "Broken fences",
         NavCategory.GravesToDecorate => "Graves to decorate",
+        NavCategory.Buildables => "Built objects",
         _ => "Other"
     };
 
@@ -2192,7 +2195,14 @@ internal static class ObjectNavigator
                 // so file them under Stations rather than the catch-all Other. has_craft is a
                 // cheap obj_def flag — avoid touching obj.components, which lazily allocates a
                 // ComponentsManager for every scene object on each refresh.
-                category = def.has_craft ? NavCategory.Stations : NavCategory.Other;
+                if (def.has_craft)
+                {
+                    category = NavCategory.Stations;
+                    return true;
+                }
+                // A script object with no craft that the player built (carries a removal craft,
+                // so the build desk can demolish it) goes under Buildables; otherwise Other.
+                category = obj.has_removal_craft ? NavCategory.Buildables : NavCategory.Other;
                 return true;
             default:
                 // Resource nodes worked with a tool (chop a tree, mine a stone, dig out a
@@ -2210,6 +2220,17 @@ internal static class ObjectNavigator
                     obj.obj_id.IndexOf("grave", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     category = NavCategory.Graves;
+                    return true;
+                }
+
+                // Player-built objects with no other interaction (decorations, structures, signs,
+                // lamps, beds, etc.) would otherwise be skipped and become impossible to find. A
+                // built object carries a removal craft (the build desk's "Entfernen" can demolish
+                // it — same marker BuildPlacementHandler.BuildRemovableList uses), so list those
+                // under Buildables. has_removal_craft is a cheap WGO flag (no components touch).
+                if (obj.has_removal_craft)
+                {
+                    category = NavCategory.Buildables;
                     return true;
                 }
                 return false;
