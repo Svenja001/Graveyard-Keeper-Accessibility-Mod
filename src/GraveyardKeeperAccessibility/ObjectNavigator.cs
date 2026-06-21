@@ -1777,10 +1777,12 @@ internal static class ObjectNavigator
             }
 
             // Building entrances (Tavern, Home), anchored on the exterior door you press E on.
+            var doorLandmarkLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (doorPlace, label) in DoorLandmarks)
             {
                 var door = FindEntranceDoor(allObjects, doorPlace, playerPos);
                 if (door == null) continue;
+                doorLandmarkLabels.Add(label);
                 list.Add(new NavigationTarget
                 {
                     Object = door,
@@ -1804,6 +1806,11 @@ internal static class ObjectNavigator
                 if (reqDlc.HasValue && !DLCEngine.IsDLCAvailable(reqDlc.Value)) continue;
                 if (string.IsNullOrEmpty(zone.id) || !seenZones.Add(zone.id)) continue;
                 if (SkipZoneIds.Contains(zone.id)) continue;   // superseded by a door landmark
+                // Skip a zone that duplicates a building-entrance landmark (e.g. the "tavern" zone vs
+                // the Tavern door). The door anchors on the real outdoor entrance; the zone would
+                // anchor on whatever member object is nearest — often the interior staging — giving a
+                // second, wrong "Tavern" at a different distance.
+                if (doorLandmarkLabels.Contains(ZoneLabel(zone.id))) continue;
 
                 // Anchor on an actual object in the zone (closest to the player), NOT the
                 // geometric centre: a zone centre often falls inside a building (the church in
@@ -1858,25 +1865,51 @@ internal static class ObjectNavigator
     ///
     /// Critically this uses the SAME filter the Doors category does: a USABLE door has
     /// <c>interaction_type != None</c>. The <c>None</c> teleports are non-interactive arrival
-    /// ANCHORS (where you land), some of which sit inside the building — and a door's anchor is
-    /// what the old snap-distance heuristic kept latching onto, sending "Home" to an interior spot.
-    /// Among the usable same-place doors we pick the one NEAREST the player, exactly like browsing
-    /// the Doors list and walking to the house door you can see: when you're outside, the exterior
-    /// entrance is the nearer one (the interior door is further in / often not even loaded). This is
-    /// why the Doors category walks to the right door while the old Landmark heuristic didn't.
+    /// ANCHORS (where you land); a door's anchor is what the old snap-distance heuristic kept
+    /// latching onto, sending "Home" to an interior spot.
+    ///
+    /// Among the usable same-place doors we can't just take the one NEAREST the player: a building
+    /// exposes several teleports under one place — the street entrance plus interior stairs/landings
+    /// (e.g. "tp_tavern_up_to_2nd_floor", "tp_tavern_from_cellar"). The euclidean-nearest of those is
+    /// often an interior door, sending auto-walk to "an inside door" instead of the entrance. The
+    /// game already names each endpoint by its side of the wall — <c>teleport_outside</c> for the
+    /// street entrance, <c>teleport_inside</c> for interior doors — so we rank by that name first
+    /// (see <see cref="DoorNameTier"/>) and only break ties by distance. The genuine outside-door
+    /// pick is cached per place (the entrance is stable); a fallback interior pick is not, so once
+    /// the real entrance loads near the player it takes over.
     /// </summary>
+    private static readonly Dictionary<string, WorldGameObject> _entranceDoorCache = new();
+
     private static WorldGameObject FindEntranceDoor(WorldGameObject[] allObjects, string place, Vector2 playerPos)
     {
         if (allObjects == null) return null;
+
+        // Reuse the resolved outside entrance while it's still valid. We deliberately don't require
+        // it to be active: the real entrance is culled to inactive while the player is far away (see
+        // below), and it must stay the cached answer the whole way there.
+        if (_entranceDoorCache.TryGetValue(place, out var cached) &&
+            cached != null && !cached.is_removed)
+            return cached;
+
+        // Rank candidates by the game's own endpoint naming. A building exposes several teleports
+        // under one place: the street entrance ("teleport_outside") plus interior doors/landings
+        // ("teleport_inside" — e.g. tp_tavern_up_to_2nd_floor's staircase). Crucially the building's
+        // INTERIOR is staged in a far-off corner of the world whose coordinates happen to sit near
+        // the player's home region, so those interior teleports stay loaded/active near home while
+        // the real outdoor entrance — way across the map — is culled to inactive. That's why the old
+        // "skip inactive" + nearest logic kept choosing an inside door. So we do NOT filter on active
+        // state here (FindObjectsOfType is scanned includeInactive, so the culled entrance is still
+        // in the list) and instead tier strictly by name: outside first, then neutral, inside last.
+        //
+        // This function is only used for the base-game DoorLandmarks (Tavern, House); DLC buildings
+        // carry distinct place tags (e.g. "players tavern"), so dropping the active filter doesn't
+        // resurface not-owned DLC doors for these places.
         WorldGameObject best = null;
+        int bestTier = int.MaxValue;
         float bestSq = float.MaxValue;
         foreach (var w in allObjects)
         {
             if (w == null || w.is_removed) continue;
-            // DLC buildings (e.g. the Stranger Sins tavern) deactivate their door WGOs when the
-            // DLC isn't installed; allObjects is scanned with includeInactive:true, so skip the
-            // inactive ones here too — re-activates automatically once the DLC is owned.
-            if (!w.gameObject.activeInHierarchy) continue;
             if (w.name.IndexOf("teleport", StringComparison.OrdinalIgnoreCase) < 0) continue;
             if (!string.Equals(InteractionDetector.DoorPlaceFromTag(w.custom_tag), place,
                                StringComparison.OrdinalIgnoreCase))
@@ -1889,10 +1922,37 @@ internal static class ObjectNavigator
                 w.obj_def.interaction_type == ObjectDefinition.InteractionType.None)
                 continue;
 
-            float distSq = (w.pos - playerPos).sqrMagnitude;
-            if (distSq < bestSq) { bestSq = distSq; best = w; }
+            int tier = DoorNameTier(w.name);     // 0 = outside, 1 = neutral, 2 = inside
+            float sq = (w.pos - playerPos).sqrMagnitude;
+            // Better tier wins outright; within a tier, take the nearest.
+            if (tier < bestTier || (tier == bestTier && sq < bestSq))
+            {
+                bestTier = tier;
+                bestSq = sq;
+                best = w;
+            }
         }
+
+        // Cache only a genuine outside-door pick: it's the stable entrance. A neutral/inside pick
+        // means this building has no outside-tagged door — don't pin it, so a better match can win
+        // on a later refresh.
+        if (best != null && bestTier == 0)
+            _entranceDoorCache[place] = best;
+
         return best;
+    }
+
+    /// <summary>
+    /// Tier a teleport WGO by the side of the building its spawn name marks it on:
+    /// 0 = "teleport_outside" (the street-facing entrance to walk to), 2 = "teleport_inside" (an
+    /// interior door/landing — stairs, back rooms), 1 = anything else. Lower is preferred.
+    /// </summary>
+    private static int DoorNameTier(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return 1;
+        if (name.IndexOf("outside", StringComparison.OrdinalIgnoreCase) >= 0) return 0;
+        if (name.IndexOf("inside", StringComparison.OrdinalIgnoreCase) >= 0) return 2;
+        return 1;
     }
 
     private static string ZoneLabel(string zoneId)
