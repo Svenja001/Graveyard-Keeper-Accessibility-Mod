@@ -118,11 +118,17 @@ public class Plugin : BaseUnityPlugin
                 _lastSceneName = currentScene;
                 // Clear the zone de-dup so loading a save re-announces the current area once.
                 ZoneAnnouncer.Reset();
+                // Re-baseline health/energy silently so a save load doesn't announce the whole bar.
+                HealthEnergyAnnouncer.Reset();
             }
 
             // Speak any items the player just received ("Got 4 wood"). Runs regardless of GUI
             // state so a craft finished with the station window open still announces its output.
             ItemPickupAnnouncer.Update();
+
+            // Speak any change to the player's health/energy bars ("Got 20 energy", "Lost 3
+            // health"). Runs regardless of GUI state so eating from the inventory still announces.
+            HealthEnergyAnnouncer.Tick();
 
             // Accessible build placement: while the build ghost is live, this owns the
             // keyboard (arrows move, Enter places, etc.). Skip the rest of the update so the

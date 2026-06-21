@@ -310,6 +310,12 @@ internal static class InventoryItemHandler
             if (!string.IsNullOrEmpty(quality))
                 name = $"{name}, {quality}";
 
+            // For consumables (food/potions), speak what using them gives — "gives 20 energy,
+            // 4 health" — since the on-screen tooltip that shows this never voices.
+            var perks = DescribeUsePerks(item.definition);
+            if (!string.IsNullOrEmpty(perks))
+                name = $"{name}, {perks}";
+
             return item.value > 1 ? $"{name}, {item.value}" : name;
         }
         catch
@@ -373,6 +379,56 @@ internal static class InventoryItemHandler
             case <= 0: return null;
             default: return $"{stars} stars";
         }
+    }
+
+    /// <summary>
+    /// Spoken summary of what using a consumable does to the player's bars — "gives 20 energy,
+    /// 4 health" (or "drains 5 health" for negatives) — or null for items that can't be used or
+    /// have no health/energy/sanity effect. Reads the same data the on-screen tooltip shows:
+    /// <see cref="ItemDefinition.params_on_use"/> for fixed effects plus any energy/hp from
+    /// <see cref="ItemDefinition.on_use_expressions"/> (foods whose value scales), mirroring
+    /// ItemDefinition.GetItemDescription.
+    /// </summary>
+    internal static string DescribeUsePerks(ItemDefinition def)
+    {
+        try
+        {
+            if (def == null || !def.can_be_used) return null;
+
+            float energy = def.params_on_use?.Get("energy") ?? 0f;
+            float hp = def.params_on_use?.Get("hp") ?? 0f;
+            float sanity = def.params_on_use?.Get("sanity") ?? 0f;
+
+            // Foods with a scaling effect carry it in on_use_expressions, not params_on_use.
+            if (def.on_use_expressions != null)
+            {
+                foreach (var expr in def.on_use_expressions)
+                {
+                    if (expr == null || expr.HasNoExpresion()) continue;
+                    var parsed = GameRes.ParseSmartExpression(expr);
+                    energy += parsed.Get("energy");
+                    hp += parsed.Get("hp");
+                }
+            }
+
+            var parts = new List<string>(3);
+            AppendPerk(parts, Mathf.RoundToInt(energy), "energy");
+            AppendPerk(parts, Mathf.RoundToInt(hp), "health");
+            AppendPerk(parts, Mathf.RoundToInt(sanity), "sanity");
+
+            return parts.Count == 0 ? null : string.Join(", ", parts);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Add "gives N energy" / "drains N energy" to <paramref name="parts"/> when N != 0.</summary>
+    private static void AppendPerk(List<string> parts, int value, string label)
+    {
+        if (value > 0) parts.Add($"gives {value} {label}");
+        else if (value < 0) parts.Add($"drains {-value} {label}");
     }
 
     /// <summary>

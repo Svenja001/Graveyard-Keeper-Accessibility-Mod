@@ -132,6 +132,10 @@ internal static class ItemPickupAnnouncer
         if (!string.IsNullOrEmpty(quality))
             name = $"{name}, {quality}";
 
+        var perks = InventoryItemHandler.DescribeUsePerks(item.definition);
+        if (!string.IsNullOrEmpty(perks))
+            name = $"{name}, {perks}";
+
         return name;
     }
 
