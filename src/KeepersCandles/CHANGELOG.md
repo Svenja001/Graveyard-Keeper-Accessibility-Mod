@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0 | 20 June 2026
+
+- Fixed candelabras that couldn't be extinguished after saving and reloading
+
 ## 0.1.11 | 23 May 2026
 
 - Fixed incense burners that couldn't be extinguished after saving and reloading

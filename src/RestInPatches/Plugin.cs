@@ -4,6 +4,7 @@ namespace RestInPatches;
 public class Plugin : BaseUnityPlugin
 {
     private const string ApplicationSection = "── Application ──";
+    private const string MovementSection    = "── Movement ──";
     private const string FootprintsSection  = "── Footprints ──";
     private const string UpdatesSection     = "── Updates ──";
 
@@ -13,6 +14,7 @@ public class Plugin : BaseUnityPlugin
     internal static Sprite ArrowDownSprite { get; private set; }
     private static ConfigEntry<bool> KeepRunningInBackground { get; set; }
     private static ConfigEntry<bool> MuteWhenUnfocused { get; set; }
+    internal static ConfigEntry<bool> SmoothPlayerMovement { get; private set; }
     internal static ConfigEntry<int> MaxFootprints { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
@@ -74,6 +76,12 @@ public class Plugin : BaseUnityPlugin
         MuteWhenUnfocused.SettingChanged += (_, _) =>
         {
             AudioListener.volume = MuteWhenUnfocused.Value && !Application.isFocused ? 0f : 1f;
+        };
+
+        SmoothPlayerMovement = LocalizedConfig.Bind(Config, MovementSection, "Smooth Player Movement", true, "smooth_player_movement");
+        SmoothPlayerMovement.SettingChanged += (_, _) =>
+        {
+            Patches.PhysicsPatches.ApplyInterpolation();
         };
 
         MaxFootprints = LocalizedConfig.Bind(Config, FootprintsSection, "Max Footprints", 1000, "max_footprints", new AcceptableValueRange<int>(0, 10000));

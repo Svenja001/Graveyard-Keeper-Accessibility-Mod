@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "Max out the base quality of every grave-category item so your graveyard score is capped from the start.",
   "cfg.modify_decorations.name": "Modify Decorations",
   "cfg.modify_decorations.desc": "Max out the base quality of grave-quality decoration objects too - not just the gravestones/fences themselves.",
+  "cfg.ignore_skull_limit.name": "Ignore Body Skull Limit",
+  "cfg.ignore_skull_limit.desc": "Count a grave's full decoration quality even when the body has few white skulls. Vanilla caps grave score at the corpse's white-skull count; this lifts that cap. Turn off for vanilla behaviour.",
   "cfg.check_for_updates.name": "Check for Updates",
   "cfg.check_for_updates.desc": "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page."
 }

@@ -18,6 +18,7 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> SpendHalfGratitude { get; private set; }
     internal static ConfigEntry<bool> AutoEquipNewTool { get; private set; }
     internal static ConfigEntry<bool> SpeedUpSleep { get; private set; }
+    internal static ConfigEntry<bool> SleepAnytime { get; private set; }
     internal static ConfigEntry<bool> AutoWakeFromMeditationWhenStatsFull { get; private set; }
     internal static ConfigEntry<bool> SpendHalfSanity { get; private set; }
     internal static ConfigEntry<bool> SpeedUpMeditation { get; private set; }
@@ -63,6 +64,7 @@ public class Plugin : BaseUnityPlugin
         AutoWakeFromMeditationWhenStatsFull = LocalizedConfig.Bind(Config, MeditationSection, "Auto Wake From Meditation When Stats Full", true, "auto_wake_from_meditation_when_stats_full", order: 47);
         SpeedUpMeditation = LocalizedConfig.Bind(Config, MeditationSection, "Speed Up Meditation", true, "speed_up_meditation", order: 46);
 
+        SleepAnytime = LocalizedConfig.Bind(Config, SleepSection, "Sleep Anytime", false, "sleep_anytime", order: 46);
         EnergySpendBeforeSleepDebuff = LocalizedConfig.Bind(Config, SleepSection, "Energy Spend Before Sleep Debuff", 1200, "energy_spend_before_sleep_debuff", new AcceptableValueRange<int>(350, 50000), order: 45);
         SpeedUpSleep = LocalizedConfig.Bind(Config, SleepSection, "Speed Up Sleep", true, "speed_up_sleep", order: 44);
 

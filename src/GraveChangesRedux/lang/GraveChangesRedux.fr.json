@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "Pousse au maximum la qualité de base de chaque objet de la catégorie tombe, pour que ton score de cimetière soit au plafond dès le départ.",
   "cfg.modify_decorations.name": "Modifier les décorations",
   "cfg.modify_decorations.desc": "Pousse aussi au maximum la qualité de base des décorations associées aux tombes - pas seulement des pierres tombales et clôtures.",
+  "cfg.ignore_skull_limit.name": "Ignorer la limite de crânes du corps",
+  "cfg.ignore_skull_limit.desc": "Fait compter à une tombe toute la qualité de ses décorations même quand le corps a peu de crânes blancs. Le jeu de base plafonne le score de la tombe au nombre de crânes blancs du cadavre ; ceci lève ce plafond. Désactive pour le comportement d'origine.",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",
   "cfg.check_for_updates.desc": "Affiche un avis dans le menu principal lorsqu'une nouvelle version de ce mod est disponible sur NexusMods. Clique sur l'avis pour ouvrir la page du mod."
 }

@@ -3,11 +3,28 @@ namespace RestInPatches.Patches;
 [Harmony]
 public static class PhysicsPatches
 {
+    internal static Rigidbody2D PlayerBody { get; private set; }
+
     [HarmonyPostfix]
     [HarmonyPatch(typeof(PlayerComponent), nameof(PlayerComponent.InitLocalPlayer))]
     public static void PlayerComponent_InitLocalPlayer(PlayerComponent __instance)
     {
-        __instance.wgo.GetComponent<Rigidbody2D>().interpolation = RigidbodyInterpolation2D.Interpolate;
+        PlayerBody = __instance.wgo.GetComponent<Rigidbody2D>();
+        ApplyInterpolation();
+    }
+
+    // Smoothing on: Interpolate (the judder fix). Off: Extrapolate, which is what
+    // the game sets for the player by default (ComponentsManager).
+    internal static void ApplyInterpolation()
+    {
+        if (PlayerBody == null)
+        {
+            return;
+        }
+
+        PlayerBody.interpolation = Plugin.SmoothPlayerMovement.Value
+            ? RigidbodyInterpolation2D.Interpolate
+            : RigidbodyInterpolation2D.Extrapolate;
     }
 
     [HarmonyTranspiler]
@@ -32,7 +49,7 @@ public static class PhysicsPatches
 
     private static void PositionWrapper(Transform transform, Vector3 position, RoundAndSortComponent roundSort)
     {
-        if (roundSort._world_part?.parent?.is_player ?? false)
+        if (Plugin.SmoothPlayerMovement.Value && (roundSort._world_part?.parent?.is_player ?? false))
         {
             var tf = transform.GetComponentInChildren<SortingGroup>().transform;
             tf.position = new Vector3(tf.position.x, tf.position.y, position.z);

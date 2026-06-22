@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-30T16:36:37Z",
-  "generated_by": "update-manifest.yml@d230a6a6",
+  "generated_at": "2026-06-20T05:45:16Z",
+  "generated_by": "update-manifest.yml@09fe0f20",
   "game_domain": "graveyardkeeper",
   "mods": [
     {
@@ -68,10 +68,10 @@
       "plugin_guid": "p1xel8ted.gyk.deadgiveaway",
       "nexus_mod_id": 159,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/159",
-      "latest_version": "0.1.0",
-      "latest_file_id": 1213,
+      "latest_version": "0.1.1",
+      "latest_file_id": 1221,
       "latest_file_name": "Dead Giveaway",
-      "uploaded_unix": 1780129864,
+      "uploaded_unix": 1780734294,
       "status": "ok"
     },
     {
@@ -98,10 +98,10 @@
       "plugin_guid": "p1xel8ted.gyk.exhaustless",
       "nexus_mod_id": 42,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/42",
-      "latest_version": "3.5.6",
-      "latest_file_id": 1171,
+      "latest_version": "3.5.7",
+      "latest_file_id": 1234,
       "latest_file_name": "Exhaust-less",
-      "uploaded_unix": 1779190441,
+      "uploaded_unix": 1781931646,
       "status": "ok"
     },
     {
@@ -148,20 +148,20 @@
       "plugin_guid": "p1xel8ted.gyk.givememoar",
       "nexus_mod_id": 70,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/70",
-      "latest_version": "1.2.17",
-      "latest_file_id": 1176,
+      "latest_version": "1.3.0",
+      "latest_file_id": 1233,
       "latest_file_name": "Give Me Moar",
-      "uploaded_unix": 1779190572,
+      "uploaded_unix": 1781931627,
       "status": "ok"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.gravechangesredux",
       "nexus_mod_id": 89,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/89",
-      "latest_version": "0.1.10",
-      "latest_file_id": 1177,
+      "latest_version": "0.1.11",
+      "latest_file_id": 1223,
       "latest_file_name": "Grave Changes Redux",
-      "uploaded_unix": 1779190601,
+      "uploaded_unix": 1780819176,
       "status": "ok"
     },
     {
@@ -188,10 +188,10 @@
       "plugin_guid": "p1xel8ted.gyk.keeperscandles",
       "nexus_mod_id": 87,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/87",
-      "latest_version": "0.1.11",
-      "latest_file_id": 1202,
+      "latest_version": "0.2.0",
+      "latest_file_id": 1232,
       "latest_file_name": "Keepers Candles",
-      "uploaded_unix": 1779498257,
+      "uploaded_unix": 1781931600,
       "status": "ok"
     },
     {
@@ -308,10 +308,10 @@
       "plugin_guid": "p1xel8ted.gyk.restinpatches",
       "nexus_mod_id": 125,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/125",
-      "latest_version": "0.1.4",
-      "latest_file_id": 1209,
+      "latest_version": "0.1.5",
+      "latest_file_id": 1230,
       "latest_file_name": "Rest In Patches",
-      "uploaded_unix": 1779787753,
+      "uploaded_unix": 1781931533,
       "status": "ok"
     },
     {
@@ -378,10 +378,10 @@
       "plugin_guid": "p1xel8ted.gyk.wheresmastorage",
       "nexus_mod_id": 62,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/62",
-      "latest_version": "2.1.18",
-      "latest_file_id": 1207,
+      "latest_version": "2.2.0",
+      "latest_file_id": 1231,
       "latest_file_name": "Where's Ma Storage",
-      "uploaded_unix": 1779505824,
+      "uploaded_unix": 1781931562,
       "status": "ok"
     },
     {

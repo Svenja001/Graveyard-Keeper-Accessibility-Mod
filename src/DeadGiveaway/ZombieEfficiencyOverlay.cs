@@ -88,19 +88,8 @@ internal class ZombieEfficiencyOverlay : MonoBehaviour
         {
             var w = all[i];
             if (!w || !w.IsWorker()) continue;
+            if (w.IsInvisibleWorker()) continue; // refugee-camp beds run on an invisible worker; no body to show
             _workers.Add(w);
-
-            try
-            {
-                w.worker?.UpdateWorkerLevel();
-            }
-            catch (Exception e)
-            {
-                if (Plugin.DebugEnabled)
-                {
-                    Plugin.Log.LogWarning($"[Overlay] UpdateWorkerLevel failed for '{w.obj_id}': {e.Message}");
-                }
-            }
         }
 
         if (Plugin.DebugEnabled)

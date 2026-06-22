@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5 | 20 June 2026
+
+- Added an option to turn off player movement smoothing
+
 ## 0.1.4 | 25 May 2026
 
 - Fixed workers and other NPCs freezing after the game has been left running in the background

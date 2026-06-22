@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "Ustawia maksymalną jakość bazową każdego przedmiotu z kategorii grób, aby wynik cmentarza był od początku na maksimum.",
   "cfg.modify_decorations.name": "Modyfikuj dekoracje",
   "cfg.modify_decorations.desc": "Maksymalizuje również jakość bazową obiektów dekoracyjnych powiązanych z grobami - nie tylko nagrobków i ogrodzeń.",
+  "cfg.ignore_skull_limit.name": "Ignoruj limit czaszek ciała",
+  "cfg.ignore_skull_limit.desc": "Sprawia, że grób liczy pełną jakość dekoracji nawet wtedy, gdy ciało ma mało białych czaszek. Podstawowa gra ogranicza wynik grobu do liczby białych czaszek zwłok; to usuwa ten limit. Wyłącz, aby przywrócić oryginalne zachowanie.",
   "cfg.check_for_updates.name": "Sprawdź aktualizacje",
   "cfg.check_for_updates.desc": "Wyświetla powiadomienie w menu głównym, gdy na NexusMods pojawi się nowsza wersja tego moda. Kliknij powiadomienie, aby otworzyć stronę moda."
 }

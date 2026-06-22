@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "모든 묘지 카테고리 아이템의 기본 품질을 최대로 설정하여 시작부터 묘지 점수를 최대치로 유지합니다.",
   "cfg.modify_decorations.name": "장식 수정",
   "cfg.modify_decorations.desc": "묘비나 울타리뿐만 아니라 묘지 품질에 영향을 주는 장식 오브젝트의 기본 품질도 최대로 설정합니다.",
+  "cfg.ignore_skull_limit.name": "시신 해골 제한 무시",
+  "cfg.ignore_skull_limit.desc": "시신의 흰 해골이 적어도 묘지가 장식 품질을 전부 반영하도록 합니다. 기본 게임은 묘지 점수를 시신의 흰 해골 수로 제한하는데, 이 제한을 해제합니다. 기본 동작으로 돌리려면 끄세요.",
   "cfg.check_for_updates.name": "업데이트 확인",
   "cfg.check_for_updates.desc": "넥서스모드에 이 모드의 최신 버전이 나오면 메인 메뉴에 알림을 띄웁니다. 알림을 누르면 모드 페이지가 열립니다."
 }

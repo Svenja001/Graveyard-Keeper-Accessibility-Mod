@@ -90,14 +90,6 @@ public class Plugin : BaseUnityPlugin
         return !id.Contains(Souls) && id.Contains(keyword);
     }
 
-    internal static string GetUnlitCandle(string input)
-    {
-        if (!input.Contains("_to_")) return string.Empty;
-
-        var parts = input.Split(["_to_"], StringSplitOptions.None);
-        return parts[0];
-    }
-
     internal static string GetUnlitReplacement(WorldGameObject wgo)
     {
         // Incense burner: lit "c_obj_incense_2" turns back into empty "c_obj_incense_2_place".
@@ -107,8 +99,9 @@ public class Plugin : BaseUnityPlugin
             return wgo.obj_id.EndsWith("_place") ? string.Empty : wgo.obj_id + "_place";
         }
 
-        // Candelabrum: pull the bare candelabrum out of the running craft id.
-        return GetUnlitCandle(wgo.components.craft.last_craft_id);
+        // Candelabrum: lit "wall_candelabrum_2_1" drops its candle-count suffix back to "wall_candelabrum_2".
+        var cut = wgo.obj_id.LastIndexOf('_');
+        return cut > 0 ? wgo.obj_id.Substring(0, cut) : string.Empty;
     }
 
     internal static List<WorldGameObject> GetCandles()  => GetLitBurners(Candelabrum);

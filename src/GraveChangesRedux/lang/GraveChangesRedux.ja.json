@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "墓カテゴリのアイテムの基本品質を最大化し、墓地スコアを最初から上限にします。",
   "cfg.modify_decorations.name": "装飾を変更",
   "cfg.modify_decorations.desc": "墓石や柵だけでなく、墓関連の装飾オブジェクトの基本品質も最大化します。",
+  "cfg.ignore_skull_limit.name": "遺体のドクロ上限を無視",
+  "cfg.ignore_skull_limit.desc": "遺体の白ドクロが少なくても、墓の装飾品質を全て反映させます。通常は墓のスコアが遺体の白ドクロ数で上限になりますが、その上限を解除します。元の挙動に戻すにはオフにしてください。",
   "cfg.check_for_updates.name": "アップデートを確認",
   "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。"
 }

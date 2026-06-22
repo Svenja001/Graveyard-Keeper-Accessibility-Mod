@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "Total energy you need to spend in a day before the sleep debuff kicks in (vanilla is 300).",
   "cfg.speed_up_sleep.name": "Speed Up Sleep",
   "cfg.speed_up_sleep.desc": "Reduce the in-game time sleeping takes to finish.",
+  "cfg.sleep_anytime.name": "Sleep Anytime",
+  "cfg.sleep_anytime.desc": "Go to bed whenever you like, even fully rested. Sleep lasts until morning; press the interact button to wake up early.",
   "cfg.spend_half_energy.name": "Spend Half Energy",
   "cfg.spend_half_energy.desc": "Halve the energy cost of every action. Turning this on switches Unlimited Energy off.",
   "cfg.spend_half_gratitude.name": "Spend Half Gratitude",

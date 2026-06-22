@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.7 | 20 June 2026
+
+- Added a Sleep Anytime option: go to bed whenever you like, even fully rested, and sleep through to morning. Press the interact button to wake up early
+
 ## 3.5.6 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations
