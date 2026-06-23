@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "Energía total que debes gastar en un día antes de que se aplique el malus de sueño (vanilla: 300).",
   "cfg.speed_up_sleep.name": "Acelerar sueño",
   "cfg.speed_up_sleep.desc": "Reduce el tiempo de juego que tarda en terminar el sueño.",
+  "cfg.sleep_anytime.name": "Dormir en cualquier momento",
+  "cfg.sleep_anytime.desc": "Acuéstate cuando quieras, incluso totalmente descansado. El sueño dura hasta la mañana; pulsa el botón de interacción para despertar antes.",
   "cfg.spend_half_energy.name": "Mitad de gasto de energía",
   "cfg.spend_half_energy.desc": "Reduce a la mitad el coste de energía de cada acción. Activarlo desactiva Energía ilimitada.",
   "cfg.spend_half_gratitude.name": "Mitad de gasto de gratitud",

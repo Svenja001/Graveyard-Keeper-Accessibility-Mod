@@ -49,10 +49,12 @@ public static class Fields
     ];
 
     // Zone-level skip list (used when iterating WorldZones in LoadInventories)
-    internal static readonly string[] AlwaysSkipZones = ["bat", "slime", "refugees", "bee", "refugee", "npc_tavern_barman", "soul_container", "box_pallet"];
+    // "beehouse"/"_bees" target the honey producers only - a bare "bee" also matched the
+    // beegarden zone, beet gardens and beer barrels, which blocked the apiary build desk.
+    internal static readonly string[] AlwaysSkipZones = ["bat", "slime", "refugees", "beehouse", "_bees", "refugee", "npc_tavern_barman", "soul_container", "box_pallet"];
 
     // Inventory-level skip list (used when filtering individual inventories/objects)
-    internal static readonly string[] AlwaysSkipInventories = ["slime", "bat", "refugees", "refugee", "bush_berry", "tree_apple", "bee"];
+    internal static readonly string[] AlwaysSkipInventories = ["slime", "bat", "refugees", "refugee", "bush_berry", "tree_apple", "beehouse", "_bees"];
 
     internal static bool GameBalanceAlreadyRun { get; set; }
     internal static bool GratitudeCraft { get; set; }

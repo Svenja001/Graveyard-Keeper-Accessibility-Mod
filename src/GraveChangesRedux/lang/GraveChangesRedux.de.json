@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "Maximiert die Grundqualität jedes Grab-Items, sodass dein Friedhof-Score von Anfang an am Maximum ist.",
   "cfg.modify_decorations.name": "Dekorationen anpassen",
   "cfg.modify_decorations.desc": "Maximiert auch die Grundqualität von Grab-bezogenen Dekorationsobjekten - nicht nur Grabsteine und Zäune.",
+  "cfg.ignore_skull_limit.name": "Knochen-Limit des Körpers ignorieren",
+  "cfg.ignore_skull_limit.desc": "Lässt ein Grab die volle Dekorationsqualität zählen, auch wenn der Körper nur wenige weiße Schädel hat. Vanilla begrenzt den Grab-Score auf die Zahl der weißen Schädel der Leiche; dies hebt diese Grenze auf. Zum Vanilla-Verhalten ausschalten.",
   "cfg.check_for_updates.name": "Auf Updates prüfen",
   "cfg.check_for_updates.desc": "Zeigt im Hauptmenü einen Hinweis an, wenn auf NexusMods eine neuere Version dieses Mods verfügbar ist. Klicke auf den Hinweis, um die Modseite zu öffnen."
 }

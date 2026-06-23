@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "Energia total que precisa gastar em um dia antes do debuff de sono entrar em ação (padrão: 300).",
   "cfg.speed_up_sleep.name": "Acelerar sono",
   "cfg.speed_up_sleep.desc": "Reduz o tempo de jogo que dormir leva para terminar.",
+  "cfg.sleep_anytime.name": "Dormir a qualquer momento",
+  "cfg.sleep_anytime.desc": "Vá para a cama quando quiser, mesmo totalmente descansado. O sono dura até de manhã; pressione o botão de interação para acordar antes.",
   "cfg.spend_half_energy.name": "Metade do gasto de energia",
   "cfg.spend_half_energy.desc": "Reduz pela metade o custo de energia de cada ação. Ligar desativa Energia ilimitada.",
   "cfg.spend_half_gratitude.name": "Metade do gasto de gratidão",

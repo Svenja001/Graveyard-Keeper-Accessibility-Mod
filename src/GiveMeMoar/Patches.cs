@@ -96,10 +96,17 @@ public static class Patches
     // The prefix scales those values in place, the postfix puts them back.
     [ThreadStatic] private static List<int> _mqValueSnapshot;
 
-    private readonly struct CraftCtxState(CraftDefinition ctx, List<int> snap)
+    // The craft the prefix scaled. The postfix restores its output from this, not from
+    // __instance.current_craft, which the game has already cleared (via End()) by the time the
+    // postfix runs. Restoring off the cleared field would miss, so the scaled values would stay
+    // in the shared craft data and grow with every craft.
+    [ThreadStatic] private static CraftDefinition _mqCraft;
+
+    private readonly struct CraftCtxState(CraftDefinition ctx, List<int> snap, CraftDefinition mqCraft)
     {
         public readonly CraftDefinition PrevCtx = ctx;
         public readonly List<int> PrevSnapshot = snap;
+        public readonly CraftDefinition PrevMqCraft = mqCraft;
     }
 
     [HarmonyPostfix]
@@ -208,8 +215,9 @@ public static class Patches
     [HarmonyPatch(typeof(CraftComponent), nameof(CraftComponent.ProcessFinishedCraft))]
     private static void CraftComponent_ProcessFinishedCraft_Prefix(CraftComponent __instance, out CraftCtxState __state)
     {
-        __state = new CraftCtxState(_craftCtx, _mqValueSnapshot);
+        __state = new CraftCtxState(_craftCtx, _mqValueSnapshot, _mqCraft);
         _mqValueSnapshot = null;
+        _mqCraft = null;
 
         var craft = __instance.current_craft;
         _craftCtx = craft;
@@ -240,8 +248,18 @@ public static class Patches
             return;
         }
 
+        if (IsBodyModificationCraft(craft.id))
+        {
+            if (Plugin.DebugEnabled)
+            {
+                Helpers.Log($"[CraftMQ] '{craft.id}' skipped: body modification craft");
+            }
+            return;
+        }
+
         var excludeTools = Plugin.CraftExcludeToolsAndEquipment.Value;
         _mqValueSnapshot = new List<int>(craft.output.Count);
+        _mqCraft = craft;
         var mutated = 0;
         var skippedTools = 0;
         for (var i = 0; i < craft.output.Count; i++)
@@ -271,30 +289,28 @@ public static class Patches
     private static void CraftComponent_ProcessFinishedCraft_Postfix(CraftComponent __instance, CraftCtxState __state)
     {
         var snapshot = _mqValueSnapshot;
-        if (snapshot != null)
+        var craft = _mqCraft;
+        if (snapshot != null && craft != null)
         {
-            var craft = __instance.current_craft;
-            if (craft != null)
+            var restored = 0;
+            for (var i = 0; i < craft.output.Count && i < snapshot.Count; i++)
             {
-                var restored = 0;
-                for (var i = 0; i < craft.output.Count && i < snapshot.Count; i++)
+                if (craft.output[i] == null) continue;
+                if (craft.output[i].value != snapshot[i])
                 {
-                    if (craft.output[i] == null) continue;
-                    if (craft.output[i].value != snapshot[i])
-                    {
-                        craft.output[i].value = snapshot[i];
-                        restored++;
-                    }
+                    craft.output[i].value = snapshot[i];
+                    restored++;
                 }
-                if (Plugin.DebugEnabled && restored > 0)
-                {
-                    Helpers.Log($"[CraftMQ] '{craft.id}' restored {restored} output values to vanilla");
-                }
+            }
+            if (Plugin.DebugEnabled && restored > 0)
+            {
+                Helpers.Log($"[CraftMQ] '{craft.id}' restored {restored} output values to vanilla");
             }
         }
 
         _craftCtx = __state.PrevCtx;
         _mqValueSnapshot = __state.PrevSnapshot;
+        _mqCraft = __state.PrevMqCraft;
 
         if (Plugin.DebugEnabled && __instance.current_craft != null)
         {
@@ -329,6 +345,15 @@ public static class Patches
             if (Plugin.DebugEnabled)
             {
                 Helpers.Log($"[CraftDrop] '{craft.id}' skipped: progression craft");
+            }
+            return;
+        }
+
+        if (IsBodyModificationCraft(craft.id))
+        {
+            if (Plugin.DebugEnabled)
+            {
+                Helpers.Log($"[CraftDrop] '{craft.id}' skipped: body modification craft");
             }
             return;
         }
@@ -371,6 +396,14 @@ public static class Patches
         }
         return false;
     }
+
+    // Corpse prep at the autopsy table. Extraction crafts ("ex:") run their output through
+    // ResModificator, so the craft multiplier would scale the body parts you pull out and flood
+    // the inventory. Insertion crafts ("insert:") add directly and never multiply, but match the
+    // same intent. The Multiply Body Parts and Sin Shard multipliers cover body prep separately.
+    private static bool IsBodyModificationCraft(string craftId)
+        => craftId.StartsWith("ex:", StringComparison.Ordinal)
+           || craftId.StartsWith("insert:", StringComparison.Ordinal);
 
     private static bool IsToolLikeOutput(string outputId)
     {

@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "Porta al massimo la qualità base di ogni oggetto della categoria tomba, così il punteggio del cimitero è al massimo fin dall'inizio.",
   "cfg.modify_decorations.name": "Modifica decorazioni",
   "cfg.modify_decorations.desc": "Porta al massimo anche la qualità base degli oggetti decorativi legati alle tombe - non solo lapidi e recinzioni.",
+  "cfg.ignore_skull_limit.name": "Ignora il limite di teschi del corpo",
+  "cfg.ignore_skull_limit.desc": "Fa contare a una tomba tutta la qualità delle decorazioni anche quando il corpo ha pochi teschi bianchi. Il gioco base limita il punteggio della tomba al numero di teschi bianchi del cadavere; questo rimuove quel limite. Disattiva per il comportamento originale.",
   "cfg.check_for_updates.name": "Controlla aggiornamenti",
   "cfg.check_for_updates.desc": "Mostra un avviso nel menu principale quando è disponibile una nuova versione di questo mod su NexusMods. Clicca sull'avviso per aprire la pagina del mod."
 }

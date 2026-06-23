@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 | 6 June 2026
+
+- Fixed refugee-camp farm workers slowing down after loading a save
+- No longer shows a stray label over refugee-camp garden beds
+
 ## 0.1.0 | 30 May 2026
 
 - Shows each zombie's work efficiency over its head, as a percentage, the raw skull count, or both.

@@ -13,6 +13,10 @@ public static class Patches
         ItemDefinition.ItemType.HeadArmor, ItemDefinition.ItemType.Sword
     ];
 
+    // Sleep Anytime: reset each time a sleep starts; dawn flips _dawnSeen so the auto-wake can fire.
+    private static bool _dawnSeen;
+    private static float _prevTimeK;
+
 
     [HarmonyPrefix]
     [HarmonyPatch(typeof(CraftComponent), nameof(CraftComponent.TrySpendPlayerGratitudePoints))]
@@ -126,11 +130,82 @@ public static class Patches
 
     [HarmonyPrefix]
     [HarmonyPatch(typeof(SleepGUI), nameof(SleepGUI.Update))]
-    public static void SleepGUI_Update()
+    public static void SleepGUI_Update(SleepGUI __instance)
     {
+        if (__instance._state == SleepGUI.State.Sleeping && TimeOfDay.me)
+        {
+            var timeK = TimeOfDay.me.GetTimeK();
+            if (_prevTimeK < TimeOfDay.MORNING && timeK >= TimeOfDay.MORNING)
+            {
+                _dawnSeen = true;
+            }
+
+            _prevTimeK = timeK;
+        }
+
         if (!Plugin.SpeedUpSleep.Value) return;
 
         RestoreVitamins();
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(SleepGUI), nameof(SleepGUI.Open))]
+    public static void SleepGUI_Open_Postfix()
+    {
+        if (!TimeOfDay.me) return;
+
+        // Going to bed during the morning keeps the vanilla wake-up instead of sleeping a whole extra day.
+        _dawnSeen = TimeOfDay.me.time_of_day_enum == TimeOfDay.TimeOfDayEnum.Morning;
+        _prevTimeK = TimeOfDay.me.GetTimeK();
+    }
+
+    public static bool GateTooRested(bool tooRested)
+    {
+        return !Plugin.SleepAnytime.Value && tooRested;
+    }
+
+    public static bool StatsFullForWake(bool statsFull)
+    {
+        return statsFull && (!Plugin.SleepAnytime.Value || _dawnSeen);
+    }
+
+    // The bed refuses a fully rested player. Force the check false when Sleep Anytime is on;
+    // false short-circuits the && so the "too rested" branch is never taken.
+    [HarmonyTranspiler]
+    [HarmonyPatch(typeof(SleepGUI), nameof(SleepGUI.Open))]
+    private static IEnumerable<CodeInstruction> SleepGUI_Open_Transpiler(IEnumerable<CodeInstruction> instructions)
+    {
+        var equalsTo = AccessTools.Method(typeof(ExtentionTools), nameof(ExtentionTools.EqualsTo),
+            [typeof(float), typeof(float), typeof(float)]);
+        var inserted = false;
+        foreach (var instruction in instructions)
+        {
+            yield return instruction;
+            if (!inserted && instruction.Calls(equalsTo))
+            {
+                yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(Patches), nameof(GateTooRested)));
+                inserted = true;
+            }
+        }
+    }
+
+    // Sleeping normally ends the moment energy and health are full. While Sleep Anytime is on,
+    // hold that auto-wake until morning. Waking manually with the interact key is untouched.
+    [HarmonyTranspiler]
+    [HarmonyPatch(typeof(SleepGUI), nameof(SleepGUI.Update))]
+    private static IEnumerable<CodeInstruction> SleepGUI_Update_Transpiler(IEnumerable<CodeInstruction> instructions)
+    {
+        var equalsOrMore = AccessTools.Method(typeof(ExtentionTools), nameof(ExtentionTools.EqualsOrMore));
+        var calls = 0;
+        foreach (var instruction in instructions)
+        {
+            yield return instruction;
+            // the second call is the health check that decides the auto-wake
+            if (instruction.Calls(equalsOrMore) && ++calls == 2)
+            {
+                yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(Patches), nameof(StatsFullForWake)));
+            }
+        }
     }
 
 

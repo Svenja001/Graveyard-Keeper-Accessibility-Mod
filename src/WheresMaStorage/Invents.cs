@@ -243,7 +243,7 @@ public static class Invents
     internal static MultiInventory GetMiInventory(string requester, string zone, Vector3 crafterPos)
     {
         var requesterInQuarry = zone.Contains("stone_workyard") || zone.Contains("marble_deposit");
-        var requesterInZombieMill = zone.Contains("zombie_mill");
+        var requesterInZombieMill = zone.Contains("zombie_sawmill");
 
         if (requester.Contains("refugee_builddesk") || requester.Contains("storage_builddesk") || requesterInQuarry)
         {
@@ -277,7 +277,7 @@ public static class Invents
                 quarryFiltered++;
                 continue;
             }
-            if (excludeZombieMill && subName.Contains("zombie_mill"))
+            if (excludeZombieMill && subName.Contains("zombie_sawmill"))
             {
                 zombieMillFiltered++;
                 continue;
@@ -345,7 +345,7 @@ public static class Invents
 
         var isQuarry = worldZoneId.Contains("stone_workyard") || worldZoneId.Contains("marble_deposit");
         var isWell = objId.Contains("well");
-        var isZombieMill = worldZoneId.Contains("zombie_mill");
+        var isZombieMill = worldZoneId.Contains("zombie_sawmill");
 
         var isZombie = objId.Contains("zombie") || linkedWorkerObjId.Contains("zombie");
         Fields.ZombieWorker = isZombie;

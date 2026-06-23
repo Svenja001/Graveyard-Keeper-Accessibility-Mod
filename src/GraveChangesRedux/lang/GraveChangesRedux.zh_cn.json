@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "将所有墓类物品的基础品质拉满，让墓地分数从一开始就达到上限。",
   "cfg.modify_decorations.name": "修改装饰",
   "cfg.modify_decorations.desc": "不仅墓碑与栅栏，连墓相关的装饰物的基础品质也一并拉满。",
+  "cfg.ignore_skull_limit.name": "忽略尸体骷髅上限",
+  "cfg.ignore_skull_limit.desc": "即使尸体的白骷髅很少，也让坟墓计入全部装饰品质。原版会把墓地分数限制在尸体白骷髅数以内，此选项解除该上限。想恢复原版表现请关闭。",
   "cfg.check_for_updates.name": "检查更新",
   "cfg.check_for_updates.desc": "当 NexusMods 上有此模组的更新版本时，在主菜单显示提示。点击提示可打开模组页面。"
 }

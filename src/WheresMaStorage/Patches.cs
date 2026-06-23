@@ -163,7 +163,7 @@ public static class Patches
         var worldZoneId = __instance.GetMyWorldZoneId();
         var isQuarry = worldZoneId.Contains("stone_workyard") || worldZoneId.Contains("marble_deposit");
         var isWell = objId.Contains("well");
-        var isZombieMill = worldZoneId.Contains("zombie_mill");
+        var isZombieMill = worldZoneId.Contains("zombie_sawmill");
         var isBuilder = __instance.obj_def.interaction_type == ObjectDefinition.InteractionType.Builder;
 
         var objOrDefMatchesSkip = Fields.AlwaysSkipInventories.Any(s => objId.Contains(s) || objDefId.Contains(s));
@@ -383,7 +383,7 @@ public static class Patches
 
         var isQuarry = crafteryWzId.Contains("stone_workyard") || crafteryWzId.Contains("marble_deposit");
         var isWell = crafteryObjId.Contains("well") || crafteryObjDefId.Contains("well");
-        var isZombieMill = crafteryWzId.Contains("zombie_mill");
+        var isZombieMill = crafteryWzId.Contains("zombie_sawmill");
 
         var isZombie = crafteryObjId.Contains("zombie") || crafteryObjDefId.Contains("zombie");
         Fields.ZombieWorker = isZombie;
@@ -404,6 +404,16 @@ public static class Patches
         {
             if (Plugin.DebugEnabled) Helpers.Log($"[BaseCraftGUI] skip (zombie, shared disallowed) obj={crafteryObjId}");
             return;
+        }
+
+        // Opening a craft or build desk is a deliberate, infrequent player action, so this is the
+        // safe spot to rebuild a stale pool. Covers every desk the player opens (apiary, cellar,
+        // storage, quarry, etc.) without making auto-craft ticks pay for a full rescan.
+        if (!Fields.InventoriesLoaded && Fields.LoadInventoriesCoroutine == null)
+        {
+            if (Plugin.DebugEnabled) Helpers.Log($"[BaseCraftGUI] pool stale → reloading before serving obj={crafteryObjId} zone={crafteryWzId}");
+            Fields.LoadInventoriesCoroutine = MainGame.me.StartCoroutine(Invents.LoadInventories());
+            MainGame.me.StartCoroutine(Invents.LoadWildernessInventories());
         }
 
         __result = Invents.GetMiInventory($"[BaseCraftGUI.multi_inventory (Getter)]: {instanceName}, Craftery: {crafteryObjId}", crafteryWGO.GetMyWorldZoneId(), crafteryWGO.pos3);

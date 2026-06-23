@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "Eleva ao máximo a qualidade base de todo item da categoria túmulo, fazendo seu placar de cemitério ficar no topo desde o início.",
   "cfg.modify_decorations.name": "Modificar decorações",
   "cfg.modify_decorations.desc": "Eleva ao máximo a qualidade base também dos objetos decorativos ligados a túmulos - não apenas lápides e cercas.",
+  "cfg.ignore_skull_limit.name": "Ignorar limite de caveiras do corpo",
+  "cfg.ignore_skull_limit.desc": "Faz um túmulo contar toda a qualidade das decorações mesmo quando o corpo tem poucas caveiras brancas. O jogo base limita o placar do túmulo ao número de caveiras brancas do cadáver; isto remove esse limite. Desative para o comportamento original.",
   "cfg.check_for_updates.name": "Verificar atualizações",
   "cfg.check_for_updates.desc": "Mostra um aviso no menu principal quando há uma nova versão deste mod no NexusMods. Clique no aviso para abrir a página do mod."
 }

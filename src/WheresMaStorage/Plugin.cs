@@ -94,7 +94,7 @@ public class Plugin : BaseUnityPlugin
 
         SharedInventory = LocalizedConfig.Bind(Config, InventorySection, "Shared Inventory", true, "shared_inventory", order: 100);
 
-        AllowZombiesAccessToSharedInventory = LocalizedConfig.Bind(Config, InventorySection, "Allow Zombies Access To Shared Inventory", false, "allow_zombies_access", order: 99, dispNamePrefix: "    └ ");
+        AllowZombiesAccessToSharedInventory = LocalizedConfig.Bind(Config, InventorySection, "Allow Zombies Access To Shared Inventory", true, "allow_zombies_access", order: 99, dispNamePrefix: "    └ ");
         AllowZombiesAccessToSharedInventory.SettingChanged += (_, _) => Fields.InventoriesLoaded = false;
 
         ExcludeWellsFromSharedInventory = LocalizedConfig.Bind(Config, InventorySection, "Exclude Wells From Shared Inventory", true, "exclude_wells", order: 98, dispNamePrefix: "    └ ");

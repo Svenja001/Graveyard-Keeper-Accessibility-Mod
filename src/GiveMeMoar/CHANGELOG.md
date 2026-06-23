@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 | 20 June 2026
+
+- Preparing corpses no longer multiplies body parts with the Craft Output Multiplier
+
+## 1.2.18 | 6 June 2026
+
+- Fixed wine and other quality crafts piling up into the thousands no matter your Craft Output Multiplier
+
 ## 1.2.17 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

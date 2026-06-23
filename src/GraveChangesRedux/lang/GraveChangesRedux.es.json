@@ -8,6 +8,8 @@
   "cfg.modify_graves.desc": "Eleva al máximo la calidad base de cada objeto de la categoría tumba, para que la puntuación del cementerio esté en el tope desde el inicio.",
   "cfg.modify_decorations.name": "Modificar decoraciones",
   "cfg.modify_decorations.desc": "Eleva al máximo la calidad base de los objetos decorativos asociados a tumbas, no solo de las lápidas y vallas.",
+  "cfg.ignore_skull_limit.name": "Ignorar límite de calaveras del cuerpo",
+  "cfg.ignore_skull_limit.desc": "Hace que una tumba cuente toda la calidad de sus decoraciones aunque el cuerpo tenga pocas calaveras blancas. El juego base limita la puntuación de la tumba al número de calaveras blancas del cadáver; esto elimina ese límite. Desactívalo para el comportamiento original.",
   "cfg.check_for_updates.name": "Buscar actualizaciones",
   "cfg.check_for_updates.desc": "Muestra un aviso en el menú principal cuando hay una versión más nueva de este mod en NexusMods. Haz clic en el aviso para abrir la página del mod."
 }

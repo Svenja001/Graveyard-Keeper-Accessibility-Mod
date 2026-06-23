@@ -24,6 +24,8 @@
   "cfg.energy_spend_before_sleep_debuff.desc": "睡眠减益生效前一天内需要消耗的总体力（原版为 300）。",
   "cfg.speed_up_sleep.name": "加速睡眠",
   "cfg.speed_up_sleep.desc": "缩短睡眠所需的游戏内时间。",
+  "cfg.sleep_anytime.name": "随时睡觉",
+  "cfg.sleep_anytime.desc": "即使完全休息好也能上床睡觉。睡眠会持续到早晨；按交互键可提前醒来。",
   "cfg.spend_half_energy.name": "体力消耗减半",
   "cfg.spend_half_energy.desc": "将每个动作消耗的体力减半。开启时会关闭「无限体力」。",
   "cfg.spend_half_gratitude.name": "感激消耗减半",

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.11 | 7 June 2026
+
+- Fixed grave decorations still being capped by the body's white-skull count
+
 ## 0.1.10 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

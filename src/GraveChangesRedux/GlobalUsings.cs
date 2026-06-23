@@ -10,4 +10,5 @@ global using BepInEx.Logging;
 global using Shared;
 global using HarmonyLib;
 global using System.Reflection;
+global using System.Reflection.Emit;
 global using UnityEngine;
