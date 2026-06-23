@@ -1955,7 +1955,12 @@ internal static class GUIAccessibility
         return string.Join(". ", parts);
     }
 
-    /// <summary>Comma-separated names of what a tech unlocks (recipes, perks, gathering, …).</summary>
+    /// <summary>
+    /// What a tech unlocks (recipes, perks, gathering, …): each unlock's name, followed by its
+    /// description when the game has one. Perks in particular carry a "what it does" description
+    /// (the on-screen tooltip text) that is meaningless without sight — include it so the player
+    /// hears the effect, not just the perk's name.
+    /// </summary>
     private static string TechUnlocksText(TechDefinition tech)
     {
         try
@@ -1967,10 +1972,19 @@ internal static class GUIAccessibility
             foreach (var u in list)
             {
                 if (u == null) continue;
-                var n = ScreenReader.StripNguiCodes(u.GetData()?.name ?? "")?.Trim();
-                if (!string.IsNullOrWhiteSpace(n) && !n.Contains("!")) parts.Add(n);
+                var data = u.GetData();
+                if (data == null) continue;
+
+                var n = ScreenReader.StripNguiCodes(data.name ?? "")?.Trim();
+                if (string.IsNullOrWhiteSpace(n) || n.Contains("!")) continue;
+
+                var desc = ScreenReader.StripNguiCodes(data.description ?? "")?.Trim();
+                if (!string.IsNullOrWhiteSpace(desc) && !desc.Contains("!"))
+                    parts.Add($"{n}: {desc}");
+                else
+                    parts.Add(n);
             }
-            return parts.Count > 0 ? string.Join(", ", parts) : null;
+            return parts.Count > 0 ? string.Join("; ", parts) : null;
         }
         catch { return null; }
     }
