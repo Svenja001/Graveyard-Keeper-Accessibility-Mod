@@ -37,6 +37,7 @@ internal enum NavCategory
     Fences,
     GravesToDecorate,
     Buildables,
+    Roofs,
     Other
 }
 
@@ -66,6 +67,7 @@ internal static class ObjectNavigator
         NavCategory.Fences,
         NavCategory.GravesToDecorate,
         NavCategory.Buildables,
+        NavCategory.Roofs,
         NavCategory.Other
     };
 
@@ -422,6 +424,7 @@ internal static class ObjectNavigator
         NavCategory.Fences => "Broken fences",
         NavCategory.GravesToDecorate => "Graves to decorate",
         NavCategory.Buildables => "Built objects",
+        NavCategory.Roofs => "Roofs",
         _ => "Other"
     };
 
@@ -2227,6 +2230,19 @@ internal static class ObjectNavigator
             return true;
         }
 
+        // Roofs and other structural building pieces (obj_id contains "roof"): the player
+        // builds these over a building via the hammer/build desk, and removes them the same
+        // way — they carry no E-interaction of their own. Give them a dedicated navigable
+        // bucket so a blind player can locate one (e.g. to demolish it from the build desk)
+        // instead of having them swell the generic Built-objects list. Checked before the
+        // interaction_type switch so it catches them whether the game flags them None or Builder.
+        if (!string.IsNullOrEmpty(obj.obj_id) &&
+            obj.obj_id.IndexOf("roof", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            category = NavCategory.Roofs;
+            return true;
+        }
+
         switch (def.interaction_type)
         {
             case ObjectDefinition.InteractionType.Chest:
@@ -2274,10 +2290,16 @@ internal static class ObjectNavigator
 
                 // Player-built objects with no other interaction (decorations, structures, signs,
                 // lamps, beds, etc.) would otherwise be skipped and become impossible to find. A
-                // built object carries a removal craft (the build desk's "Entfernen" can demolish
-                // it — same marker BuildPlacementHandler.BuildRemovableList uses), so list those
-                // under Buildables. has_removal_craft is a cheap WGO flag (no components touch).
-                if (obj.has_removal_craft)
+                // finished built object carries a removal craft (the build desk's "Entfernen" can
+                // demolish it — same marker BuildPlacementHandler.BuildRemovableList uses), so list
+                // those under Buildables. has_removal_craft is a cheap WGO flag (no components touch).
+                //
+                // A placed-but-unbuilt construction site (e.g. a garden bed/"Beet" you finish by
+                // pressing F) is the same idea but slips through: has_removal_craft is keyed on the
+                // FINISHED obj_id, so the under-construction stage has no removal craft and used to
+                // fall through to "skip". Catch it by its Hammer build action — you literally hammer
+                // it to complete it — so unfinished builds still show up under Buildables to walk to.
+                if (obj.has_removal_craft || HasHammerBuildAction(def))
                 {
                     category = NavCategory.Buildables;
                     return true;
@@ -2390,6 +2412,28 @@ internal static class ObjectNavigator
     /// when the object is culled (deactivated off-screen), because a blind player can't pan the
     /// camera to find e.g. an iron-ore rock they can't see. Everything else stays active-only.
     /// </summary>
+    /// <summary>
+    /// True when an object is built/completed by hitting it with the Hammer (the F build action) —
+    /// i.e. a placed-but-unfinished construction site such as a garden bed under construction. These
+    /// have no removal craft on their construction-stage obj_id (that lives on the finished id), so
+    /// they would otherwise be skipped by navigation. Cheap obj_def-only check (no components touch).
+    /// Note this also matches Hammer-repairable broken objects, which are legitimately "built things"
+    /// and fine to list under Buildables.
+    /// </summary>
+    private static bool HasHammerBuildAction(ObjectDefinition def)
+    {
+        try
+        {
+            var tools = def?.tool_actions;
+            if (tools == null || tools.no_actions) return false;
+            return tools.HasToolK(ItemDefinition.ItemType.Hammer);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool IsHarvestableCategory(NavCategory category) =>
         category == NavCategory.Trees ||
         category == NavCategory.Stones ||
