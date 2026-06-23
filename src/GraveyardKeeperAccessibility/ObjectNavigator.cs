@@ -192,6 +192,12 @@ internal static class ObjectNavigator
     // within FinalApproachReach, finish the last stretch onto the door with player-graph A* so the
     // player only needs to press E.
     private const float AtTargetDistance = 3f * TileSize;
+    // Stations/build desks/chests must be entered to within ~1 tile or the game's interaction
+    // overlap test (which fires inside the player's forward collider) finds nothing and vanilla
+    // E/F does nothing. The lenient AtTargetDistance is fine for doors/teleports but too far for
+    // these, so a close-interaction target uses this tighter "arrived" radius and otherwise gets a
+    // precise final approach onto its (possibly synthetic) dock tile. See NeedsCloseInteraction.
+    private const float InteractionArrivalDistance = 1.2f * TileSize;
     private const float FinalApproachReach = 16f * TileSize;
     private const float ProgressDistance = 3f * TileSize;
     private const float AnnounceProgressDistance = 10f * TileSize;
@@ -805,9 +811,17 @@ internal static class ObjectNavigator
             var remaining = Vector2.Distance(playerPos, target.Position);
             _log?.LogInfo($"[NAVIGATOR] Native walk ended {remaining:F0}u from {target.Label}");
 
-            if (remaining <= AtTargetDistance)
+            // Stations/build desks need the player within ~1 tile to interact; doors/teleports can
+            // be triggered from the lenient AtTargetDistance. Pick the right "arrived" radius so a
+            // close-interaction target that ended a tile-plus short still gets the precise final
+            // approach below (onto its synthetic dock) instead of being declared arrived too far out.
+            var arrivedRadius = NeedsCloseInteraction(target.Object)
+                ? InteractionArrivalDistance
+                : AtTargetDistance;
+
+            if (remaining <= arrivedRadius)
             {
-                // At the door's approach point. Face it (don't graph-2 onto teleport tiles, which
+                // At the interaction tile. Face it (don't graph-2 onto teleport tiles, which
                 // fails) so vanilla E works.
                 _walkFacePos = target.Position;
                 FacePlayerAtTarget();
@@ -1208,6 +1222,19 @@ internal static class ObjectNavigator
             return dock;
         }
 
+        // No dock points, but the object still needs the player INSIDE its interaction zone to use
+        // (a build desk, craft station, chest, grave). Some of these ship without dock points (e.g.
+        // cellar_builddesk), and the door/teleport back-off below would leave the player a tile off
+        // on whatever side they happened to approach from — outside the interaction overlap, so
+        // vanilla E does nothing. Synthesize a dock: a walkable tile right beside the collider on
+        // the side nearest the player, faced toward the collider centre.
+        if (NeedsCloseInteraction(target.Object) &&
+            TrySyntheticDock(target.Object, out var synth, out var synthFace))
+        {
+            facePos = synthFace;
+            return synth;
+        }
+
         // No dock points (doors/teleports and similar). Back off from the object's COLLIDER
         // centre, not its pos: pos is the depth-sort anchor (often the top of a doorway), while
         // the interactive collider sits offset from it (e.g. one tile south for a door). Backing
@@ -1239,6 +1266,98 @@ internal static class ObjectNavigator
         {
             _log?.LogWarning($"[NAVIGATOR] InteractionBasis failed: {ex.Message}");
             return pos;
+        }
+    }
+
+    /// <summary>
+    /// True for objects the player must stand INSIDE the interaction overlap zone to use (build
+    /// desks, craft/script-craft stations, chests, graves) — as opposed to doors/teleports, which
+    /// the game lets you trigger from a tile back. Only these get the synthetic dock + tighter
+    /// arrival, so door/teleport approach behaviour is left untouched.
+    /// </summary>
+    private static bool NeedsCloseInteraction(WorldGameObject obj)
+    {
+        try
+        {
+            var def = obj?.obj_def;
+            if (def == null) return false;
+            switch (def.interaction_type)
+            {
+                case ObjectDefinition.InteractionType.Builder:
+                case ObjectDefinition.InteractionType.Craft:
+                case ObjectDefinition.InteractionType.Chest:
+                case ObjectDefinition.InteractionType.Grave:
+                    return true;
+                case ObjectDefinition.InteractionType.RunScript:
+                    return def.has_craft;   // script crafting stations (e.g. autopsy table)
+                default:
+                    return false;
+            }
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Build a synthetic "stand here" tile for an interactive object that has no dock points (e.g.
+    /// cellar_builddesk). Mirrors what dock points do: test tiles just beyond the collider edge in
+    /// the eight compass directions, keep the ones that snap to walkable navmesh, and pick the one
+    /// nearest the player (so we approach from the open side they're on). The face point is the
+    /// collider centre so the player's forward interaction collider lands on the object and vanilla
+    /// E works. Returns false when the object has no real collider or no walkable tile beside it.
+    /// </summary>
+    private static bool TrySyntheticDock(WorldGameObject obj, out Vector2 dest, out Vector2 facePos)
+    {
+        dest = Vector2.zero;
+        facePos = Vector2.zero;
+        try
+        {
+            if (obj == null) return false;
+            var b = obj.GetTotalBounds();
+            if (b.size.sqrMagnitude <= 0.0001f) return false;   // no colliders to stand beside
+
+            var center = new Vector2(b.center.x, b.center.y);
+            var ext = new Vector2(b.extents.x, b.extents.y);
+            var playerPos = MainGame.me?.player?.pos ?? center;
+
+            const float gap = 0.5f * TileSize;        // stand ~half a tile off the collider edge
+            const float maxSnap = 0.75f * TileSize;   // reject a side with no walkable tile nearby
+            const float diag = 0.7071f;
+
+            var dirs = new[]
+            {
+                new Vector2( 1f,  0f), new Vector2(-1f,  0f), new Vector2( 0f,  1f), new Vector2( 0f, -1f),
+                new Vector2( diag,  diag), new Vector2(-diag,  diag),
+                new Vector2( diag, -diag), new Vector2(-diag, -diag),
+            };
+
+            bool found = false;
+            Vector2 best = Vector2.zero;
+            float bestScore = float.MaxValue;
+
+            foreach (var d in dirs)
+            {
+                var cand = center + new Vector2(d.x * (ext.x + gap), d.y * (ext.y + gap));
+                if (!TrySnapGraph0(cand, out var snapped, out var snapDist)) continue;
+                if (snapDist > maxSnap) continue;     // nothing walkable beside the collider here
+                float score = Vector2.Distance(snapped, playerPos);   // prefer the player's side
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = snapped;
+                    found = true;
+                }
+            }
+
+            if (!found) return false;
+            dest = best;
+            facePos = center;
+            _log?.LogInfo($"[NAVIGATOR] {obj.name} synthetic dock dest={dest} (no dock points)");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] TrySyntheticDock failed: {ex.Message}");
+            return false;
         }
     }
 
@@ -2542,6 +2661,26 @@ internal static class ObjectNavigator
         };
     }
 
+    /// <summary>
+    /// Localized "broken, repair it" note appended to a broken build desk's navigator label so the
+    /// player knows it can't be used to build yet. The actual repair materials are read out by the
+    /// proximity/E repair readout (InteractionDetector.WithRepairInfo) when the player reaches it.
+    /// </summary>
+    private static string BrokenWord()
+    {
+        string code = "";
+        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
+        return code switch
+        {
+            "de" => "kaputt, reparieren",
+            "fr" => "cassé, à réparer",
+            "es" => "roto, reparar",
+            "it" => "rotto, da riparare",
+            "ru" => "сломан, починить",
+            _ => "broken, repair it",
+        };
+    }
+
     private static string GetObjectLabelSafe(WorldGameObject obj)
     {
         try
@@ -2561,14 +2700,27 @@ internal static class ObjectNavigator
             // Build desks (the "planning table" Gerry sends you to) localize to their zone
             // name, e.g. "Alter Friedhof", which doesn't match what the player is told to look
             // for. Lead with the recognizable planning-table term, appending the zone name so
-            // desks in different zones stay distinguishable.
-            if (obj?.obj_def?.interaction_type == ObjectDefinition.InteractionType.Builder)
+            // desks in different zones stay distinguishable. A build desk's BROKEN stage (e.g.
+            // the morgue build desk near Gerry, obj_id "morgue_builddesk_broken") is
+            // interaction_type Craft, not Builder, so it skips this relabel and reads as a raw
+            // zone name — unrecognizable in the Stations list. Match the "builddesk" obj_id too
+            // so broken desks are still named as build desks, and flag the broken state: pressing
+            // E there opens the repair craft (the proximity repair readout names the materials),
+            // not a build catalog.
+            bool isBuildDesk =
+                obj?.obj_def?.interaction_type == ObjectDefinition.InteractionType.Builder ||
+                (!string.IsNullOrEmpty(obj?.obj_id) &&
+                 obj.obj_id.IndexOf("builddesk", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (isBuildDesk)
             {
                 var zoneName = InteractionDetector.GetObjectLabel(obj);
                 var planning = PlanningTableWord();
-                return string.IsNullOrEmpty(zoneName) || zoneName == planning
+                var label = string.IsNullOrEmpty(zoneName) || zoneName == planning
                     ? planning
                     : $"{planning}: {zoneName}";
+                bool broken = !string.IsNullOrEmpty(obj.obj_id) &&
+                              obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0;
+                return broken ? $"{label} ({BrokenWord()})" : label;
             }
 
             // Special handling for graves by checking obj_id. Skip build/craft/chest
