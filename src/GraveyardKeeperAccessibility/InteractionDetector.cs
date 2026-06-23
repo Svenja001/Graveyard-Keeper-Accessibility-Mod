@@ -58,7 +58,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithCraftStatus(WithRepairInfo(GetObjectLabel(target), target), target);
+                        var label = WithNpcQuestInfo(WithCraftStatus(WithRepairInfo(GetObjectLabel(target), target), target), target);
                         ScreenReader.Say(label, interrupt: true);
                         _lastAnnouncedObject = target.name;
                     }
@@ -71,7 +71,7 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var label = WithCraftStatus(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby);
+                    var label = WithNpcQuestInfo(WithCraftStatus(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
@@ -740,6 +740,61 @@ internal static class InteractionDetector
     internal static bool IsPrefab(WorldGameObject obj)
     {
         return obj.name.Contains("prefab") || obj.name.Contains("Prefab") || obj.name.Contains("template");
+    }
+
+    /// <summary>
+    /// For an NPC, append the quest marker the game floats over their head. A sighted player sees
+    /// an exclamation icon (icon_quest_mark_small) above any NPC who has a <see cref="KnownNPC.TaskState.State.Visible"/>
+    /// task; a blind player gets no such cue about whom it's worth talking to. We read the same
+    /// per-NPC task list the quest log uses (<c>MainGame.me.save.known_npcs</c>, see
+    /// <see cref="QuestAnnouncer"/>) and voice the objective, so "Horadric's wife" becomes
+    /// "Horadric's wife. Has a task: bring the necklace." Non-NPCs and NPCs with no visible task
+    /// pass through unchanged.
+    /// </summary>
+    private static string WithNpcQuestInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(label) || wgo?.obj_def == null || !wgo.obj_def.IsNPC())
+                return label;
+
+            // known_npcs keys NPCs by their alias-resolved id (see KnownNPCList.GetOrCreateNPC),
+            // so match on the alias first, then the raw obj id as a fallback.
+            var def = wgo.obj_def;
+            var key = string.IsNullOrEmpty(def.npc_alias) ? def.id : def.npc_alias;
+
+            var npcs = MainGame.me?.save?.known_npcs?.npcs;
+            if (npcs == null) return label;
+
+            var tasks = new List<string>();
+            foreach (var npc in npcs)
+            {
+                if (npc?.tasks == null) continue;
+                if (npc.npc_id != key && npc.npc_id != wgo.obj_id) continue;
+
+                foreach (var task in npc.tasks)
+                {
+                    if (task == null || task.state != KnownNPC.TaskState.State.Visible) continue;
+
+                    string text = null;
+                    try { text = ScreenReader.StripNguiCodes(task.GetTaskText() ?? "").Trim(); }
+                    catch { }
+
+                    // GJL.L echoes back "!task_x!" when there's no translation — skip those.
+                    if (!string.IsNullOrEmpty(text) && text.IndexOf('!') < 0)
+                        tasks.Add(text);
+                }
+                break;
+            }
+
+            if (tasks.Count == 0) return label;
+            var header = tasks.Count == 1 ? "Has a task" : "Has tasks";
+            return $"{label}. {header}: {string.Join(". ", tasks)}";
+        }
+        catch
+        {
+            return label;
+        }
     }
 
     internal static string GetObjectLabel(WorldGameObject wgo)

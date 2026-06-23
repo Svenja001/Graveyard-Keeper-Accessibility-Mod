@@ -31,6 +31,7 @@ internal enum NavCategory
     Stations,
     Trees,
     Stones,
+    Ores,
     Bushes,
     Gatherables,
     Fences,
@@ -59,6 +60,7 @@ internal static class ObjectNavigator
         NavCategory.Stations,
         NavCategory.Trees,
         NavCategory.Stones,
+        NavCategory.Ores,
         NavCategory.Bushes,
         NavCategory.Gatherables,
         NavCategory.Fences,
@@ -94,6 +96,14 @@ internal static class ObjectNavigator
     // flips the body to Dynamic (UpdateBodyPhysics) and jams the cutscene's own scripted player
     // GoTo against a fence/gate, freezing the scene forever. See OnGameSetPlayerEnable.
     private static bool _gameOwnsPlayer = false;
+
+    // True while WE have forced control_enabled = false for a scripted walk (see StartNativePathWalk).
+    // The game gates every menu hotkey (N / Inventory / Map / Techs) on control being enabled, so if
+    // a walk ever ends without our restore running (e.g. a cutscene grabbed the player mid-walk and
+    // the completion callback bailed early), the player is silently locked out of all their menus.
+    // The idle watchdog in Update() uses this flag to undo ONLY our own disable — never control the
+    // game disabled for a cutscene/dialogue — once navigation is idle and no cutscene owns the player.
+    private static bool _weDisabledControl = false;
     private static Vector2 _longWalkProgressPos;     // last position where we made real progress
     private static int _longWalkStuckTicks = 0;      // consecutive hops with no progress
     private static Vector2 _longWalkAnnouncePos;     // last position we announced remaining distance
@@ -255,6 +265,24 @@ internal static class ObjectNavigator
             else
             {
                 _hasBusyPos = false;
+
+                // Control-lock watchdog: navigation is idle, so nothing of ours should be holding the
+                // player in script control. If we forced control_enabled = false for a walk and a
+                // teardown path skipped the restore (e.g. a cutscene grabbed the player mid-walk),
+                // the player is silently locked out of every menu hotkey (N / Inventory / Map / Techs,
+                // all gated on control_enabled). Hand control back — but only our own disable, and
+                // never while a cutscene owns the player.
+                if (_weDisabledControl && !_gameOwnsPlayer)
+                {
+                    _weDisabledControl = false;
+                    var character = MainGame.me?.player?.components?.character;
+                    if (character != null && !character.control_enabled)
+                    {
+                        character.player_controlled_by_script = false;
+                        character.control_enabled = true;
+                        _log?.LogWarning("[NAVIGATOR] Control-lock watchdog restored player control (a walk teardown left it disabled)");
+                    }
+                }
             }
 
             // A* failed on a short walk — retry through the fence-aware graph-0 route (gates)
@@ -388,6 +416,7 @@ internal static class ObjectNavigator
         NavCategory.Stations => "Crafting stations",
         NavCategory.Trees => "Trees",
         NavCategory.Stones => "Stones",
+        NavCategory.Ores => "Ores",
         NavCategory.Bushes => "Bushes",
         NavCategory.Gatherables => "Gatherables",
         NavCategory.Fences => "Broken fences",
@@ -694,6 +723,7 @@ internal static class ObjectNavigator
             // body physically collides and JAMS at fences/gates; Kinematic glides along the navmesh
             // path exactly like an NPC. This is the key to scripted long-distance walking.
             character.control_enabled = false;
+            _weDisabledControl = true;
 
             // GoTo(Direct, from_script) sets up the movement state, script control and callbacks
             // and leaves path_waypoint = 1; we then swap in the full route for the follower to walk.
@@ -743,6 +773,7 @@ internal static class ObjectNavigator
         // Restore player control / Dynamic body (we forced Kinematic for the scripted walk).
         var ch = MainGame.me?.player?.components?.character;
         if (ch != null) ch.control_enabled = true;
+        _weDisabledControl = false;
 
         if (!_longWalkActive) return;
         var target = _longWalkTarget;
@@ -1481,6 +1512,7 @@ internal static class ObjectNavigator
                 character.StopMovement();
                 character.player_controlled_by_script = false;
                 character.control_enabled = true;   // re-enable input + restore Dynamic body
+                _weDisabledControl = false;
             }
         }
         catch (Exception ex)
@@ -1525,11 +1557,26 @@ internal static class ObjectNavigator
 
             foreach (var obj in allObjects)
             {
+              // Per-object guard: a single malformed object must never abort the whole refresh.
+              // Including inactive (culled) objects below means we occasionally hit a pooled/half-
+              // initialized WorldGameObject whose transform/components are null and throws on
+              // obj.pos or labelling — skip just that one instead of losing landmarks/quests/items
+              // (gathered after this loop) to a thrown exception.
+              try
+              {
                 if (obj == null || obj.is_removed) continue;
                 if (InteractionDetector.IsPlayer(obj) || InteractionDetector.IsPrefab(obj)) continue;
-                if (!obj.gameObject.activeInHierarchy) continue;
 
                 if (!TryClassify(obj, out var category)) continue;
+
+                // The game culls off-screen objects by deactivating their GameObject (they
+                // reactivate on interaction via WorldGameObject.OnWorkAction). For most categories
+                // we only list active objects, otherwise culled duplicates from other contexts
+                // (doors/graves loaded but inactive while you're indoors, etc.) pollute the lists.
+                // Resource nodes are the exception: a blind player can't pan the camera to spot a
+                // culled iron-ore rock a few tiles away, and these are simple static world objects
+                // that stay valid while culled — so we keep harvestables navigable even when culled.
+                if (!IsHarvestableCategory(category) && !obj.gameObject.activeInHierarchy) continue;
 
                 var objPos = obj.pos;
                 var distance = Vector2.Distance(objPos, playerPos);
@@ -1587,6 +1634,8 @@ internal static class ObjectNavigator
                         Distance = distance
                     });
                 }
+              }
+              catch { /* skip this one object, keep building the rest of the list */ }
             }
 
             // Active quest targets are gathered separately: they are resolved by
@@ -2337,8 +2386,20 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
-    /// Classify a tool-worked / hand-gathered resource node into Trees, Stones, Bushes or the
-    /// catch-all Gatherables. The game marks what tool a node needs in
+    /// The tool-worked / hand-gathered resource-node categories — the ones we keep navigable even
+    /// when the object is culled (deactivated off-screen), because a blind player can't pan the
+    /// camera to find e.g. an iron-ore rock they can't see. Everything else stays active-only.
+    /// </summary>
+    private static bool IsHarvestableCategory(NavCategory category) =>
+        category == NavCategory.Trees ||
+        category == NavCategory.Stones ||
+        category == NavCategory.Ores ||
+        category == NavCategory.Bushes ||
+        category == NavCategory.Gatherables;
+
+    /// <summary>
+    /// Classify a tool-worked / hand-gathered resource node into Trees, Stones, Ores, Bushes or
+    /// the catch-all Gatherables. The game marks what tool a node needs in
     /// <c>obj_def.tool_actions.action_tools</c> (Axe = chop, Pickaxe = mine, Shovel = dig,
     /// Hand = gather); we lead with the obj_id keyword (bush/tree/stone) so a node that takes
     /// several tools (e.g. a tree you chop then dig the stump) still lands in the right bucket,
@@ -2373,10 +2434,19 @@ internal static class ObjectNavigator
                 category = NavCategory.Trees;
                 return true;
             }
+            // Ore-bearing rocks (iron_ore, gold_ore, …) get their own bucket, checked before the
+            // generic Stones bucket, so the player can head straight to a metal source instead of
+            // sifting it out from plain stone/marble. Matched by the metal keyword in the obj_id.
+            if (id.IndexOf("ore", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("iron", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("gold", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Ores;
+                return true;
+            }
             if (pickaxe || id.IndexOf("stone", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 id.IndexOf("rock", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                id.IndexOf("boulder", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                id.IndexOf("ore", StringComparison.OrdinalIgnoreCase) >= 0)
+                id.IndexOf("boulder", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Stones;
                 return true;

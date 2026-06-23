@@ -738,13 +738,18 @@ internal static class GUIAccessibility
         else
             parts.Add(name);
 
-        // The six town-visiting NPCs (merchant, astrologer, …) only appear on one fixed weekday;
-        // the card shows it as a day icon we otherwise can't read. Name it from the linked NPC's
-        // id. Other characters have no fixed day, so VisitingDayForNpc returns null and we skip.
+        // The six sin-NPCs (astrologer, inquisitor, snake/cultist, merchant, actress, bishop) each
+        // carry a day icon (top_icon_txt = ObjectDefinition.day_icon, e.g. "(d3)") naming the
+        // weekday tied to their sin. We translate it to a readable German day via the linked NPC's
+        // id, but only when the game ITSELF draws a day icon — everyone else has an empty icon and
+        // gets no day line. NOTE: this is the NPC's *associated* day, NOT a visiting schedule —
+        // the Snake (npc_cultist, "(d3)") is talkable at his spot every day despite showing Tag
+        // des Neids — so we phrase it "Zugehöriger Tag", not "Besuchstag"/"appears on".
+        bool gameShowsDay = !string.IsNullOrWhiteSpace(card.top_icon_txt?.text);
         var npcId = GetLinkedNpcId(card);
         var visitingDay = DayTimeAnnouncer.VisitingDayForNpc(npcId);
-        if (!string.IsNullOrEmpty(visitingDay))
-            parts.Add($"Appears on {visitingDay}");
+        if (gameShowsDay && !string.IsNullOrEmpty(visitingDay))
+            parts.Add($"Zugehöriger Tag: {visitingDay}");
 
         var descr = ScreenReader.StripNguiCodes(card.npc_descr?.text)?.Trim();
         if (!string.IsNullOrWhiteSpace(descr) && descr.IndexOf('!') < 0)
@@ -2151,7 +2156,46 @@ internal static class GUIAccessibility
         AddVendorButton(vendor.btn_confirm, "Confirm trade", () => ConfirmVendorTrade(vendor));
         AddVendorButton(vendor.btn_cancel, "Cancel offer", () => CancelVendorOffer(vendor));
 
+        // The vendor's purse is shown on-screen but never voices. Put it first so it's spoken
+        // when the trade screen opens (the open flow auto-reads the first row) and is reachable
+        // with the arrow keys at any time. The label is dynamic so it reflects the live value —
+        // selling to the vendor draws down their money. Enter just re-reads it.
+        AddVendorMoneyRow(vendor);
+
         Plugin.Log.LogInfo($"[VENDOR] Discovered {Elements.Count} element(s)");
+    }
+
+    // Add a read-only "Vendor money" row at the front of the vendor element list.
+    private static void AddVendorMoneyRow(VendorGUI vendor)
+    {
+        if (vendor?.trading?.trader == null) return;
+        if (Elements.Any(e => e.Go == vendor.gameObject)) return;
+
+        Elements.Insert(0, new GUIElement
+        {
+            Go = vendor.gameObject,
+            Type = ElementType.Button,
+            Label = "Vendor money",
+            ReadDynamic = () => DescribeVendorMoney(vendor),
+            // No real action — re-speak the live value rather than fall through to the generic
+            // button SendMessage path (which would poke the vendor GUI's own components).
+            OnActivate = () => ScreenReader.Say(DescribeVendorMoney(vendor))
+        });
+    }
+
+    // How much money the vendor currently has to spend, spoken ("Vendor has 3 gold, 20 silver").
+    internal static string DescribeVendorMoney(VendorGUI vendor)
+    {
+        try
+        {
+            var trader = vendor?.trading?.trader;
+            if (trader == null) return "Vendor money unknown";
+            return $"Vendor has {MoneyToSpeech(trader.cur_money)}";
+        }
+        catch
+        {
+            return "Vendor money unknown";
+        }
     }
 
     private static void AddVendorButton(UIButton button, string label, Action onActivate)

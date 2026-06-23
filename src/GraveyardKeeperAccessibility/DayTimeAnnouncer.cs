@@ -74,7 +74,16 @@ internal static class DayTimeAnnouncer
 
             string clock = FormatTime();
 
-            ScreenReader.Say($"Day {day}, {weekday}. {clock}");
+            // Dungeons have no day/night cycle of their own: they stay dark and mobs (slimes
+            // and the like) are present no matter what. The game's clock keeps ticking the
+            // SURFACE time underground, so time_of_day_enum still reports e.g. "day" while
+            // you're fighting in the dark. Reading just "day" there is misleading, so when the
+            // dungeon is loaded we say so up front and label the clock as the surface time.
+            bool inDungeon = MainGame.me.dungeon_root != null && MainGame.me.dungeon_root.dungeon_is_loaded_now;
+            if (inDungeon)
+                ScreenReader.Say($"In the dungeon. Day {day}, {weekday}. Surface time {clock}");
+            else
+                ScreenReader.Say($"Day {day}, {weekday}. {clock}");
         }
         catch (Exception ex)
         {
