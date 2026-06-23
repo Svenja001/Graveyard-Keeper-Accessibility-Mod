@@ -57,8 +57,20 @@ internal static class DialogueChoiceHandler
 
     // Harmony postfix on MultiAnswerGUI.OnChosen(string) — fires whenever an answer is
     // committed (by us or otherwise), so we drop our state and release the keyboard.
-    internal static void OnAnswerChosen()
+    //
+    // Nested-option guard: picking an answer can synchronously advance the dialogue into a
+    // *new* set of answers. Each answer set is a brand-new MultiAnswerGUI instance (the game's
+    // static ShowAnswers does _me.Copy()), and that new instance's ShowAnswers runs inside the
+    // _on_chosen callback — i.e. BEFORE this postfix. So by the time we get here, _activeGui may
+    // already point at the nested bubble. Only clear if the GUI that was just chosen is still the
+    // active one; otherwise we'd wipe the freshly-shown nested options and the player gets stuck.
+    internal static void OnAnswerChosen(MultiAnswerGUI __instance)
     {
+        if (_activeGui != null && !ReferenceEquals(_activeGui, __instance))
+        {
+            _log?.LogInfo("[DIALOGUE_CHOICE] chosen GUI replaced by nested options; keeping new state");
+            return;
+        }
         Clear();
     }
 

@@ -172,9 +172,15 @@ internal static class InventoryItemHandler
                 // Greyed (inactive) cells can't be moved into an offer: on the Buy side the item
                 // is tier-locked (vendor won't sell it yet), on the Sell side the vendor won't buy
                 // it. The game disables the press, so without this marker the player just hears a
-                // misleading "even trade" after pressing. Call it out up front instead.
-                if (gui is VendorGUI && cell.is_inactive_state)
-                    label = $"{label}, not available";
+                // misleading "even trade" after pressing. Call it out up front, and explain *why*
+                // it's locked (tier, item type, etc.) so the player knows what to do about it.
+                if (gui is VendorGUI vguiLock && cell.is_inactive_state)
+                {
+                    var reason = VendorLockReason(cell.item?.definition, vguiLock, panel);
+                    label = string.IsNullOrEmpty(reason)
+                        ? $"{label}, not available"
+                        : $"{label}, not available, {reason}";
+                }
 
                 discovered.Add(new GUIElement
                 {
@@ -362,6 +368,55 @@ internal static class InventoryItemHandler
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Why a greyed (inactive) vendor cell can't be traded, spoken as a follow-on to
+    /// "not available". Mirrors the game's own eligibility checks in the same order so the
+    /// reason matches why the cell is actually disabled (see Vendor.CanBuyItem / CanSellItem,
+    /// both run with check_tier:true by Trading's filters). The vendor's perspective is the
+    /// opposite of the panel's: the "Buy" panel is the vendor's stock it *sells* you, the
+    /// "Sell" panel is your inventory it *buys* from you. Vendor tier rises automatically as
+    /// you trade more goods with that vendor, so tier locks point the player at "trade more".
+    /// Returns null when no specific reason applies (caller falls back to plain "not available").
+    /// </summary>
+    private static string VendorLockReason(ItemDefinition def, VendorGUI vendor, string panel)
+    {
+        try
+        {
+            var trader = vendor?.trading?.trader;
+            if (def == null || trader == null) return null;
+
+            // "Buy" = vendor's stock (CanSellItem / not_selling);
+            // "Sell" = your inventory the vendor buys (CanBuyItem / not_buying).
+            bool sellSide = panel == "Sell";              // vendor buying from you
+            var mods = sellSide ? trader.definition.not_buying : trader.definition.not_selling;
+
+            if (def.product_types == null || def.product_types.Count == 0)
+                return "this item can't be traded";
+
+            if (def.product_tier > trader.cur_tier)
+                return $"unlocks when this vendor reaches tier {def.product_tier}, "
+                     + $"currently tier {trader.cur_tier}; trade more with them to raise it";
+
+            // CanTradeItemType: none of the item's product types are in the vendor's list.
+            bool tradesType = def.product_types.Any(t => trader.definition.GetProductTypes().Contains(t));
+            if (!tradesType)
+                return sellSide ? "this vendor doesn't buy this kind of item"
+                                : "this vendor doesn't sell this kind of item";
+
+            foreach (var m in mods)
+            {
+                if (m.item_name != def.id) continue;
+                if (m.tier < 1)
+                    return sellSide ? "this vendor never buys this item"
+                                    : "this vendor never sells this item";
+                if (m.tier == trader.cur_tier)
+                    return "locked at the vendor's current tier, unlocks at the next tier";
+            }
+            return null; // genuinely greyed but no check matched; fall back to "not available"
+        }
+        catch { return null; }
     }
 
     /// <summary>
