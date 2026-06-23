@@ -1189,15 +1189,33 @@ internal static class GUIAccessibility
             foreach (var ing in gui.ingredients)
             {
                 if (ing == null || ing == main) continue;
-                if (!ing.gameObject.activeInHierarchy || ing.is_inactive_state || ing.id_empty) continue;
+                // Don't skip is_inactive_state here: a requirement cell greys out precisely when
+                // the player is short of it (e.g. not enough faith), and that's exactly the case
+                // we most need to read out — skipping it is why a too-costly study just said
+                // "not enough materials" with no clue what was missing.
+                if (!ing.gameObject.activeInHierarchy || ing.id_empty) continue;
                 var desc = InventoryItemHandler.DescribeItemCell(ing);
+                // Faith ("Glaube") and study points ("Wissenschaft") usually carry a localized
+                // name, but some point icons strip to nothing — name those from the item id as a
+                // fallback so a cost is never silent.
+                if (string.IsNullOrEmpty(desc))
+                {
+                    var sn = SpecialNeedName(ing.item?.id);
+                    if (!string.IsNullOrEmpty(sn))
+                    {
+                        var v = ing.item?.value ?? 0;
+                        desc = v > 1 ? $"{v} {sn}" : sn;
+                    }
+                }
                 if (string.IsNullOrEmpty(desc)) continue;
+                var shortNote = ing.is_inactive_state ? ", you don't have enough" : "";
+                var label = $"Requires {desc}{shortNote}";
                 Elements.Add(new GUIElement
                 {
                     Go = ing.gameObject,
-                    Label = $"Requires {desc}",
+                    Label = label,
                     Type = ElementType.Button,
-                    OnActivate = () => ScreenReader.Say($"Requires {desc}")
+                    OnActivate = () => ScreenReader.Say(label)
                 });
             }
         }
@@ -1213,6 +1231,9 @@ internal static class GUIAccessibility
                 var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
                 if (string.IsNullOrEmpty(verb)) verb = "Craft";
                 if (CanCraftNow()) return verb;
+                // The individual requirement cells above already read each cost (faith, points,
+                // materials) and flag the ones you're short of, so keep the button itself terse —
+                // repeating the full cost here is what caused the duplicate "Glaube … 1 faith".
                 return main != null && main.id_empty
                     ? $"{verb}, choose an item first"
                     : $"{verb}, not enough materials";
@@ -1761,9 +1782,15 @@ internal static class GUIAccessibility
             foreach (var need in craft.needs)
             {
                 if (need == null) continue;
-                var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
-                if (string.IsNullOrWhiteSpace(iname)) continue;
                 var amt = need.value;
+
+                // Prefer the game's own localized name so we match the cells and what a sighted
+                // player reads — faith is "Glaube", the blue/science pool "Wissenschaft", etc.
+                // Only when there's no readable label (some study-point icons strip to nothing)
+                // fall back to a spelled-out resource name, so a cost is never silently dropped.
+                var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? "")?.Trim();
+                if (string.IsNullOrWhiteSpace(iname)) iname = SpecialNeedName(need.id) ?? need.id;
+                if (string.IsNullOrWhiteSpace(iname)) continue;
                 parts.Add(amt > 1 ? $"{amt} {iname}" : iname);
             }
             return parts.Count > 0 ? string.Join(", ", parts) : null;
@@ -1771,8 +1798,51 @@ internal static class GUIAccessibility
         catch { return null; }
     }
 
+    /// <summary>
+    /// Fallback spoken name for a craft "need" that is a resource pool rather than an inventory
+    /// item — faith and the study-point colours (r/g/b/v/gratitude) — used only when the game has
+    /// no readable label for it (a few icons strip to nothing). The localized name ("Glaube",
+    /// "Wissenschaft", …) is preferred when present. Returns null for a normal item.
+    /// </summary>
+    private static string SpecialNeedName(string id)
+    {
+        switch (id)
+        {
+            case "faith": return "faith";
+            case "r": return "red points";
+            case "g": return "green points";
+            case "b": return "blue points";
+            case "v": return "violet points";
+            case "gratitude_points": return "gratitude points";
+            default: return null;
+        }
+    }
+
     private static readonly System.Reflection.FieldInfo _crafteryWgoField =
         AccessTools.Field(typeof(BaseCraftGUI), "craftery_wgo");
+
+    /// <summary>
+    /// Whether an alchemy workbench is currently open (its obj_id carries the "alchemy" tag, e.g.
+    /// mf_alchemy_*). Used to gate the study-reward read-out to the one place it's useful — the
+    /// table where you actually study — so it doesn't narrate over every inventory and chest. The
+    /// station window stays shown underneath its resource picker, so iterating the shown GUIs finds
+    /// it even while the item-pick grid is on top.
+    /// </summary>
+    internal static bool IsAlchemyStationOpen()
+    {
+        try
+        {
+            if (!GUIElements.me) return false;
+            foreach (var g in GUIElements.me.GetComponentsInChildren<BaseGUI>(true))
+            {
+                if (!g.is_shown || !(g is BaseCraftGUI bcg)) continue;
+                var wgo = _crafteryWgoField?.GetValue(bcg) as WorldGameObject;
+                if (wgo?.obj_id != null && wgo.obj_id.Contains("alchemy")) return true;
+            }
+        }
+        catch { }
+        return false;
+    }
 
     /// <summary>
     /// Describe why a craft window opened with no recipes, so a blind player hears more than

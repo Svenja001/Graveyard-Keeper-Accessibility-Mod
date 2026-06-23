@@ -169,6 +169,17 @@ internal static class InventoryItemHandler
                 if (!string.IsNullOrEmpty(price))
                     label = $"{label}, {price}";
 
+                // Only while the alchemy workbench is open, tell which items still pay study
+                // points the first time they're studied — sighted players read this off the
+                // tooltip. It's only useful when you're actually at the table deciding what to
+                // study, so we gate it there rather than narrating it over every bag and chest.
+                if (GUIAccessibility.IsAlchemyStationOpen())
+                {
+                    var study = DescribeStudyReward(cell.item?.definition);
+                    if (!string.IsNullOrEmpty(study))
+                        label = $"{label}, {study}";
+                }
+
                 // Greyed (inactive) cells can't be moved into an offer: on the Buy side the item
                 // is tier-locked (vendor won't sell it yet), on the Sell side the vendor won't buy
                 // it. The game disables the press, so without this marker the player just hears a
@@ -331,6 +342,51 @@ internal static class InventoryItemHandler
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// What studying this item at the study table pays out the first time — e.g. "studying gives
+    /// 2 blue, 1 green points". The reward is a one-time "survey" craft (ItemDefinition.GetSurveyCraft,
+    /// id "surv:&lt;item&gt;") whose output holds the tech points; once that craft is in the save's
+    /// completed_one_time_crafts it pays nothing more, so we return null to avoid promising points
+    /// that won't come. Blue points (the "b" pool, the game's Science/Wissenschaft) are the scarce
+    /// early ones, so being able to spot blue-paying items in the bags is the whole point of this.
+    /// Returns null for items with no study reward or already studied.
+    /// </summary>
+    private static string DescribeStudyReward(ItemDefinition def)
+    {
+        try
+        {
+            if (def == null) return null;
+            var surveyCraft = def.GetSurveyCraft();
+            if (surveyCraft?.output == null) return null;
+            if (MainGame.me?.save != null && MainGame.me.save.completed_one_time_crafts.Contains(surveyCraft.id))
+                return null;
+
+            var parts = new List<string>();
+            foreach (var outp in surveyCraft.output)
+            {
+                if (outp == null || outp.value <= 0) continue;
+                if (!TechDefinition.TECH_POINTS.Contains(outp.id)) continue;
+                parts.Add($"{outp.value} {PointColorName(outp.id)}");
+            }
+            return parts.Count > 0 ? $"studying gives {string.Join(", ", parts)} points" : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The study-point pools spoken as colours (they show on screen only as coin sprites).</summary>
+    private static string PointColorName(string id)
+    {
+        switch (id)
+        {
+            case "r": return "red";
+            case "g": return "green";
+            case "b": return "blue";
+            case "v": return "violet";
+            case "gratitude_points": return "gratitude";
+            default: return id;
         }
     }
 
