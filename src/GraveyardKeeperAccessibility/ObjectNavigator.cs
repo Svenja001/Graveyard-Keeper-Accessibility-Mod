@@ -1669,6 +1669,19 @@ internal static class ObjectNavigator
             if (allObjects == null || allObjects.Length == 0)
                 return;
 
+            // No x-ray for blind players: when the player is in an enclosed interior, a sighted
+            // player can't see the outdoor world through the walls, so the tracker shouldn't either.
+            // The game flags this with its interior LIGHTING preset — EnvironmentEngine state goes
+            // Inside for dungeons, the mortuary, the tavern and other teleport interiors (it stays
+            // RealTime in open, roof-less areas like the keeper's yard, which therefore keep showing
+            // distant objects, exactly as a sighted player outdoors would see them). In a real
+            // interior the game already culls (deactivates) every outdoor object; the ONLY ones that
+            // still leak are harvestables, which we deliberately keep listed even when culled so a
+            // blind player can find distant ore. So while sight is wall-blocked we drop that
+            // exception and require harvestables to be active too — see the cull check below.
+            bool interiorSightBlocked =
+                EnvironmentEngine.me?.data?.state == EnvironmentEngine.State.Inside;
+
             // Remember what is currently selected so we can keep the cursor on it
             // across refreshes even as distances change. Drops have no WorldGameObject,
             // so track their GameObject separately.
@@ -1704,10 +1717,14 @@ internal static class ObjectNavigator
                 // reactivate on interaction via WorldGameObject.OnWorkAction). For most categories
                 // we only list active objects, otherwise culled duplicates from other contexts
                 // (doors/graves loaded but inactive while you're indoors, etc.) pollute the lists.
-                // Resource nodes are the exception: a blind player can't pan the camera to spot a
-                // culled iron-ore rock a few tiles away, and these are simple static world objects
-                // that stay valid while culled — so we keep harvestables navigable even when culled.
-                if (!IsHarvestableCategory(category) && !obj.gameObject.activeInHierarchy) continue;
+                // Resource nodes are normally the exception: a blind player can't pan the camera to
+                // spot a culled iron-ore rock a few tiles away, and these are simple static world
+                // objects that stay valid while culled — so we keep harvestables navigable even when
+                // culled. BUT inside a wall-enclosed interior that exception would x-ray the whole
+                // outdoor world (which is all culled), so there we require harvestables to be active
+                // too — the surviving active ones are only those in the interior with the player.
+                bool keepIfCulled = IsHarvestableCategory(category) && !interiorSightBlocked;
+                if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
 
                 var objPos = obj.pos;
                 var distance = Vector2.Distance(objPos, playerPos);
@@ -1781,7 +1798,9 @@ internal static class ObjectNavigator
             GatherLandmarkTargets(playerPos, allObjects);
 
             // Ground drops (bodies/loot) are DropResGameObjects, not WorldGameObjects, so
-            // they need their own scan or they stay invisible to the screen reader.
+            // they need their own scan or they stay invisible to the screen reader. FindObjectsOfType
+            // only returns ACTIVE drops, so outdoor drops culled while you're in an interior are
+            // already excluded — no extra no-x-ray handling is needed here.
             GatherDropTargets(playerPos);
 
             foreach (var cat in _categoryOrder)
