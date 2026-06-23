@@ -33,6 +33,7 @@ internal enum NavCategory
     Stones,
     Ores,
     Bushes,
+    Flowers,
     Gatherables,
     Fences,
     GravesToDecorate,
@@ -63,6 +64,7 @@ internal static class ObjectNavigator
         NavCategory.Stones,
         NavCategory.Ores,
         NavCategory.Bushes,
+        NavCategory.Flowers,
         NavCategory.Gatherables,
         NavCategory.Fences,
         NavCategory.GravesToDecorate,
@@ -179,6 +181,12 @@ internal static class ObjectNavigator
     // within a generous radius so the per-category lists stay manageable.
     private const float TileSize = 96f;
     private const float MaxNavDistance = 60f * TileSize;   // ~60 tiles
+    // Resource nodes (Trees/Stones/Ores/Bushes/Gatherables) get a longer reach: they sit out in
+    // the world (e.g. coal/iron deposits deep in the mountains) and a blind player can't pan the
+    // camera to find one, so they must be able to select and walk to one from farther away than the
+    // general 60-tile cap. Without this, distant deposits never enter the list and so can never be
+    // walked toward (chicken-and-egg). ~120 tiles covers the mountain mining area.
+    private const float MaxHarvestableNavDistance = 120f * TileSize;
     private const int UpdateInterval = 30;                 // refresh list every 30 frames
     private const float ApproachOffset = 80f;              // stop ~1 tile short, on walkable ground
 
@@ -426,6 +434,7 @@ internal static class ObjectNavigator
         NavCategory.Stones => "Stones",
         NavCategory.Ores => "Ores",
         NavCategory.Bushes => "Bushes",
+        NavCategory.Flowers => "Flowers",
         NavCategory.Gatherables => "Gatherables",
         NavCategory.Fences => "Broken fences",
         NavCategory.GravesToDecorate => "Graves to decorate",
@@ -1702,7 +1711,8 @@ internal static class ObjectNavigator
 
                 var objPos = obj.pos;
                 var distance = Vector2.Distance(objPos, playerPos);
-                if (distance > MaxNavDistance) continue;
+                var maxDist = IsHarvestableCategory(category) ? MaxHarvestableNavDistance : MaxNavDistance;
+                if (distance > maxDist) continue;
 
                 var label = GetObjectLabelSafe(obj);
                 _byCategory[category].Add(new NavigationTarget
@@ -2558,6 +2568,7 @@ internal static class ObjectNavigator
         category == NavCategory.Stones ||
         category == NavCategory.Ores ||
         category == NavCategory.Bushes ||
+        category == NavCategory.Flowers ||
         category == NavCategory.Gatherables;
 
     /// <summary>
@@ -2591,18 +2602,30 @@ internal static class ObjectNavigator
                 category = NavCategory.Bushes;
                 return true;
             }
+            // Wild flowers (flower_small_N, flower_spawner): hand-picked decoratives that are
+            // scattered everywhere and were swamping the Gatherables list. Give them their own
+            // bucket so Gatherables stays focused on mushrooms/herbs/branches/etc.
+            if (id.IndexOf("flower", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Flowers;
+                return true;
+            }
             if (axe || id.IndexOf("tree", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 id.IndexOf("stump", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Trees;
                 return true;
             }
-            // Ore-bearing rocks (iron_ore, gold_ore, …) get their own bucket, checked before the
-            // generic Stones bucket, so the player can head straight to a metal source instead of
-            // sifting it out from plain stone/marble. Matched by the metal keyword in the obj_id.
+            // Ore-bearing rocks (iron_ore, gold_ore, …) and the mountainside mining deposits
+            // (steep_iron, steep_coal, …) get their own bucket, checked before the generic Stones
+            // bucket, so the player can head straight to a metal/fuel source instead of sifting it
+            // out from plain stone/marble. Matched by keyword in the obj_id. Coal is included here
+            // (rather than Stones) because it lives among the iron deposits in the mountains and
+            // that is where the player expects to find it.
             if (id.IndexOf("ore", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 id.IndexOf("iron", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                id.IndexOf("gold", StringComparison.OrdinalIgnoreCase) >= 0)
+                id.IndexOf("gold", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("coal", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Ores;
                 return true;
