@@ -1785,11 +1785,12 @@ internal static class GUIAccessibility
                 var amt = need.value;
 
                 // Prefer the game's own localized name so we match the cells and what a sighted
-                // player reads — faith is "Glaube", the blue/science pool "Wissenschaft", etc.
-                // Only when there's no readable label (some study-point icons strip to nothing)
-                // fall back to a spelled-out resource name, so a cost is never silently dropped.
+                // player reads. Only when there's no readable label (some study-point icons strip
+                // to nothing) fall back to a spelled-out resource name, so a cost is never silently dropped.
                 var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? "")?.Trim();
+                Plugin.Log?.LogInfo($"[CRAFT NEED] id='{need.id}', definition={need.definition != null}, localized='{iname}'");
                 if (string.IsNullOrWhiteSpace(iname)) iname = SpecialNeedName(need.id) ?? need.id;
+                Plugin.Log?.LogInfo($"[CRAFT NEED] Final: id='{need.id}' -> label='{iname}'");
                 if (string.IsNullOrWhiteSpace(iname)) continue;
                 parts.Add(amt > 1 ? $"{amt} {iname}" : iname);
             }

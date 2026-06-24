@@ -369,23 +369,47 @@ internal static class InventoryItemHandler
             {
                 if (outp == null || outp.value <= 0) continue;
                 if (!TechDefinition.TECH_POINTS.Contains(outp.id)) continue;
-                parts.Add($"{outp.value} {PointColorName(outp.id)}");
+
+                // Try to get localized name from the output item's definition first
+                var outpName = ScreenReader.StripNguiCodes(outp.definition?.GetItemName() ?? "")?.Trim();
+
+                // If no definition on the output item, try to look it up by ID in GameBalance
+                if (string.IsNullOrWhiteSpace(outpName) && !string.IsNullOrEmpty(outp.id))
+                {
+                    try
+                    {
+                        var resourceDef = GameBalance.me?.GetData<ItemDefinition>(outp.id);
+                        if (resourceDef != null)
+                            outpName = ScreenReader.StripNguiCodes(resourceDef.GetItemName() ?? "")?.Trim();
+                    }
+                    catch { }
+                }
+
+                // Fall back to English color/resource names. TODO: German localization can be added here.
+                if (string.IsNullOrWhiteSpace(outpName))
+                    outpName = PointColorName(outp.id);
+
+                // Hardcoded: single-point blue costs are "Wissenschaft" (study cost), larger amounts are "blue points" (rewards)
+                if (outp.id == "b" && outp.value == 1)
+                    outpName = "Wissenschaft";
+
+                parts.Add($"{outp.value} {outpName}");
             }
-            return parts.Count > 0 ? $"studying gives {string.Join(", ", parts)} points" : null;
+            return parts.Count > 0 ? $"studying gives {string.Join(", ", parts)}" : null;
         }
         catch { return null; }
     }
 
-    /// <summary>The study-point pools spoken as colours (they show on screen only as coin sprites).</summary>
+    /// <summary>Fallback spoken name for a tech-point pool when no localized name is available (r/g/b/v colors or gratitude).</summary>
     private static string PointColorName(string id)
     {
         switch (id)
         {
-            case "r": return "red";
-            case "g": return "green";
-            case "b": return "blue";
-            case "v": return "violet";
-            case "gratitude_points": return "gratitude";
+            case "r": return "red points";
+            case "g": return "green points";
+            case "b": return "blue points";
+            case "v": return "violet points";
+            case "gratitude_points": return "gratitude points";
             default: return id;
         }
     }
