@@ -150,6 +150,11 @@ public class Plugin : BaseUnityPlugin
             if (DialogueChoiceHandler.Update())
                 return;
 
+            // The quest list (J): while open it owns Up/Down/Enter/Escape so the player can step
+            // through objectives without the world nav stealing the arrows.
+            if (QuestAnnouncer.Update())
+                return;
+
             // Handle click input (Z/X keys)
             ClickHandler.Update();
 
@@ -450,6 +455,8 @@ public class Plugin : BaseUnityPlugin
                 HealthEnergyAnnouncer.Announce();
             else if (Input.GetKeyDown(KeyCode.R) && !ctrl)
                 MoneyAnnouncer.Announce();
+            else if (Input.GetKeyDown(KeyCode.J) && !ctrl)
+                QuestAnnouncer.Open();
         }
         catch (Exception ex)
         {

@@ -20,8 +20,13 @@ internal static class InventoryItemHandler
         // Detect inventory and chest GUIs
         if (IsInventoryGUI(guiTypeName))
         {
+            // Only remember the GUI so we can say "Inventory closed" later and detect empty
+            // panels. We deliberately do NOT scrape every UILabel here: for the player's own
+            // InventoryGUI those labels include the shared HUD (health/energy, money), the
+            // buffs panel ("Keine aktiven Buffs") and the quest log, which were being read out
+            // as junk ("Items: 10, 100, 100, ...") before the real announcement. The actual
+            // item list is read by the item-cell navigation in MainMenuPatches.OnGUIOpened.
             _currentInventoryGUI = gui;
-            AnnounceAllInventoryItems(gui);
         }
     }
 
@@ -45,84 +50,6 @@ internal static class InventoryItemHandler
                guiTypeName.Contains("Storage") ||
                guiTypeName.Contains("Container") ||
                guiTypeName.Contains("Bag");
-    }
-
-    private static void AnnounceAllInventoryItems(BaseGUI gui)
-    {
-        try
-        {
-            var itemLabels = GetInventoryItemLabels(gui);
-
-            var announcements = new List<string>();
-            foreach (var label in itemLabels)
-            {
-                if (string.IsNullOrWhiteSpace(label)) continue;
-
-                var cleaned = ScreenReader.StripNguiCodes(label).Trim();
-                if (!string.IsNullOrEmpty(cleaned) && cleaned.Length > 1)
-                    announcements.Add(cleaned);
-            }
-
-            string announcement;
-            if (announcements.Count > 0)
-            {
-                announcement = "Items: " + string.Join(", ", announcements);
-            }
-            else
-            {
-                announcement = "Empty";
-            }
-
-            _log?.LogInfo($"[INVENTORY] {announcement}");
-            ScreenReader.Say(announcement);
-        }
-        catch (Exception ex)
-        {
-            _log?.LogError($"[INVENTORY] Error announcing items: {ex.Message}");
-        }
-    }
-
-    private static List<string> GetInventoryItemLabels(BaseGUI gui)
-    {
-        var items = new List<string>();
-        try
-        {
-            // Find all UILabel components that might represent items
-            var allLabels = gui.GetComponentsInChildren<UILabel>(true);
-
-            foreach (var label in allLabels)
-            {
-                if (label == null || !label.gameObject.activeInHierarchy) continue;
-                if (string.IsNullOrWhiteSpace(label.text)) continue;
-
-                // Filter out UI chrome (buttons, headers, labels)
-                var parentName = label.transform.parent?.name ?? "";
-                var labelName = label.name;
-
-                // Skip common UI elements that aren't items
-                if (parentName.Contains("header") || parentName.Contains("Header") ||
-                    parentName.Contains("title") || parentName.Contains("Title") ||
-                    labelName.Contains("header") || labelName.Contains("Header") ||
-                    labelName.Contains("label") && !labelName.Contains("ItemLabel"))
-                    continue;
-
-                // Look for item-like text patterns
-                var text = label.text;
-
-                // Items typically have names and sometimes quantities in parentheses
-                // e.g., "Shovel (2)" or "Wood"
-                if (text.Length > 1 && !text.StartsWith("[") && !text.Equals("X", StringComparison.OrdinalIgnoreCase))
-                {
-                    items.Add(text);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _log?.LogError($"[INVENTORY] Error getting item labels: {ex.Message}");
-        }
-
-        return items;
     }
 
     // ---- Item-cell navigation (shared with GUIAccessibility) --------------------

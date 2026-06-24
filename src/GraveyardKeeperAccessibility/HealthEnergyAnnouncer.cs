@@ -63,11 +63,54 @@ internal static class HealthEnergyAnnouncer
             int energy = Mathf.RoundToInt(player.energy);
             int maxEnergy = save.max_energy;
 
-            ScreenReader.Say($"Health {hp} of {maxHp}. Energy {energy} of {maxEnergy}");
+            ScreenReader.Say($"Health {hp} of {maxHp}. Energy {energy} of {maxEnergy}. {DescribeBuffs(save)}");
         }
         catch (Exception ex)
         {
             _log?.LogError($"HealthEnergyAnnouncer error: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+
+    /// <summary>
+    /// The player's active buffs (the icons in the game's buff bar), e.g. "Buffs: Well fed 2:30,
+    /// Drunk 0:45". Mirrors BuffsGUI.Redraw — iterate save.buffs and skip hidden ones — so we
+    /// read exactly what the game shows. The buff name is localized by the game (German on a
+    /// German install); we append GetTimerText() unless the buff opts out of a timer.
+    /// </summary>
+    private static string DescribeBuffs(GameSave save)
+    {
+        try
+        {
+            var names = new List<string>();
+            var buffs = save.buffs;
+            if (buffs != null)
+            {
+                foreach (var buff in buffs)
+                {
+                    if (buff == null) continue;
+                    BuffDefinition def = null;
+                    try { def = buff.definition; } catch { }
+                    if (def == null || def.is_hidden) continue;
+
+                    var name = ScreenReader.StripNguiCodes(def.GetLocalizedName() ?? "").Trim();
+                    if (string.IsNullOrEmpty(name) || name.IndexOf('!') >= 0) continue;
+
+                    if (!def.do_not_show_timer)
+                    {
+                        var timer = buff.GetTimerText();
+                        if (!string.IsNullOrEmpty(timer))
+                            name = $"{name} {timer}";
+                    }
+                    names.Add(name);
+                }
+            }
+
+            return names.Count == 0 ? "No active buffs" : "Buffs: " + string.Join(", ", names);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"HealthEnergyAnnouncer.DescribeBuffs error: {ex.Message}");
+            return "";
         }
     }
 
