@@ -176,10 +176,60 @@ internal static class DialogueChoiceHandler
         return true;
     }
 
-    // Option text plus an availability hint when the game has locked it.
+    // Spoken cost of an option, e.g. "5 gold, 50 silver" or "3 wood". The royal-services mailbox
+    // ("Königliche Dienstleistungen") and similar paid dialogue options carry their price ONLY as a
+    // price icon + number in the AnswerVisualData — never in the translated label — so without this
+    // a blind player hears the service name but never learns what it costs. Returns "" when free.
+    private static string PriceOf(MultiAnswerOptionGUI opt)
+    {
+        try
+        {
+            var data = _answerDataField(opt);
+            return PriceFromVisual(data);
+        }
+        catch { return ""; }
+    }
+
+    private static string PriceFromVisual(AnswerVisualData d)
+    {
+        if (d == null || string.IsNullOrEmpty(d.icon_price)) return "";
+
+        // Text price (money / tech points): SmartRes encodes these as a ":+(gld)5(slv)50"-style
+        // string (see SmartRes.FillVisualData). Drop the ":+"/":-" marker and let StripNguiCodes
+        // turn the coin tokens into words ("5 gold, 50 silver").
+        if (d.icon_price.StartsWith(":"))
+        {
+            bool negative = d.icon_price.Length > 1 && d.icon_price[1] == '-';
+            var raw = d.icon_price.Length > 2 ? d.icon_price.Substring(2) : "";
+            var txt = ScreenReader.StripNguiCodes(raw).Trim();
+            if (string.IsNullOrEmpty(txt)) return "";
+            return negative ? "minus " + txt : txt;
+        }
+
+        // Item price: icon_price is a sprite name and n_price the count. Resolve the localized item
+        // name from the underlying SmartRes so we say "3 wood", not just "3".
+        string itemName = null;
+        try
+        {
+            var sr = d.link_to_answer_data?.d_price;
+            if (sr != null && sr.res_type == SmartRes.ResType.Item && sr.item != null)
+                itemName = ScreenReader.StripNguiCodes(
+                    GameBalance.me.GetData<ItemDefinition>(sr.item.id)?.GetItemName() ?? "").Trim();
+        }
+        catch { }
+        int n = d.n_price;
+        if (!string.IsNullOrEmpty(itemName)) return n > 1 ? $"{n} {itemName}" : itemName;
+        return n > 1 ? n.ToString() : "";
+    }
+
+    // Option text, plus its cost when it has one, plus an availability hint when the game has
+    // locked it (typically because the player can't afford that cost).
     private static string OptionPhrase(MultiAnswerOptionGUI opt)
     {
         var label = LabelOf(opt);
+        var price = PriceOf(opt);
+        if (!string.IsNullOrEmpty(price))
+            label = string.IsNullOrEmpty(label) ? $"kostet {price}" : $"{label}, kostet {price}";
         if (!string.IsNullOrEmpty(label) && !CanPick(opt))
             label += " (nicht verfügbar)";
         return label;
