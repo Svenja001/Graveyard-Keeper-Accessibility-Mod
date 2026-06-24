@@ -96,11 +96,12 @@ internal static class InventoryItemHandler
                 if (!string.IsNullOrEmpty(price))
                     label = $"{label}, {price}";
 
-                // Only while the alchemy workbench is open, tell which items still pay study
-                // points the first time they're studied — sighted players read this off the
-                // tooltip. It's only useful when you're actually at the table deciding what to
-                // study, so we gate it there rather than narrating it over every bag and chest.
-                if (GUIAccessibility.IsAlchemyStationOpen())
+                // Only while a survey/study station is open (alchemy survey table OR the
+                // research/study table), tell which items still pay study points the first time
+                // they're studied — sighted players read this off the tooltip. It's only useful
+                // when you're actually at the table deciding what to study, so we gate it there
+                // rather than narrating it over every bag and chest.
+                if (GUIAccessibility.IsStudyStationOpen())
                 {
                     var study = DescribeStudyReward(cell.item?.definition);
                     if (!string.IsNullOrEmpty(study))

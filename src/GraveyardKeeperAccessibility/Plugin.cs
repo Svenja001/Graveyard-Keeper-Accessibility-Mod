@@ -85,6 +85,12 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.WorldGameObject_AddToInventory_Postfix),
             typeof(WorldGameObject), "AddToInventory", new[] { typeof(Item) });
 
+        // Auto-collect study/research rewards (stories etc.) into the bag instead of letting them
+        // drop silently on the ground at the survey table. See Patches.WorldGameObject_DropItem_Prefix.
+        TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.WorldGameObject_DropItem_Prefix),
+            typeof(WorldGameObject), "DropItem",
+            new[] { typeof(Item), typeof(Direction), typeof(Vector3), typeof(float), typeof(bool) });
+
         // Voice each coin donated into the church donation box during a sermon ("3 bronze").
         // See Patches.WorldGameObject_AddToParams_Postfix.
         TryPatch(harmony, typeof(Patches), nameof(Patches.WorldGameObject_AddToParams_Postfix),

@@ -214,6 +214,13 @@ internal static class GUIAccessibility
         var cellCount = active.Count(e => e.Type == ElementType.ItemCell);
         var header = cellCount > 0 ? $"{guiName}, {cellCount} items" : guiName;
 
+        // Survey/study tables look alike but do different jobs — say which one this is up-front
+        // ("Erforschen" research vs alchemy "Untersuchen"/"Zerlegen") so the player isn't left
+        // guessing whether they walked up to the right table.
+        var stationPurpose = CraftStationPurpose(gui);
+        if (!string.IsNullOrEmpty(stationPurpose))
+            header = $"{stationPurpose}. {header}";
+
         // For multi-panel inventory GUIs (e.g. a chest), call out any side that's empty so the
         // player knows the chest or their own inventory has nothing in it.
         var emptyDesc = InventoryItemHandler.DescribeEmptyPanels(gui);
@@ -1315,17 +1322,37 @@ internal static class GUIAccessibility
         var main = gui.main_ingredient;
         if (main != null)
         {
+            // The resource hint, when its label is actually shown. For a science decompose this is
+            // the reward line ("Beim Zerlegen dieses Gegenstands erhältst du +(sci)4") — the whole
+            // point of the action — which is otherwise dropped the moment an item is in the slot.
+            // Guard on the label being active so we don't read a stale/hidden hint in survey mode.
+            string ResourceHint()
+            {
+                try
+                {
+                    var lbl = gui.label_resourse_hint;
+                    if (lbl == null || !lbl.gameObject.activeInHierarchy) return null;
+                    var t = ScreenReader.StripNguiCodes(lbl.text)?.Trim();
+                    return string.IsNullOrEmpty(t) ? null : t;
+                }
+                catch { return null; }
+            }
+
             string PickLabel()
             {
                 if (main.id_empty)
                 {
-                    var hint = ScreenReader.StripNguiCodes(gui.label_resourse_hint?.text)?.Trim();
+                    var hint = ResourceHint();
                     return string.IsNullOrEmpty(hint) ? "Choose item" : $"Choose item. {hint}";
                 }
                 var chosen = InventoryItemHandler.DescribeItemCell(main);
-                return string.IsNullOrEmpty(chosen)
+                var baseLabel = string.IsNullOrEmpty(chosen)
                     ? "Choose item"
                     : $"Selected {chosen}. Enter to choose a different item";
+                // Append the reward/hint (e.g. the science you'll get from decomposing) so it's
+                // read right after you pick the item, not only while the slot is empty.
+                var sel = ResourceHint();
+                return string.IsNullOrEmpty(sel) ? baseLabel : $"{baseLabel}. {sel}";
             }
 
             Elements.Add(new GUIElement
@@ -1388,12 +1415,16 @@ internal static class GUIAccessibility
                 var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
                 if (string.IsNullOrEmpty(verb)) verb = "Craft";
                 if (CanCraftNow()) return verb;
-                // The individual requirement cells above already read each cost (faith, points,
-                // materials) and flag the ones you're short of, so keep the button itself terse —
-                // repeating the full cost here is what caused the duplicate "Glaube … 1 faith".
-                return main != null && main.id_empty
-                    ? $"{verb}, choose an item first"
-                    : $"{verb}, not enough materials";
+                if (main != null && main.id_empty) return $"{verb}, choose an item first";
+                // Name exactly what's short on the button itself. A blind player who presses the
+                // button and hears only "not enough materials" can't tell whether they're out of
+                // faith, science (Wissenschaft) or a material — and won't necessarily arrow over to
+                // the requirement cells to find out. Studying costs faith + Wissenschaft, and
+                // running out of Wissenschaft is the usual culprit, so spell it out.
+                var missing = MissingNeedsText(gui, main);
+                return string.IsNullOrEmpty(missing)
+                    ? $"{verb}, not enough materials"
+                    : $"{verb}, not enough, you need {missing}";
             }
 
             Elements.Add(new GUIElement
@@ -1406,17 +1437,33 @@ internal static class GUIAccessibility
                 {
                     if (!CanCraftNow())
                     {
-                        ScreenReader.Say(main != null && main.id_empty
-                            ? "Choose an item first"
-                            : "Not enough materials");
+                        if (main != null && main.id_empty)
+                            ScreenReader.Say("Choose an item first");
+                        else
+                        {
+                            var missing = MissingNeedsText(gui, main);
+                            ScreenReader.Say(string.IsNullOrEmpty(missing)
+                                ? "Not enough materials"
+                                : $"Not enough, you need {missing}");
+                        }
                         return;
                     }
                     try { gui.OnCraftButtonPressed(); }
                     catch (Exception ex) { Plugin.Log.LogWarning($"[RESCRAFT] craft failed: {ex.Message}"); }
                     // The craft is queued/performed; the station usually stays open. Re-read so
                     // affordability and the slot update (the item may have been consumed).
-                    var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
-                    ScreenReader.Say(string.IsNullOrEmpty(verb) ? "Crafting" : verb);
+                    // A survey/study station "studies"/"decomposes" rather than crafts — say that
+                    // instead of the generic verb so studying paper for science isn't called a craft.
+                    var done = StudyDoneWord(gui);
+                    if (!string.IsNullOrEmpty(done))
+                    {
+                        ScreenReader.Say(done);
+                    }
+                    else
+                    {
+                        var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
+                        ScreenReader.Say(string.IsNullOrEmpty(verb) ? "Crafting" : verb);
+                    }
                     if (_currentGUI is ResourceBasedCraftGUI)
                         RefreshCurrentGUI(SelectedIndex);
                 }
@@ -1906,6 +1953,14 @@ internal static class GUIAccessibility
         }
         catch { }
 
+        // A survey/study craft isn't "crafting" — say "studied"/"decomposed" so studying paper
+        // for science reads correctly. (Survey science output has no ground item to point at.)
+        var studyWord = StudyDoneWord(craft);
+        if (studyWord != null)
+            return string.IsNullOrWhiteSpace(recipeName)
+                ? countPrefix + studyWord
+                : $"{countPrefix}{recipeName} {studyWord.ToLowerInvariant()}";
+
         // Instant craft, already finished. If it made a real item it's now on the ground.
         bool dropsItem = false;
         try { dropsItem = craft?.GetFirstRealOutput() != null; } catch { }
@@ -2021,13 +2076,18 @@ internal static class GUIAccessibility
         AccessTools.Field(typeof(BaseCraftGUI), "craftery_wgo");
 
     /// <summary>
-    /// Whether an alchemy workbench is currently open (its obj_id carries the "alchemy" tag, e.g.
-    /// mf_alchemy_*). Used to gate the study-reward read-out to the one place it's useful — the
-    /// table where you actually study — so it doesn't narrate over every inventory and chest. The
-    /// station window stays shown underneath its resource picker, so iterating the shown GUIs finds
-    /// it even while the item-pick grid is on top.
+    /// Whether a survey/study station is currently open — i.e. a craft window whose recipe list
+    /// holds a <see cref="CraftDefinition.CraftType.Survey"/> craft. That covers both the alchemy
+    /// survey table ("Untersuchen"/"Zerlegen", obj_id mf_alchemy_survey) and the research/study
+    /// table ("Erforschen", obj_id desk/table_book_constr — which does NOT carry the "alchemy"
+    /// tag, so the old obj_id-substring gate silently skipped it). Used to gate the study-reward
+    /// read-out to the place it's useful — the table where you actually study — so it doesn't
+    /// narrate over every inventory and chest (those have no craft GUI). The station window stays
+    /// shown underneath its resource picker, so iterating the shown GUIs finds it even while the
+    /// item-pick grid is on top. Reads only the already-built GUI's craft list (cheap); never
+    /// touches wgo.components (lazy per-object allocation).
     /// </summary>
-    internal static bool IsAlchemyStationOpen()
+    internal static bool IsStudyStationOpen()
     {
         try
         {
@@ -2035,12 +2095,121 @@ internal static class GUIAccessibility
             foreach (var g in GUIElements.me.GetComponentsInChildren<BaseGUI>(true))
             {
                 if (!g.is_shown || !(g is BaseCraftGUI bcg)) continue;
-                var wgo = _crafteryWgoField?.GetValue(bcg) as WorldGameObject;
-                if (wgo?.obj_id != null && wgo.obj_id.Contains("alchemy")) return true;
+                if (bcg.crafts == null) continue;
+                foreach (var c in bcg.crafts)
+                {
+                    if (c != null && c.craft_type == CraftDefinition.CraftType.Survey) return true;
+                }
             }
         }
         catch { }
         return false;
+    }
+
+    /// <summary>
+    /// A one-line "what is this table for" cue for survey/study stations, said up-front when the
+    /// window opens so a blind player can tell at a glance whether it's the table they wanted —
+    /// the alchemy survey table ("Untersuchen"/"Zerlegen") and the research/study table
+    /// ("Erforschen", research items for science points) are easy to confuse. Derived from the
+    /// open craft list's types (generic — works across station tiers), not hardcoded obj_ids.
+    /// Returns null for any other station so ordinary craft windows are unaffected.
+    /// </summary>
+    private static string CraftStationPurpose(BaseGUI gui)
+    {
+        try
+        {
+            if (!(gui is BaseCraftGUI bcg) || bcg.crafts == null) return null;
+
+            bool hasScienceSurvey = false, hasAlchemy = false;
+            foreach (var c in bcg.crafts)
+            {
+                if (c == null) continue;
+                if (c.craft_type == CraftDefinition.CraftType.Survey &&
+                    c.sub_type == CraftDefinition.CraftSubType.SurveySciencePoints)
+                    hasScienceSurvey = true;
+                else if (c.craft_type == CraftDefinition.CraftType.Survey ||
+                         c.craft_type == CraftDefinition.CraftType.AlchemyDecompose)
+                    hasAlchemy = true;
+            }
+
+            // Same physical table (mf_alchemy_survey), different mode — describe the mode, but keep
+            // the "Forschungstisch" name consistent with the approach-time label so they don't
+            // contradict. Science decompose (paper/notes/books -> Wissenschaft) vs surveying an item.
+            if (hasScienceSurvey) return "Forschungstisch, Gegenstände für Wissenschaftspunkte zerlegen";
+            if (hasAlchemy) return "Forschungstisch, Gegenstände untersuchen";
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Action word for a finished survey/study craft so the feedback says "Studied" / "Decomposed"
+    /// instead of the generic "crafted" — studying paper for science (or surveying an ingredient)
+    /// isn't crafting, and reporting it as such is confusing. Returns null for ordinary crafts so
+    /// they keep the normal wording. Capitalized for standalone use; lower-case it when appending
+    /// after an item name ("Clean paper studied").
+    /// </summary>
+    private static string StudyDoneWord(CraftDefinition craft)
+    {
+        if (craft == null) return null;
+        switch (craft.craft_type)
+        {
+            case CraftDefinition.CraftType.Survey: return "Studied";
+            case CraftDefinition.CraftType.AlchemyDecompose: return "Decomposed";
+            default: return null;
+        }
+    }
+
+    /// <summary>
+    /// As <see cref="StudyDoneWord(CraftDefinition)"/> but derived from a station's whole craft
+    /// list, for the resource-based station path where the exact pressed craft isn't to hand.
+    /// </summary>
+    private static string StudyDoneWord(BaseCraftGUI gui)
+    {
+        try
+        {
+            if (gui?.crafts == null) return null;
+            foreach (var c in gui.crafts)
+            {
+                var w = StudyDoneWord(c);
+                if (w != null) return w;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// The requirements a resource-based craft is currently SHORT of, named, for the craft button
+    /// (e.g. "Wissenschaft" when a study is blocked by missing science). Scans the station's
+    /// requirement cells (faith / science / materials), keeping only the greyed (is_inactive_state)
+    /// ones — a cell greys out precisely when the player can't afford it. Skips the pick slot and
+    /// empty cells. Returns null when nothing is short (or the reason is elsewhere). Mirrors the
+    /// per-cell read in <see cref="DiscoverResourceBasedCraft"/> so the wording matches.
+    /// </summary>
+    private static string MissingNeedsText(ResourceBasedCraftGUI gui, BaseItemCellGUI main)
+    {
+        try
+        {
+            if (gui?.ingredients == null) return null;
+            var names = new List<string>();
+            foreach (var ing in gui.ingredients)
+            {
+                if (ing == null || ing == main) continue;
+                if (!ing.gameObject.activeInHierarchy || ing.id_empty) continue;
+                if (!ing.is_inactive_state) continue;
+
+                var desc = InventoryItemHandler.DescribeItemCell(ing);
+                if (string.IsNullOrEmpty(desc))
+                {
+                    var sn = SpecialNeedName(ing.item?.id);
+                    if (!string.IsNullOrEmpty(sn)) desc = sn;
+                }
+                if (!string.IsNullOrEmpty(desc) && !names.Contains(desc)) names.Add(desc);
+            }
+            return names.Count > 0 ? string.Join(", ", names) : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>

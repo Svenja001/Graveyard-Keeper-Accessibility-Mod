@@ -797,6 +797,17 @@ internal static class InteractionDetector
         }
     }
 
+    // Stations whose own localized name is too generic to navigate by. mf_alchemy_survey is the
+    // study/research table — you study items for tech points, and decompose notes/paper/books for
+    // science (Wissenschaft) here — but it localizes to the bare "Arbeitstisch" (work table). Name
+    // it for what it does so it matches the on-open purpose announcement. Add more ids here only
+    // when a station's real name is genuinely confusing.
+    private static readonly Dictionary<string, string> StationNameOverrides =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["mf_alchemy_survey"] = "Forschungstisch",
+        };
+
     internal static string GetObjectLabel(WorldGameObject wgo)
     {
         if (wgo == null)
@@ -815,6 +826,15 @@ internal static class InteractionDetector
         {
             if (wgo.obj_def != null)
             {
+                // A few stations have generic/ambiguous game names that leave a blind player
+                // unable to tell them apart — e.g. the alchemy survey table localizes to the
+                // bare "Arbeitstisch" (work table), easily confused with the research/study
+                // table. Override those with an explicit name. Keep this list to genuinely
+                // ambiguous ids; everything else keeps its real localized name.
+                if (!string.IsNullOrEmpty(wgo.obj_def.id) &&
+                    StationNameOverrides.TryGetValue(wgo.obj_def.id, out var clearName))
+                    return clearName;
+
                 // Try to use the object id, localized to a readable name where possible
                 if (!string.IsNullOrEmpty(wgo.obj_def.id))
                     return LocalizedObjectName(wgo.obj_def.id);

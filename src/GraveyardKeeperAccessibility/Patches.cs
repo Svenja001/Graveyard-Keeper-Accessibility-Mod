@@ -98,6 +98,41 @@ internal static class Patches
         }
     }
 
+    // Auto-collect study/research rewards. When you study an item at the survey table, the game
+    // splits the payout: tech points auto-award, but real reward items (a "story", etc.) drop on
+    // the GROUND at the table and are never picked up automatically — a blind player has no way to
+    // know one is lying there, and it despawns once they walk off. So when a Survey craft is about
+    // to drop a non-tech-point reward, put it straight in the player's bag instead. The existing
+    // AddToInventory postfix then voices it ("Got a story"). Falls back to the normal ground drop
+    // if the bag is full. Scoped to plain Survey crafts: body-part extraction/insertion and souls
+    // (gratitude) crafts keep their own drop handling untouched.
+    public static bool WorldGameObject_DropItem_Prefix(WorldGameObject __instance, Item __0)
+    {
+        try
+        {
+            if (__instance == null || __0 == null || __0.is_tech_point) return true;
+
+            // Only intercept while THIS station is finishing a survey craft.
+            var craft = (__instance.obj_def != null && __instance.obj_def.has_craft)
+                ? __instance.components?.craft : null;
+            var cur = craft?.current_craft;
+            if (cur == null || cur.craft_type != CraftDefinition.CraftType.Survey) return true;
+            if (cur.IsBodyPartExtractionCraft() || cur.IsBodyPartInsertionCraft()) return true;
+            if (__instance.is_current_craft_gratitude) return true;
+
+            var player = MainGame.me?.player;
+            if (player == null) return true;
+
+            // If it fits in the bag, take it (skip the ground drop); otherwise drop as normal.
+            return !player.AddToInventory(__0);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[PICKUP] DropItem prefix: {ex.Message}");
+            return true;
+        }
+    }
+
     // Voice each coin donated into the church donation box during a sermon. A sighted player sees
     // a little "+3 bronze" bubble pop over the box (EffectBubblesManager) as each praying NPC drops
     // a coin; a blind player otherwise only hears the generic coin sound. Flow_DonateToBox adds the
