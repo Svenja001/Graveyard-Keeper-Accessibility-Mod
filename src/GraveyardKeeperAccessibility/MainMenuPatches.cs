@@ -3152,7 +3152,19 @@ internal static class GUIAccessibility
 
         var elem = active[SelectedIndex];
         if (elem.SaveSlot != null)
+        {
             elem.SaveSlot.OnDeletePressed();
+            return;
+        }
+
+        // In the player's own inventory, Delete throws away the focused item — the action a
+        // sighted player gets from the right-click context menu's "destroy" option. The game
+        // opens a yes/no confirm dialog (announced and navigable by the mod) before removing it.
+        if (elem.Type == ElementType.ItemCell && _currentGUI is InventoryGUI && elem.Cell != null)
+        {
+            var msg = InventoryItemHandler.DestroyInventoryItem(elem.Cell);
+            if (!string.IsNullOrEmpty(msg)) ScreenReader.Say(msg);
+        }
     }
 
     internal static void AdjustLeft()

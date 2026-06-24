@@ -628,4 +628,57 @@ internal static class InventoryItemHandler
 
         return (null, false);
     }
+
+    private static MethodInfo _onDestroyItem;
+
+    /// <summary>
+    /// Throw away / destroy an item from the player's own inventory — the action a sighted player
+    /// reaches via the right-click context menu's "destroy" option. We drive the game's own
+    /// <see cref="InventoryGUI"/>.OnDestroyItem, which checks the item is throw-out-able, then opens
+    /// the localized yes/no confirm dialog (read by the mod's dialog handling) whose "yes" runs the
+    /// real removal. Registering the cell as the panel's selection first (OnOver) is required: the
+    /// game reads <c>panel.selected_item</c> to know what to destroy — see
+    /// <see cref="ActivateInventoryItem"/>.
+    /// </summary>
+    /// <returns>A spoken message to say now, or null when the confirm dialog was opened (the mod
+    /// reads that dialog next, so we stay silent here).</returns>
+    internal static string DestroyInventoryItem(BaseItemCellGUI cell)
+    {
+        if (cell == null) return null;
+        var item = cell.item;
+        if (item == null || item.IsEmpty()) return null;
+
+        var def = item.definition;
+        var name = ScreenReader.StripNguiCodes(def?.GetItemName() ?? item.id)?.Trim();
+        if (string.IsNullOrEmpty(name)) name = item.id;
+
+        // Some items (quest items, the starting tools) are flagged un-throwable; the game greys the
+        // "destroy" option out for them. Say so rather than silently doing nothing.
+        if (def != null && def.player_cant_throw_out)
+            return $"{name} can't be destroyed";
+
+        var invGui = cell.GetComponentInParent<InventoryGUI>();
+        if (invGui == null) return null;
+
+        // Register this cell as the panel's current selection so OnDestroyItem acts on it.
+        try { cell.OnOver(false); } catch { }
+
+        try
+        {
+            _onDestroyItem ??= AccessTools.Method(typeof(InventoryGUI), "OnDestroyItem");
+            if (_onDestroyItem == null)
+            {
+                _log?.LogWarning("[INVENTORY] OnDestroyItem method not found");
+                return null;
+            }
+            // Opens the game's "Throw away X?" yes/no dialog; the mod announces it next frame.
+            _onDestroyItem.Invoke(invGui, null);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INVENTORY] destroy '{name}' threw: {ex.Message}");
+            return null;
+        }
+    }
 }
