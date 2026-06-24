@@ -2392,6 +2392,11 @@ internal static class GUIAccessibility
         // selling to the vendor draws down their money. Enter just re-reads it.
         AddVendorMoneyRow(vendor);
 
+        // Right after money, a row for the vendor's level (tier 1–3) and how far the on-screen
+        // level-up progress bar has filled toward the next tier. Trading raises the bar, so a
+        // blind player otherwise has no cue that a vendor is about to level up. Read-only/dynamic.
+        AddVendorLevelRow(vendor);
+
         Plugin.Log.LogInfo($"[VENDOR] Discovered {Elements.Count} element(s)");
     }
 
@@ -2411,6 +2416,66 @@ internal static class GUIAccessibility
             // button SendMessage path (which would poke the vendor GUI's own components).
             OnActivate = () => ScreenReader.Say(DescribeVendorMoney(vendor))
         });
+    }
+
+    // Add a read-only "Vendor level" row just after the money row. Anchored on the vendor panel
+    // (the money row already claims vendor.gameObject), so it survives the activeInHierarchy filter
+    // and stays distinct from the money row's de-dup guard.
+    private static void AddVendorLevelRow(VendorGUI vendor)
+    {
+        if (vendor?.trading?.trader == null) return;
+        var anchor = vendor.vendor_panel != null ? vendor.vendor_panel.gameObject : vendor.gameObject;
+        if (Elements.Any(e => e.Go == anchor)) return;
+
+        // Sit right behind the money row (index 0) when it exists, else at the front.
+        int at = Elements.Count > 0 && Elements[0].Go == vendor.gameObject ? 1 : 0;
+        Elements.Insert(at, new GUIElement
+        {
+            Go = anchor,
+            Type = ElementType.Button,
+            Label = "Vendor level",
+            ReadDynamic = () => DescribeVendorLevel(vendor),
+            OnActivate = () => ScreenReader.Say(DescribeVendorLevel(vendor))
+        });
+    }
+
+    // The vendor's current tier (1–3) and how full the level-up progress bar is toward the next
+    // tier. The bar value mirrors what the game draws: Vendor.FillDrawingMultiInventory marks the
+    // cur_tier+1 inventory's VendorTierInfo as progressbar_visible and stores its 0–1 progress.
+    internal static string DescribeVendorLevel(VendorGUI vendor)
+    {
+        try
+        {
+            var trader = vendor?.trading?.trader;
+            if (trader == null) return "Vendor level unknown";
+
+            int tier = trader.cur_tier;
+            if (tier >= 3) return $"Vendor level {tier} of 3, maximum level reached";
+
+            float progress = -1f;
+            var inv = trader.drawing_inventory;
+            if (inv?.all != null)
+            {
+                foreach (var i in inv.all)
+                {
+                    if (i?.vendor_tier_info != null && i.vendor_tier_info.progressbar_visible)
+                    {
+                        progress = i.vendor_tier_info.progress;
+                        break;
+                    }
+                }
+            }
+
+            if (progress < 0f)
+                return $"Vendor level {tier} of 3";
+
+            int percent = Mathf.Clamp(Mathf.RoundToInt(progress * 100f), 0, 100);
+            return $"Vendor level {tier} of 3, {percent} percent toward level {tier + 1}";
+        }
+        catch
+        {
+            return "Vendor level unknown";
+        }
     }
 
     // How much money the vendor currently has to spend, spoken ("Vendor has 3 gold, 20 silver").
