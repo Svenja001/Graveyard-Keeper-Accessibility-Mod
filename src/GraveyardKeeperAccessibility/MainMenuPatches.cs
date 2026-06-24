@@ -137,6 +137,18 @@ internal static class GUIAccessibility
             return;
         }
 
+        // Sermon / church-donation report (PrayReportGUI): a DialogGUI whose body is a table of
+        // PrayReportItemGUI rows (label + value) — attendance, faith and MONEY collected, the
+        // success chance and any bonuses. The generic path finds no item cells and only the OK
+        // button, so a blind player never hears how much money a sermon brought in, nor what the
+        // donation box ("Spendendose") collected. Read the header and every row aloud; the OK
+        // button (focused below) confirms with Enter, which is what banks the money.
+        if (gui is PrayReportGUI prayReport)
+        {
+            AnnouncePrayReport(prayReport);
+            return;
+        }
+
         // Special handling for dialogue GUIs
         if (guiName.Contains("Dialog") || guiName.Contains("Subtitle") || guiName.Contains("Caption"))
         {
@@ -231,6 +243,8 @@ internal static class GUIAccessibility
         SelectedIndex = -1;
         _watchedSmart = null;
         _watchedPrice = null;
+        // Drop any not-yet-spoken report line if the window's already gone.
+        _pendingReport = null;
 
         InventoryItemHandler.OnGUIClosed(gui);
     }
@@ -320,6 +334,19 @@ internal static class GUIAccessibility
         if (gui is TutorialGUI || gui is BaseTutorialGUI)
         {
             DiscoverTutorialButtons(gui);
+            return;
+        }
+
+        // The sermon / donation report (PrayReportGUI) is a DialogGUI: its rows are info-only
+        // PrayReportItemGUI labels, and the only control is the OK button. Expose a single OK row
+        // so Enter closes/confirms; AnnouncePrayReport reads the rows. (GameKey.Select has no
+        // keyboard binding, so without this Enter wouldn't close it.) We can't reuse the generic
+        // DiscoverDialogButtons here: on this dialog the per-button DialogButtonGUI._gui back-ref
+        // is left null, so its OnClick throws an NRE (Enter appeared to do nothing). See
+        // DiscoverPrayReportButtons, which drives the dialog option directly instead.
+        if (gui is PrayReportGUI)
+        {
+            DiscoverPrayReportButtons(gui);
             return;
         }
 
@@ -816,6 +843,47 @@ internal static class GUIAccessibility
         }
     }
 
+    // Add a single keyboard "OK" row that closes/confirms a PrayReportGUI (sermon or donation
+    // report). The dialog's OK button can't be clicked through DialogButtonGUI.OnClick here — its
+    // _gui back-reference is null on this window, so OnClick NREs (that's why Enter did nothing).
+    // Instead drive the dialog option straight through DialogButtonsGUI.InvokeOption(0): that runs
+    // the very wrapper a real OK click would (Hide + on_hide), so the window closes AND any pending
+    // flow — e.g. banking the donation money — still fires. OnClosePressed is the fallback (also
+    // the path the window's own Select/Back use) when the buttons widget can't be found.
+    private static void DiscoverPrayReportButtons(BaseGUI gui)
+    {
+        var label = "OK";
+        try
+        {
+            var btn = gui.GetComponentsInChildren<DialogButtonGUI>(true)
+                         .FirstOrDefault(b => b != null && b.gameObject.activeInHierarchy);
+            var lbl = ScreenReader.StripNguiCodes(btn?.GetComponentInChildren<UILabel>()?.text)?.Trim();
+            if (!string.IsNullOrWhiteSpace(lbl)) label = lbl;
+        }
+        catch { }
+
+        Elements.Add(new GUIElement
+        {
+            Go = gui.gameObject,
+            Label = label,
+            Type = ElementType.Button,
+            OnActivate = () =>
+            {
+                try
+                {
+                    var buttons = gui.GetComponentInChildren<DialogButtonsGUI>(true);
+                    if (buttons != null) buttons.InvokeOption(0);
+                    else gui.OnClosePressed();
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning($"[PRAY REPORT] close failed: {ex.Message}");
+                    try { gui.OnClosePressed(); } catch { }
+                }
+            }
+        });
+    }
+
     // Speak the entire new-technology popup: the "you've unlocked" subheader (when shown), the
     // tech name, every unlock's name and description, and the cost (for the optional buy variant).
     // Then land focus on the first button so Enter confirms without arrowing.
@@ -901,6 +969,83 @@ internal static class GUIAccessibility
                 catch (Exception ex) { Plugin.Log.LogWarning($"[TUTORIAL] close failed: {ex.Message}"); }
             }
         });
+    }
+
+    // Speak the whole sermon / donation report: the header (e.g. "Sermon report") followed by
+    // every result row in order — "People 12", "Faith 8", "Money 1 silver 50 bronze", the success
+    // outcome and chance, plus any faith/money bonus. Each PrayReportItemGUI row holds a label
+    // (txt, already suffixed with ":") and a value; money values come through as the game's
+    // (gld)/(slv)/(brz) coin tokens, which StripNguiCodes now voices as words. The OK button was
+    // exposed by DiscoverDialogButtons, so we land on it: Enter closes the report and banks the money.
+    // Deferred sermon/donation report line and the time it should be (re-)spoken. See
+    // AnnouncePrayReport for why the read is delayed rather than spoken at open-time.
+    private static string _pendingReport;
+    private static float _pendingReportTime;
+
+    /// <summary>
+    /// Speak a deferred pray-report line once its settle delay has elapsed, as long as the report
+    /// is still the active window. Called every frame from Plugin.Update. interrupt:true so it wins
+    /// over any donation-coin / health-energy speech still draining from the end of the sermon.
+    /// </summary>
+    internal static void FlushPendingReport()
+    {
+        if (_pendingReport == null) return;
+        if (Time.unscaledTime < _pendingReportTime) return;
+
+        var line = _pendingReport;
+        _pendingReport = null;
+        if (_currentGUI is PrayReportGUI)
+            ScreenReader.Say(line, interrupt: true);
+    }
+
+    private static void AnnouncePrayReport(PrayReportGUI gui)
+    {
+        try
+        {
+            var parts = new List<string>();
+
+            var header = ScreenReader.StripNguiCodes(gui.label_1?.text)?.Trim();
+            if (!string.IsNullOrWhiteSpace(header) && header.IndexOf('!') < 0)
+                parts.Add(header);
+
+            foreach (var row in gui.GetComponentsInChildren<PrayReportItemGUI>(true))
+            {
+                // The prefab row is kept inactive (Open hides it before cloning), so only the
+                // real, populated rows are active.
+                if (row == null || !row.gameObject.activeInHierarchy) continue;
+
+                var t = ScreenReader.StripNguiCodes(row.txt?.text)?.Trim();
+                var v = ScreenReader.StripNguiCodes(row.value?.text)?.Trim();
+                if (string.IsNullOrWhiteSpace(t) && string.IsNullOrWhiteSpace(v)) continue;
+
+                // txt already ends with ":", so "Money:" + " " + "1 silver" reads naturally.
+                if (string.IsNullOrWhiteSpace(v)) parts.Add(t);
+                else if (string.IsNullOrWhiteSpace(t)) parts.Add(v);
+                else parts.Add($"{t} {v}");
+            }
+
+            var body = string.Join(". ", parts);
+            // Focus the OK button (exposed by DiscoverDialogButtons) so Enter closes/confirms.
+            var active = GetActiveElements();
+            SelectedIndex = active.Count > 0 ? 0 : -1;
+
+            var lead = string.IsNullOrWhiteSpace(body) ? "Report" : body;
+            Plugin.Log.LogInfo($"[PRAY REPORT] reading ({parts.Count} rows): {lead}");
+
+            // Don't speak the report at open-time. A sermon ends in a burst of other speech — the
+            // per-coin donation drip and the health/energy/faith change announcements all fire in
+            // the same instant the report opens — and the report kept getting swallowed in that
+            // collision (it reached TTS per the log but was never heard). Defer it: re-assert the
+            // report as one interrupting line a beat later (FlushPendingReport, run every frame),
+            // so it lands as the last, clean thing the player hears after the burst settles.
+            _pendingReport = $"{lead}. Press Enter to close.";
+            _pendingReportTime = Time.unscaledTime + 0.7f;
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[PRAY REPORT] read failed: {ex.Message}");
+            ScreenReader.Say("Report. Press Enter to close.");
+        }
     }
 
     // Speak the full body text of a tutorial window (all visible instruction labels, in order,

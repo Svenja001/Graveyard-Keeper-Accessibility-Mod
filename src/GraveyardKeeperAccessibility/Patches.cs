@@ -98,6 +98,31 @@ internal static class Patches
         }
     }
 
+    // Voice each coin donated into the church donation box during a sermon. A sighted player sees
+    // a little "+3 bronze" bubble pop over the box (EffectBubblesManager) as each praying NPC drops
+    // a coin; a blind player otherwise only hears the generic coin sound. Flow_DonateToBox adds the
+    // amount to the box's "_money" param on every donation, so we hook that and speak the amount.
+    // Tightly filtered: only the "_money" param on the donation box object itself (custom_tag
+    // "donat_box_inside"). The sermon's silent money-spread also touches "_money" but on individual
+    // prayer NPCs (different objects), so those are excluded — we only voice the visible drip.
+    public static void WorldGameObject_AddToParams_Postfix(WorldGameObject __instance, string __0, float __1)
+    {
+        try
+        {
+            if (__1 <= 0f || __0 != "_money" || __instance == null) return;
+            var tag = __instance.custom_tag;
+            if (string.IsNullOrEmpty(tag) || tag.IndexOf("donat_box", StringComparison.OrdinalIgnoreCase) < 0) return;
+
+            // Queue (don't interrupt) so a rapid burst of coins reads as a sequence, e.g.
+            // "3 bronze. 2 bronze. 5 bronze." rather than each cutting off the last.
+            ScreenReader.Say(GUIAccessibility.MoneyToSpeech(__1), interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[DONATION] AddToParams postfix: {ex.Message}");
+        }
+    }
+
     // Announce the map area the player walks into. HUD.UpdateZoneInfo gets the game's own
     // localized zone-name banner (name = GJL.L("zone_"+id), or "..." for open wilderness) every
     // 0.5s; ZoneAnnouncer speaks it when it changes so the player knows when they switch areas.

@@ -85,6 +85,11 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.WorldGameObject_AddToInventory_Postfix),
             typeof(WorldGameObject), "AddToInventory", new[] { typeof(Item) });
 
+        // Voice each coin donated into the church donation box during a sermon ("3 bronze").
+        // See Patches.WorldGameObject_AddToParams_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.WorldGameObject_AddToParams_Postfix),
+            typeof(WorldGameObject), "AddToParams", new[] { typeof(string), typeof(float) });
+
         // Speak earned tech points ("Got 3 green tech points") at the award moment.
         // See Patches.TechPointsDrop_Drop_Postfix.
         TryPatch(harmony, typeof(Patches), nameof(Patches.TechPointsDrop_Drop_Postfix),
@@ -129,6 +134,10 @@ public class Plugin : BaseUnityPlugin
             // Speak any change to the player's health/energy bars ("Got 20 energy", "Lost 3
             // health"). Runs regardless of GUI state so eating from the inventory still announces.
             HealthEnergyAnnouncer.Tick();
+
+            // Speak the sermon/donation report a beat after it opens, so it isn't drowned by the
+            // end-of-sermon burst of coin/health speech. See GUIAccessibility.FlushPendingReport.
+            GUIAccessibility.FlushPendingReport();
 
             // Accessible build placement: while the build ghost is live, this owns the
             // keyboard (arrows move, Enter places, etc.). Skip the rest of the update so the

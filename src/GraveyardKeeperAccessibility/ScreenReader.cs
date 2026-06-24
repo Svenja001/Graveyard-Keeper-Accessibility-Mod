@@ -135,22 +135,30 @@ internal static class ScreenReader
     internal static string StripNguiCodes(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        // The game embeds skull/cross counts as inline sprite tokens, e.g.
-        // "(wskull)20", "(rskull)5", "(cross)10" (the number always immediately
-        // follows the token). Spoken literally these are unintelligible, so turn
-        // them into words like "20 white skulls" / "5 red skulls" / "10 crosses".
+        // The game embeds skull/cross counts and money amounts as inline sprite tokens,
+        // e.g. "(wskull)20", "(rskull)5", "(cross)10", "(gld)10 (slv)20 (brz)5" (the number
+        // always immediately follows the token). Spoken literally these are unintelligible,
+        // so turn them into words like "20 white skulls" / "5 red skulls" / "10 crosses" /
+        // "10 gold" / "20 silver" / "5 bronze" (see Trading.FormatMoney for the coin tokens).
         if (text.Contains('('))
-            text = Regex.Replace(text, @"\((wskull|rskull|skull|cross)\)(-?\d+(?:\.\d+)?)?", SkullTokenToWords);
+            text = Regex.Replace(text, @"\((wskull|rskull|skull|cross|gld|slv|brz)\)(-?\d+(?:\.\d+)?)?", TokenToWords);
         // Strip NGUI color codes: [XXXXXX], [-], [c], [/c], etc.
         if (text.Contains('['))
             text = Regex.Replace(text, @"\[[\da-fA-F]{6}\]|\[-\]|\[/?c\]", "");
         return text;
     }
 
-    private static string SkullTokenToWords(Match m)
+    private static string TokenToWords(Match m)
     {
         string token = m.Groups[1].Value;
         string num = m.Groups[2].Success ? m.Groups[2].Value : null;
+        // Coins (gld/slv/brz) are mass nouns — no singular/plural distinction, "1 gold" reads fine.
+        switch (token)
+        {
+            case "gld": return num != null ? num + " gold" : "gold";
+            case "slv": return num != null ? num + " silver" : "silver";
+            case "brz": return num != null ? num + " bronze" : "bronze";
+        }
         // "(skull)" and "(wskull)" are both the white skull; "(rskull)" is red.
         bool plural = num == null || num != "1";
         string label;
