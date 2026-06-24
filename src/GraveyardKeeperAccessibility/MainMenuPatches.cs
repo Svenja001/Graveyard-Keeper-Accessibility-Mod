@@ -1256,14 +1256,26 @@ internal static class GUIAccessibility
                 ? () => ExpandRecipe(craftGui, captured)
                 : (Action)null;
 
-            Elements.Add(new GUIElement
+            var elem = new GUIElement
             {
                 Go = cri.gameObject,
                 Label = CraftRecipeLabel(cri),
                 Type = ElementType.ItemCell,
                 Cell = cell,
                 OnActivate = onActivate
-            });
+            };
+
+            // Recipes that can be batch-crafted (most cooking-station / furnace foods) carry a
+            // +/- amount control sighted players use to queue several at once. Expose it on
+            // Left/Right: pressing Enter then crafts that many. The label re-reads the live amount.
+            if (!IsMultiquality(cri) && CanCraftMultipleRecipe(craftGui, cri))
+            {
+                elem.ReadDynamic = () => CraftRecipeLabel(captured) + CraftAmountSuffix(captured);
+                elem.OnAdjustRight = () => { captured.OnAmountPlus(); AnnounceFocused(); };
+                elem.OnAdjustLeft = () => { captured.OnAmountMinus(); AnnounceFocused(); };
+            }
+
+            Elements.Add(elem);
             added++;
         }
 
@@ -1809,6 +1821,44 @@ internal static class GUIAccessibility
         return label;
     }
 
+    /// <summary>
+    /// Whether this recipe supports batch crafting in the current window — i.e. the station shows
+    /// the +/- amount buttons (CraftGUI.has_amount_buttons) and the recipe itself allows multiple
+    /// (CraftDefinition.CanCraftMultiple: not durability-/multiquality-gated). When true we let the
+    /// player set how many to make with Left/Right before pressing Enter.
+    /// </summary>
+    private static bool CanCraftMultipleRecipe(CraftGUI craftGui, CraftItemGUI cri)
+    {
+        try
+        {
+            return craftGui != null && craftGui.has_amount_buttons
+                && cri?.current_craft != null && cri.current_craft.CanCraftMultiple();
+        }
+        catch { return false; }
+    }
+
+    private static FieldInfo _amountField;
+
+    /// <summary>The recipe row's currently chosen craft amount (the game's private _amount, min 1).</summary>
+    private static int GetCraftAmount(CraftItemGUI cri)
+    {
+        try
+        {
+            _amountField ??= AccessTools.Field(typeof(CraftItemGUI), "_amount");
+            if (_amountField != null)
+                return (int)_amountField.GetValue(cri);
+        }
+        catch { }
+        return 1;
+    }
+
+    /// <summary>Spoken tail describing the chosen batch amount and how to change it.</summary>
+    private static string CraftAmountSuffix(CraftItemGUI cri)
+    {
+        int amount = GetCraftAmount(cri);
+        return $". Amount {amount}, press Left or Right to change";
+    }
+
     /// <summary>Just the recipe's display name (no "Requires…/Ready" tail), or null.</summary>
     private static string RecipeDisplayName(CraftItemGUI cri)
     {
@@ -1834,8 +1884,11 @@ internal static class GUIAccessibility
     /// item drops it on the ground beside the station (CraftComponent drops player-craft output),
     /// so point the player at it — they can't see it land and would otherwise lose track of it.
     /// </summary>
-    private static string CraftStartedMessage(CraftGUI craftGui, CraftDefinition craft, string recipeName)
+    private static string CraftStartedMessage(CraftGUI craftGui, CraftDefinition craft, string recipeName, int amount = 1)
     {
+        // When several were queued, say so up front so the player knows their batch took.
+        string countPrefix = amount > 1 ? $"{amount} queued. " : "";
+
         try
         {
             var wgo = _crafteryWgoField?.GetValue(craftGui) as WorldGameObject;
@@ -1847,8 +1900,8 @@ internal static class GUIAccessibility
                 catch { }
                 if (string.IsNullOrWhiteSpace(outName)) outName = recipeName;
                 int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
-                if (string.IsNullOrWhiteSpace(outName)) return "Crafting started";
-                return pct >= 1 ? $"Crafting {outName}, {pct} percent done" : $"Started crafting {outName}";
+                if (string.IsNullOrWhiteSpace(outName)) return countPrefix + "Crafting started";
+                return countPrefix + (pct >= 1 ? $"Crafting {outName}, {pct} percent done" : $"Started crafting {outName}");
             }
         }
         catch { }
@@ -1856,10 +1909,10 @@ internal static class GUIAccessibility
         // Instant craft, already finished. If it made a real item it's now on the ground.
         bool dropsItem = false;
         try { dropsItem = craft?.GetFirstRealOutput() != null; } catch { }
-        if (string.IsNullOrWhiteSpace(recipeName)) return "Crafted";
+        if (string.IsNullOrWhiteSpace(recipeName)) return countPrefix + "Crafted";
         return dropsItem
-            ? $"{recipeName} crafted. It dropped on the ground, press E to pick it up"
-            : $"{recipeName} crafted";
+            ? $"{countPrefix}{recipeName} crafted. It dropped on the ground, press E to pick it up"
+            : $"{countPrefix}{recipeName} crafted";
     }
 
     /// <summary>
@@ -2817,6 +2870,7 @@ internal static class GUIAccessibility
             CraftGUI craftStation = null;
             string pressedRecipeName = null;
             CraftDefinition pressedCraftDef = null;
+            int pressedAmount = 1;
             if (_currentGUI is CraftGUI cg && !(MainGame.me?.build_mode_logics?.IsBuilding() == true))
             {
                 craftStation = cg;
@@ -2825,6 +2879,7 @@ internal static class GUIAccessibility
                     var cri = elem.Cell?.GetComponentInParent<CraftItemGUI>();
                     pressedRecipeName = RecipeDisplayName(cri);
                     pressedCraftDef = cri?.current_craft;
+                    pressedAmount = GetCraftAmount(cri);
                 }
                 catch { }
             }
@@ -2854,7 +2909,7 @@ internal static class GUIAccessibility
                 // so re-read the row: crafting consumes ingredients, and the player hears whether
                 // they can still make another (". Ready" -> ". Not enough materials").
                 if (!craftStation.is_shown)
-                    ScreenReader.Say(CraftStartedMessage(craftStation, pressedCraftDef, pressedRecipeName), interrupt: true);
+                    ScreenReader.Say(CraftStartedMessage(craftStation, pressedCraftDef, pressedRecipeName, pressedAmount), interrupt: true);
                 else
                     RefreshCurrentGUI(prevIndex);
             }
