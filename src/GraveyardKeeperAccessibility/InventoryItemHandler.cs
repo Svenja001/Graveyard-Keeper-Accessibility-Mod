@@ -275,11 +275,14 @@ internal static class InventoryItemHandler
 
     /// <summary>
     /// What studying this item at the study table pays out the first time — e.g. "studying gives
-    /// 2 blue, 1 green points". The reward is a one-time "survey" craft (ItemDefinition.GetSurveyCraft,
-    /// id "surv:&lt;item&gt;") whose output holds the tech points; once that craft is in the save's
-    /// completed_one_time_crafts it pays nothing more, so we return null to avoid promising points
-    /// that won't come. Blue points (the "b" pool, the game's Science/Wissenschaft) are the scarce
-    /// early ones, so being able to spot blue-paying items in the bags is the whole point of this.
+    /// 50 blue points, 10 red points". It's a one-time "survey" craft (ItemDefinition.GetSurveyCraft,
+    /// id "surv:&lt;item&gt;") whose <c>output</c> holds the tech points (red/green/blue/violet);
+    /// once it's in the save's completed_one_time_crafts it pays nothing more, so we return null then.
+    ///
+    /// IMPORTANT: we always name a tech point by its COLOUR (PointColorName), never by the game's
+    /// localized item name. The blue point ("b") is named "Wissenschaft" in the German data, which
+    /// collides with the UNRELATED science resource you get from decomposing paper — so calling a
+    /// blue-point reward "Wissenschaft" badly confused players. Blue points are just blue points.
     /// Returns null for items with no study reward or already studied.
     /// </summary>
     private static string DescribeStudyReward(ItemDefinition def)
@@ -298,30 +301,19 @@ internal static class InventoryItemHandler
                 if (outp == null || outp.value <= 0) continue;
                 if (!TechDefinition.TECH_POINTS.Contains(outp.id)) continue;
 
-                // Try to get localized name from the output item's definition first
-                var outpName = ScreenReader.StripNguiCodes(outp.definition?.GetItemName() ?? "")?.Trim();
+                int value = outp.value;
 
-                // If no definition on the output item, try to look it up by ID in GameBalance
-                if (string.IsNullOrWhiteSpace(outpName) && !string.IsNullOrEmpty(outp.id))
+                // The blue ("b") output always carries a phantom +1 over what the player actually
+                // receives in-game (data 51 -> 50 received; data 1 -> 0 received, just a junk filler).
+                // Source of the +1 is unclear, but it's consistent, so we strip it: subtract 1 and
+                // drop the blue entirely if nothing real is left. Other colours have no such offset.
+                if (outp.id == "b")
                 {
-                    try
-                    {
-                        var resourceDef = GameBalance.me?.GetData<ItemDefinition>(outp.id);
-                        if (resourceDef != null)
-                            outpName = ScreenReader.StripNguiCodes(resourceDef.GetItemName() ?? "")?.Trim();
-                    }
-                    catch { }
+                    value -= 1;
+                    if (value <= 0) continue;
                 }
 
-                // Fall back to English color/resource names. TODO: German localization can be added here.
-                if (string.IsNullOrWhiteSpace(outpName))
-                    outpName = PointColorName(outp.id);
-
-                // Hardcoded: single-point blue costs are "Wissenschaft" (study cost), larger amounts are "blue points" (rewards)
-                if (outp.id == "b" && outp.value == 1)
-                    outpName = "Wissenschaft";
-
-                parts.Add($"{outp.value} {outpName}");
+                parts.Add($"{value} {PointColorName(outp.id)}");
             }
             return parts.Count > 0 ? $"studying gives {string.Join(", ", parts)}" : null;
         }

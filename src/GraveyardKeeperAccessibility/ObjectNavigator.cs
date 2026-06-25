@@ -34,6 +34,7 @@ internal enum NavCategory
     Ores,
     Bushes,
     Flowers,
+    Mushrooms,
     Gatherables,
     Fences,
     GravesToDecorate,
@@ -65,6 +66,7 @@ internal static class ObjectNavigator
         NavCategory.Ores,
         NavCategory.Bushes,
         NavCategory.Flowers,
+        NavCategory.Mushrooms,
         NavCategory.Gatherables,
         NavCategory.Fences,
         NavCategory.GravesToDecorate,
@@ -435,6 +437,7 @@ internal static class ObjectNavigator
         NavCategory.Ores => "Ores",
         NavCategory.Bushes => "Bushes",
         NavCategory.Flowers => "Flowers",
+        NavCategory.Mushrooms => "Mushrooms",
         NavCategory.Gatherables => "Gatherables",
         NavCategory.Fences => "Broken fences",
         NavCategory.GravesToDecorate => "Graves to decorate",
@@ -2588,6 +2591,7 @@ internal static class ObjectNavigator
         category == NavCategory.Ores ||
         category == NavCategory.Bushes ||
         category == NavCategory.Flowers ||
+        category == NavCategory.Mushrooms ||
         category == NavCategory.Gatherables;
 
     /// <summary>
@@ -2627,6 +2631,14 @@ internal static class ObjectNavigator
             if (id.IndexOf("flower", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Flowers;
+                return true;
+            }
+            // Mushrooms (mushroom_N, forest_mushroom, mushroom_spawner): hand-picked, want their
+            // own bucket so the player can head straight to them instead of digging through the
+            // generic Gatherables list.
+            if (id.IndexOf("mushroom", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Mushrooms;
                 return true;
             }
             if (axe || id.IndexOf("tree", StringComparison.OrdinalIgnoreCase) >= 0 ||
