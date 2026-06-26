@@ -1989,6 +1989,11 @@ internal static class ObjectNavigator
     {
         ("Tavern", "Tavern"),
         ("House", "Home"),
+        // The church IS a separate teleport interior (place tag "Church", a "teleport_outside"
+        // door at the graveyard). Its zone members (pulpit, candles) are staged far away inside,
+        // so the generic zone anchor sent auto-walk indoors — anchor on the real outdoor door
+        // instead, exactly like the Tavern/Home (the Doors category's "Door outside: Church").
+        ("Church", "Church"),
     };
 
     // World-zone ids NOT to add as landmarks — superseded by a door landmark above (the zone's
