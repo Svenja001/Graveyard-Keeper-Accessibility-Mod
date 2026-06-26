@@ -42,6 +42,16 @@ internal class GUIElement
     // up the slot's child delete_button and wiring Enter to deletion instead of loading.
     internal SaveSlotGUI SaveSlot;
 
+    // Hold-to-repeat support (set only on the resource-craft "zerlegen"/study button). When all
+    // three are set, holding Enter on this element keeps performing the action — one per tick —
+    // until the key is released or the material runs out, so a whole stack of paper can be
+    // decomposed in one go instead of pressing Enter once per sheet. HoldCanRepeat says whether
+    // another repeat is still possible; HoldDoOne performs one silently; HoldSummary speaks the
+    // total once the hold ends. See GUIAccessibility.TryHandleHoldRepeat.
+    internal Func<bool> HoldCanRepeat;
+    internal Action HoldDoOne;
+    internal Action<int> HoldSummary;
+
     internal string ReadLabel()
     {
         if (ReadDynamic != null)
@@ -1427,7 +1437,13 @@ internal static class GUIAccessibility
                     : $"{verb}, not enough, you need {missing}";
             }
 
-            Elements.Add(new GUIElement
+            // Study/decompose crafts (paper -> Wissenschaft, alchemy decompose) are instant and
+            // leave the station open, so holding Enter can chew through a whole stack in one go.
+            // Only wire hold-repeat for those (StudyDoneWord != null); repair/sharpening crafts are
+            // timed and excluded so we never machine-gun a queue of them.
+            bool holdRepeatable = StudyDoneWord(gui) != null;
+
+            var craftElem = new GUIElement
             {
                 Go = gui.craft_button.gameObject,
                 Label = CraftLabel(),
@@ -1467,7 +1483,32 @@ internal static class GUIAccessibility
                     if (_currentGUI is ResourceBasedCraftGUI)
                         RefreshCurrentGUI(SelectedIndex);
                 }
-            });
+            };
+
+            if (holdRepeatable)
+            {
+                // Hold Enter to decompose the whole stack. HoldDoOne performs one craft silently
+                // (the game redraws and updates the button's enabled state in the same call), and
+                // HoldSummary reports the total once the player lets go or the material runs out —
+                // so a screen reader hears one "Decomposed 12" instead of 12 chattered crafts.
+                craftElem.HoldCanRepeat = CanCraftNow;
+                craftElem.HoldDoOne = () =>
+                {
+                    try { gui.OnCraftButtonPressed(); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[RESCRAFT] hold craft failed: {ex.Message}"); }
+                };
+                craftElem.HoldSummary = (count) =>
+                {
+                    if (count <= 0) return;
+                    var done = StudyDoneWord(gui);
+                    var verb = !string.IsNullOrEmpty(done)
+                        ? done
+                        : (ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim() ?? "Crafted");
+                    ScreenReader.Say(count > 1 ? $"{verb} {count}" : verb, interrupt: true);
+                };
+            }
+
+            Elements.Add(craftElem);
         }
 
         // Close button.
@@ -2965,6 +3006,88 @@ internal static class GUIAccessibility
         if (silver > 0) parts.Add($"{silver} silver");
         if (bronze > 0) parts.Add($"{bronze} bronze");
         return parts.Count > 0 ? string.Join(", ", parts) : "nothing";
+    }
+
+    // Hold-to-repeat state for the resource-craft "zerlegen"/study button. A session starts on the
+    // initial Enter press and runs while the key stays held, performing one craft per tick until the
+    // key is released or the material runs out — then a single summary is spoken. _holdElem is kept
+    // so the summary still fires if focus moves off the button mid-release.
+    private static GUIElement _holdElem;
+    private static bool _holdActive;
+    private static int _holdCount;
+    private static float _holdNextTime;
+    private const float HoldInitialDelay = 0.4f;   // grace before auto-repeat starts (a tap = one)
+    private const float HoldRepeatInterval = 0.16f; // gap between repeats while held
+
+    private static void FinishHoldSession()
+    {
+        if (!_holdActive) return;
+        _holdActive = false;
+        var elem = _holdElem;
+        int n = _holdCount;
+        _holdElem = null;
+        _holdCount = 0;
+        try { elem?.HoldSummary?.Invoke(n); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[HOLD] summary failed: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Handles holding Enter on a hold-repeat element (the resource-craft decompose/study button).
+    /// Returns true when it consumed the Enter input so the caller skips the normal Enter handling.
+    /// A quick tap performs exactly one craft (and speaks the summary on release); holding keeps
+    /// crafting until the key is released or the material runs out. For every other element it does
+    /// nothing and returns false, leaving the ordinary Enter -> ActivateSelected path untouched.
+    /// </summary>
+    internal static bool TryHandleHoldRepeat()
+    {
+        var active = GetActiveElements();
+        var elem = (SelectedIndex >= 0 && SelectedIndex < active.Count) ? active[SelectedIndex] : null;
+        bool holdable = elem != null && elem.HoldDoOne != null && elem.HoldCanRepeat != null;
+
+        bool enterHeld = Input.GetKey(KeyCode.Return) || Input.GetKey(KeyCode.KeypadEnter);
+        bool enterDown = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
+
+        // End a running session when the key is released or focus left the hold button.
+        if (_holdActive && (!enterHeld || !holdable))
+            FinishHoldSession();
+
+        if (!holdable) return false;
+
+        if (enterDown)
+        {
+            // Nothing to do (no item chosen / not enough): let the normal action speak the reason.
+            if (!elem.HoldCanRepeat())
+            {
+                elem.OnActivate?.Invoke();
+                return true;
+            }
+            _holdElem = elem;
+            _holdActive = true;
+            _holdCount = 0;
+            elem.HoldDoOne();
+            _holdCount = 1;
+            _holdNextTime = Time.unscaledTime + HoldInitialDelay;
+            if (!elem.HoldCanRepeat()) FinishHoldSession();   // only one was possible
+            return true;
+        }
+
+        if (_holdActive && enterHeld && Time.unscaledTime >= _holdNextTime)
+        {
+            if (elem.HoldCanRepeat())
+            {
+                elem.HoldDoOne();
+                _holdCount++;
+                _holdNextTime = Time.unscaledTime + HoldRepeatInterval;
+            }
+            else
+            {
+                FinishHoldSession();   // ran out while still holding
+            }
+            return true;
+        }
+
+        // While a hold is in progress, keep swallowing Enter so it doesn't leak to other handlers.
+        return _holdActive;
     }
 
     internal static void ActivateSelected()

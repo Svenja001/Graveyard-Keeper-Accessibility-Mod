@@ -23,6 +23,7 @@ internal enum NavCategory
     Quests,
     Landmarks,
     Items,
+    Corpses,
     Doors,
     Graves,
     ExhumableGraves,
@@ -55,6 +56,7 @@ internal static class ObjectNavigator
         NavCategory.Quests,
         NavCategory.Landmarks,
         NavCategory.Items,
+        NavCategory.Corpses,
         NavCategory.Doors,
         NavCategory.Graves,
         NavCategory.ExhumableGraves,
@@ -426,6 +428,7 @@ internal static class ObjectNavigator
         NavCategory.Quests => "Quest targets",
         NavCategory.Landmarks => "Landmarks",
         NavCategory.Items => "Items",
+        NavCategory.Corpses => "Corpses",
         NavCategory.Doors => "Doors",
         NavCategory.Graves => "Graves",
         NavCategory.ExhumableGraves => "Exhumable graves",
@@ -1786,6 +1789,23 @@ internal static class ObjectNavigator
                         Distance = distance
                     });
                 }
+
+                // Any object holding a LOOSE corpse — a morgue bed/fridge, or a prep/autopsy
+                // table — is mirrored into the Corpses list so the player can jump straight to a
+                // body the moment the donkey delivers it. Graves are deliberately excluded: an
+                // interred body is already covered by Graves/ExhumableGraves, and the whole point
+                // of this list is to surface fresh corpses that still need processing, not the
+                // dozens of bodies already buried in the graveyard.
+                if (category != NavCategory.Graves && HoldsBody(obj))
+                {
+                    _byCategory[NavCategory.Corpses].Add(new NavigationTarget
+                    {
+                        Object = obj,
+                        Label = label,
+                        Position = objPos,
+                        Distance = distance
+                    });
+                }
               }
               catch { /* skip this one object, keep building the rest of the list */ }
             }
@@ -2237,7 +2257,7 @@ internal static class ObjectNavigator
                 var distance = Vector2.Distance(pos, playerPos);
                 if (distance > MaxNavDistance) continue;
 
-                itemList.Add(new NavigationTarget
+                var dropTarget = new NavigationTarget
                 {
                     Object = null,
                     Label = GetDropLabelSafe(res),
@@ -2245,7 +2265,13 @@ internal static class ObjectNavigator
                     Distance = distance,
                     IsDrop = true,
                     DropGo = drop.gameObject
-                });
+                };
+                itemList.Add(dropTarget);
+
+                // A corpse lying on the ground is also mirrored into the Corpses list so it shows
+                // up alongside bodies in morgue storage and graves.
+                if (res.definition.type == ItemDefinition.ItemType.Body)
+                    _byCategory[NavCategory.Corpses].Add(dropTarget);
             }
         }
         catch (Exception ex)
@@ -2303,6 +2329,24 @@ internal static class ObjectNavigator
     /// purpose: reading obj.components lazily allocates a manager for every scene object each
     /// refresh, which the discovery loop deliberately avoids.
     /// </summary>
+    /// <summary>
+    /// True when an object currently holds a corpse in its inventory — regardless of where it
+    /// sits. Unlike <see cref="HasExhumableBody"/> this drops the no-cross/no-fence test, so it
+    /// catches bodies in morgue storage (corpse_bed / corpse_fridge), on prep / autopsy tables,
+    /// and in any grave. Used to mirror corpse-holders into the dedicated Corpses list.
+    /// </summary>
+    private static bool HoldsBody(WorldGameObject obj)
+    {
+        try
+        {
+            var body = obj.GetBodyFromInventory();
+            return body != null && body.definition != null
+                && body.definition.type == ItemDefinition.ItemType.Body
+                && !body.IsEmpty();
+        }
+        catch { return false; }
+    }
+
     private static bool HasExhumableBody(WorldGameObject obj)
     {
         try

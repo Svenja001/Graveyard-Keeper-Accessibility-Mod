@@ -23,6 +23,7 @@ public class Plugin : BaseUnityPlugin
         TechPointsAnnouncer.Init(Log);
         HealthEnergyAnnouncer.Init(Log);
         MoneyAnnouncer.Init(Log);
+        CorpseScanner.Init(Log);
         BuildPlacementHandler.Init(Log);
         DialogueChoiceHandler.Init(Log);
         CombatAssist.Init(Log);
@@ -238,6 +239,12 @@ public class Plugin : BaseUnityPlugin
             if (countGUI == 0) return;
 
             var idxGUI = GUIAccessibility.SelectedIndex;
+
+            // Hold Enter to repeat a hold-capable action (the resource-craft "zerlegen"/study
+            // button decomposes a whole stack in one hold). Consumes Enter when it applies so the
+            // single-press path below doesn't also fire; returns false for everything else.
+            if (GUIAccessibility.TryHandleHoldRepeat())
+                return;
 
             if (Input.GetKeyDown(KeyCode.DownArrow))
                 GUIAccessibility.SelectIndex((idxGUI + 1) % countGUI);
@@ -463,6 +470,8 @@ public class Plugin : BaseUnityPlugin
                 MoneyAnnouncer.Announce();
             else if (Input.GetKeyDown(KeyCode.J) && !ctrl)
                 QuestAnnouncer.Open();
+            else if (Input.GetKeyDown(KeyCode.K) && !ctrl)
+                CorpseScanner.Announce();
         }
         catch (Exception ex)
         {
