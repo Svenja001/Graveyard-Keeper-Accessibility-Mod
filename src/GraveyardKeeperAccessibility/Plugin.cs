@@ -47,6 +47,12 @@ public class Plugin : BaseUnityPlugin
         TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.MoveObjectToMouse_Prefix),
             typeof(BuildModeLogics), "MoveObjectToMouse", Type.EmptyTypes);
 
+        // After auto-walk, bias the game's E-interaction onto the object the player navigated to so a
+        // closer neighbour (chest beside a bed, etc.) doesn't steal it. FindCurrentInteractionNearest
+        // is a private, parameterless method. See Patches.InteractionComponent_*_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.InteractionComponent_FindCurrentInteractionNearest_Postfix),
+            typeof(InteractionComponent), "FindCurrentInteractionNearest", Type.EmptyTypes);
+
         // Patch WorldGameObject.Say method for dialogue capture
         TryPatchWorldGameObjectSay(harmony);
 

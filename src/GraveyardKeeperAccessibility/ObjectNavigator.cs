@@ -155,6 +155,17 @@ internal static class ObjectNavigator
     // a point so it works for both WorldGameObjects and ground drops (which aren't WGOs).
     private static Vector2? _walkFacePos;
 
+    // The specific object the player just auto-walked to. On arrival the game's interaction
+    // component picks whatever interactable is nearest/most-aligned in front of the player
+    // (InteractionComponent.GetGameObject scores by angle + distance) — so a chest sitting next to
+    // the bed you navigated to can win, and vanilla E opens the wrong thing. While the player is
+    // still standing at the navigated object we bias that selection back to it (see
+    // Patches.InteractionComponent_FindCurrentInteractionNearest_Postfix) so E acts on the object
+    // they actually chose. Cleared when the player walks away (distance check) or starts a new walk.
+    private static WorldGameObject _arrivedTarget;
+    private static Vector2 _arrivedTargetPos;
+    private const float ArrivedTargetHoldDistance = 2.5f * TileSize;
+
     // Deferred fallback walk: when A* fails we cannot re-issue GoTo synchronously
     // (the game's OnPathFailed clobbers the new request right after our callback),
     // so we queue a straight-line Direct attempt to run on the next frame.
@@ -554,8 +565,10 @@ internal static class ObjectNavigator
         if (_selectedIndex >= list.Count) _selectedIndex = 0;
         var target = list[_selectedIndex];
 
-        // Fresh user walk: clear the "A* already failed" guard so this attempt may use A*/handoff.
+        // Fresh user walk: clear the "A* already failed" guard so this attempt may use A*/handoff,
+        // and drop any previous arrival bias (the new arrival sets its own).
         _astarFailedForWalk = false;
+        ClearArrivedTarget();
 
         // For a faraway target (e.g. the Tavern from home) the A* player graph can't path
         // there in one shot, so auto-walk it in short hops instead of a single GoTo.
@@ -809,6 +822,7 @@ internal static class ObjectNavigator
             _longWalkActive = false;
             _walkFacePos = target.Position;
             FacePlayerAtTarget();
+            SetArrivedTarget(target.Object);
             ScreenReader.Say($"At the door. Press E to step outside, then go to {_exitAssistLabel} again.", interrupt: true);
             _log?.LogInfo("[NAVIGATOR] Exit-assist reached door");
             return;
@@ -840,6 +854,7 @@ internal static class ObjectNavigator
                 // fails) so vanilla E works.
                 _walkFacePos = target.Position;
                 FacePlayerAtTarget();
+                SetArrivedTarget(target.Object);
                 ScreenReader.Say($"Arrived at {target.Label}, {DistanceText(remaining)}", interrupt: true);
             }
             else if (remaining <= FinalApproachReach)
@@ -864,6 +879,7 @@ internal static class ObjectNavigator
             var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
             _walkFacePos = target.Position;
             FacePlayerAtTarget();
+            SetArrivedTarget(target.Object);
             ScreenReader.Say($"Arrived as close as I can walk to {target.Label}, {DistanceText(Vector2.Distance(playerPos, target.Position))}. Look for the entrance ahead.", interrupt: true);
             _log?.LogInfo($"[NAVIGATOR] Reached closest navmesh point to {target.Label}");
         }
@@ -1128,6 +1144,51 @@ internal static class ObjectNavigator
     /// an object usually isn't facing it and plain E does nothing. Facing the object on
     /// arrival rotates that collider onto it, so the vanilla E key just works.
     /// </summary>
+    /// <summary>
+    /// Record the object we just reached so vanilla E targets it even when another interactable is
+    /// closer/more aligned. Ground drops (<paramref name="obj"/> == null) are excluded: they're
+    /// picked up via the game's own highlighted-drop path, not the interaction component.
+    /// </summary>
+    private static void SetArrivedTarget(WorldGameObject obj)
+    {
+        _arrivedTarget = obj;
+        _arrivedTargetPos = MainGame.me?.player?.pos ?? Vector2.zero;
+    }
+
+    private static void ClearArrivedTarget() => _arrivedTarget = null;
+
+    /// <summary>
+    /// The object the player auto-walked to, while they're still standing at it — so the
+    /// E-interaction patch can prefer it over a different interactable that happens to be nearer or
+    /// better aligned. Null once the player walks away from it (or it's gone/removed). Read by
+    /// <see cref="Patches.InteractionComponent_FindCurrentInteractionNearest_Postfix"/>.
+    /// </summary>
+    internal static WorldGameObject PreferredInteractionTarget()
+    {
+        var obj = _arrivedTarget;
+        if (obj == null) return null;
+        try
+        {
+            if (obj.is_removed || obj.gameObject == null || !obj.gameObject.activeInHierarchy)
+            {
+                _arrivedTarget = null;
+                return null;
+            }
+            var pp = MainGame.me?.player?.pos ?? Vector2.zero;
+            if (Vector2.Distance(pp, _arrivedTargetPos) > ArrivedTargetHoldDistance)
+            {
+                _arrivedTarget = null;
+                return null;
+            }
+        }
+        catch
+        {
+            _arrivedTarget = null;
+            return null;
+        }
+        return obj;
+    }
+
     private static void FacePlayerAtTarget()
     {
         var facePos = _walkFacePos;
@@ -1474,6 +1535,8 @@ internal static class ObjectNavigator
                 {
                     _isWalking = false;
                     FacePlayerAtTarget();
+                    // Bias vanilla E onto the object we walked to, not a closer neighbour.
+                    SetArrivedTarget(_shortWalkTarget.Object);
                     ScreenReader.Say($"Arrived at {label}", interrupt: true);
                     _log?.LogInfo($"[NAVIGATOR] Arrived at {label} ({method})");
                 },
@@ -1571,6 +1634,7 @@ internal static class ObjectNavigator
             _astarFailedForWalk = false;
             _exitAssisting = false;
             _hasBusyPos = false;
+            ClearArrivedTarget();
             ReleaseScriptControl();
             ScreenReader.Say("Navigation cancelled", interrupt: true);
             _log?.LogInfo("[NAVIGATOR] Navigation aborted after teleport");

@@ -362,6 +362,45 @@ internal static class Patches
         return null;
     }
 
+    // Cached reflection handle for the private InteractionComponent._collisions list (the objects
+    // currently inside the player's forward interaction collider).
+    private static System.Reflection.FieldInfo _interactionCollisionsField;
+
+    // Bias the game's E-interaction toward the object the player just auto-walked to. Each frame the
+    // interaction component recomputes which interactable is "nearest" in front of the player
+    // (InteractionComponent.GetGameObject scores by facing angle + distance), and that object is
+    // exactly what vanilla E acts on (FindObjectForInteraction returns interaction.nearest). So when
+    // two points of interest sit close together — a chest beside the bed, an object next to the
+    // church door — the wrong one can win the score and E opens it instead. While the player is
+    // still standing at the object they navigated to, AND it's genuinely inside the interaction
+    // collider, force it to be "nearest" so E acts on the object they actually chose. Scoped to the
+    // player's own interaction component (NPCs keep their normal selection); leaves drops alone.
+    public static void InteractionComponent_FindCurrentInteractionNearest_Postfix(
+        InteractionComponent __instance, ref WorldGameObject __result)
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null || __instance != player.components?.interaction) return;
+
+            var preferred = ObjectNavigator.PreferredInteractionTarget();
+            if (preferred == null || ReferenceEquals(__result, preferred)) return;
+
+            _interactionCollisionsField ??= AccessTools.Field(typeof(InteractionComponent), "_collisions");
+            if (_interactionCollisionsField?.GetValue(__instance) is not List<WorldGameObject> collisions)
+                return;
+
+            // Only override when the navigated object is actually in reach (inside the collider), so
+            // we never highlight/interact something the player can't physically touch from here.
+            if (collisions.Contains(preferred))
+                __result = preferred;
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[NAVIGATOR] interaction-nearest bias: {ex.Message}");
+        }
+    }
+
     // While we drive the placement ghost from the keyboard, suppress the game's mouse-follow.
     // BuildModeLogics.UpdateWhilePlacing -> ProcessMovement -> MoveObjectToMouse snaps the ghost
     // back onto the cursor every frame; skipping it lets our arrow-key MoveCurrentByDir steps
