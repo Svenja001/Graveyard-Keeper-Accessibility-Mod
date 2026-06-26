@@ -54,6 +54,41 @@ internal static class SkullInfo
         }
     }
 
+    /// <summary>
+    /// The skull score of a single body part (flesh, bones, blood, organs, skull) as shown in
+    /// the autopsy grid — e.g. "2 white" (raises grave value) or "1 red" (lowers it). Each part
+    /// carries its own red (<see cref="Item.GetRedSkullsValue"/> = q_minus) and white
+    /// (<see cref="Item.GetWhiteSkullsValue"/> = q_plus) values, which is what makes one part
+    /// "good" and another "bad". Returns null for non-part items, "no skull value" for a part
+    /// that contributes nothing.
+    /// </summary>
+    internal static string DescribePart(Item part)
+    {
+        if (part == null || part.definition == null || part.IsEmpty()) return null;
+
+        var type = part.definition.type;
+        if (type != ItemDefinition.ItemType.BodyUniversalPart
+            && type != ItemDefinition.ItemType.BodyBodyPart
+            && type != ItemDefinition.ItemType.SoulBodyPart)
+            return null;
+
+        try
+        {
+            int red = part.GetRedSkullsValue();     // q_minus — bad, lowers grave value
+            int white = part.GetWhiteSkullsValue();  // q_plus  — good, raises grave value
+            if (red == 0 && white == 0) return "no skull value";
+
+            var bits = new List<string>();
+            if (red != 0) bits.Add($"{red} red");
+            if (white != 0) bits.Add($"{white} white");
+            return string.Join(", ", bits);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static bool IsBody(Item item)
     {
         return item != null

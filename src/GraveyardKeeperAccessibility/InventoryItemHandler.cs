@@ -265,6 +265,12 @@ internal static class InventoryItemHandler
             if (!string.IsNullOrEmpty(perks))
                 name = $"{name}, {perks}";
 
+            // Body parts in the autopsy grid each carry their own skull score (red = bad, white =
+            // good); the on-screen skull pips never voice, so speak the values — "flesh, 2 white".
+            var partSkulls = SkullInfo.DescribePart(item);
+            if (!string.IsNullOrEmpty(partSkulls))
+                name = $"{name}, {partSkulls}";
+
             return item.value > 1 ? $"{name}, {item.value}" : name;
         }
         catch
