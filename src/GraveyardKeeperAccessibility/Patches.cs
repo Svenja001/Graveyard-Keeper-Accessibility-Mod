@@ -112,6 +112,18 @@ internal static class Patches
         {
             if (__instance == null || __0 == null || __0.is_tech_point) return true;
 
+            // Stories ("story:1/2/3") are always player rewards — DropStory drops them with
+            // Direction.ToPlayer. They reach here from quest flow nodes (Flow_DropStory /
+            // Flow_SetTaskState) as task rewards with NO active Survey craft, so the craft gate
+            // below misses them and they're left on the ground where a blind player can never find
+            // them. Auto-collect any story into the bag (the AddToInventory postfix then voices
+            // "Got a story"); fall back to a ground drop only if the bag is full.
+            if (__0.id != null && __0.id.StartsWith("story", StringComparison.Ordinal))
+            {
+                var storyPlayer = MainGame.me?.player;
+                if (storyPlayer != null) return !storyPlayer.AddToInventory(__0);
+            }
+
             // Only intercept while THIS station is finishing a survey craft.
             var craft = (__instance.obj_def != null && __instance.obj_def.has_craft)
                 ? __instance.components?.craft : null;
