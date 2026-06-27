@@ -217,6 +217,28 @@ internal static class GUIAccessibility
             return;
         }
 
+        // Slot-based "combine" stations: the alchemy combiner (put two ingredients together to
+        // get a mixture) and the organ enhancer (improve an organ's skull values). The slots are
+        // empty when the window opens, so a plain "2 items" header would be wrong and unhelpful;
+        // give a short how-to and focus the first slot so the player knows to fill it.
+        if (gui is MixedCraftGUI || gui is OrganEnhancerGUI)
+        {
+            var intro = gui is MixedCraftGUI
+                ? "Combine ingredients. Fill the slots, then combine."
+                : "Organ enhancer. Choose an organ, then continue.";
+            var slots = GetActiveElements();
+            if (slots.Count > 0)
+            {
+                SelectedIndex = 0;
+                ScreenReader.Say($"{intro} {slots[0].ReadLabel()}");
+            }
+            else
+            {
+                ScreenReader.Say(intro);
+            }
+            return;
+        }
+
         // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
@@ -402,6 +424,24 @@ internal static class GUIAccessibility
         if (gui is ResourceBasedCraftGUI resourceCraftGui)
         {
             DiscoverResourceBasedCraft(resourceCraftGui);
+            return;
+        }
+
+        // The alchemy "combine" table (MixedCraftGUI) and the organ enhancer (OrganEnhancerGUI)
+        // both work by putting item(s) into slots that start EMPTY, then pressing an action
+        // button. The generic item-cell discovery skips empty cells (and the action button is a
+        // GamepadSelectableButton, not a plain UIButton), so a blind player has no slot to start
+        // from. Expose each slot (Enter opens the shared resource picker, which is already
+        // accessible) plus the action button. MixedCraftGUI backs every tier of alchemy combiner,
+        // so one handler covers all of them.
+        if (gui is MixedCraftGUI mixedCraftGui)
+        {
+            DiscoverMixedCraft(mixedCraftGui);
+            return;
+        }
+        if (gui is OrganEnhancerGUI organEnhancerGui)
+        {
+            DiscoverOrganEnhancer(organEnhancerGui);
             return;
         }
 
@@ -1523,6 +1563,158 @@ internal static class GUIAccessibility
         }
 
         Plugin.Log.LogInfo($"[RESCRAFT] discovered station, {Elements.Count} element(s)");
+    }
+
+    /// <summary>
+    /// The alchemy "combine" table (MixedCraftGUI): a row of ingredient slots that start empty
+    /// plus a single combine button. Putting two ingredients into the slots and pressing combine
+    /// produces a mixture. Each slot is a BaseItemCellGUI whose press fires the game's own
+    /// OnItemSelect, opening the shared resource picker (already navigable) to pick an ingredient;
+    /// the picked item then fills the slot. The same GUI backs every tier of alchemy combiner, so
+    /// this one handler makes all of them accessible.
+    /// </summary>
+    private static void DiscoverMixedCraft(MixedCraftGUI gui)
+    {
+        // The opened preset is the only Activated MixedCraftPresetGUI; its `items` array is the
+        // ordered list of ingredient slots (2 for alchemy).
+        var preset = gui.GetComponentsInChildren<MixedCraftPresetGUI>(true)
+            .FirstOrDefault(p => p != null && p.gameObject.activeInHierarchy && p.items != null);
+
+        if (preset != null)
+        {
+            for (int i = 0; i < preset.items.Length; i++)
+            {
+                var cell = preset.items[i];
+                if (cell == null || !cell.gameObject.activeInHierarchy) continue;
+                int n = i;
+
+                string SlotLabel()
+                {
+                    var pos = $"Slot {n + 1}";
+                    if (cell.id_empty)
+                        return $"{pos}, empty. Enter to choose an ingredient";
+                    var d = InventoryItemHandler.DescribeItemCell(cell);
+                    return string.IsNullOrEmpty(d) ? pos : $"{pos}, {d}. Enter to change";
+                }
+
+                Elements.Add(new GUIElement
+                {
+                    Go = cell.gameObject,
+                    Label = SlotLabel(),
+                    ReadDynamic = SlotLabel,
+                    Type = ElementType.ItemCell,
+                    Cell = cell
+                });
+            }
+        }
+
+        // The combine button. OnCraftPressed gates on its own IsCraftAllowed (both slots filled),
+        // and the button's UIButton.isEnabled mirrors that, so use it for the label/gate. The
+        // station stays open and clears the slots after a combine, so refresh to re-read them.
+        AddSlotStationButton(gui, gui.GetComponentInChildren<GamepadSelectableButton>(true),
+            "Combine", "add ingredients to the slots first", () => gui.OnCraftPressed(),
+            refreshDone: "Combined");
+
+        AddStationCloseRow(gui, () => gui.OnClosePressed());
+        Plugin.Log.LogInfo($"[MIXEDCRAFT] discovered, {Elements.Count} element(s)");
+    }
+
+    /// <summary>
+    /// The organ enhancer (OrganEnhancerGUI): a single slot for an organ, then a button that
+    /// continues into the regular crafting window (CraftGUI, already accessible) to apply the
+    /// enhancement. Same empty-slot + resource-picker pattern as the alchemy combiner.
+    /// </summary>
+    private static void DiscoverOrganEnhancer(OrganEnhancerGUI gui)
+    {
+        var cell = gui.GetComponentsInChildren<BaseItemCellGUI>(true)
+            .FirstOrDefault(c => c != null && c.gameObject.activeInHierarchy);
+        if (cell != null)
+        {
+            string SlotLabel()
+            {
+                if (cell.id_empty)
+                    return "Organ to enhance, empty. Enter to choose an organ";
+                var d = InventoryItemHandler.DescribeItemCell(cell);
+                return string.IsNullOrEmpty(d) ? "Organ to enhance" : $"Organ to enhance, {d}. Enter to change";
+            }
+
+            Elements.Add(new GUIElement
+            {
+                Go = cell.gameObject,
+                Label = SlotLabel(),
+                ReadDynamic = SlotLabel,
+                Type = ElementType.ItemCell,
+                Cell = cell
+            });
+        }
+
+        // Pressing this opens the regular crafting window for the chosen organ, so there's nothing
+        // to refresh here — CheckForNewGUI announces the CraftGUI that opens next.
+        AddSlotStationButton(gui, gui.GetComponentInChildren<GamepadSelectableButton>(true),
+            "Continue", "choose an organ first", () => gui.OnChooseButtonPress(), refreshDone: null);
+
+        AddStationCloseRow(gui, () => gui.OnClosePressed());
+        Plugin.Log.LogInfo($"[ORGANENHANCER] discovered, {Elements.Count} element(s)");
+    }
+
+    /// <summary>
+    /// Add the action button shared by the slot-based combine stations. The button is a
+    /// GamepadSelectableButton whose ui_button.isEnabled mirrors the station's own "can craft"
+    /// check, so it both labels availability and gates the press. When <paramref name="refreshDone"/>
+    /// is non-null the station stays open after the action (alchemy combine clears the slots), so
+    /// re-discover and re-read, led by that word; when null the action opens another window.
+    /// </summary>
+    private static void AddSlotStationButton(BaseGUI gui, GamepadSelectableButton btn,
+        string defaultVerb, string disabledHint, Action onPress, string refreshDone)
+    {
+        if (btn == null) return;
+
+        bool CanPress() => btn.ui_button != null && btn.ui_button.isEnabled;
+        string Verb()
+        {
+            var t = ScreenReader.StripNguiCodes(btn.ui_button?.GetComponentInChildren<UILabel>(true)?.text)?.Trim();
+            return string.IsNullOrEmpty(t) ? defaultVerb : t;
+        }
+        string Label() => CanPress() ? Verb() : $"{Verb()}, {disabledHint}";
+
+        Elements.Add(new GUIElement
+        {
+            Go = btn.gameObject,
+            Label = Label(),
+            ReadDynamic = Label,
+            Type = ElementType.Button,
+            OnActivate = () =>
+            {
+                if (!CanPress())
+                {
+                    ScreenReader.Say(disabledHint);
+                    return;
+                }
+                try { onPress(); }
+                catch (Exception ex) { Plugin.Log.LogWarning($"[SLOTCRAFT] action failed: {ex.Message}"); }
+
+                // If the station stays open (combine), re-read the now-empty slots; the mixture
+                // itself is announced separately by the item-pickup announcer.
+                if (!string.IsNullOrEmpty(refreshDone) && _currentGUI == gui)
+                    RefreshCurrentGUI(0, refreshDone);
+            }
+        });
+    }
+
+    /// <summary>
+    /// A "Close" row for stations with no exposed close-button field. Enter drives the GUI's own
+    /// OnClosePressed (Escape also works natively); listing it keeps closing reachable by keyboard
+    /// navigation alone.
+    /// </summary>
+    private static void AddStationCloseRow(BaseGUI gui, Action onClose)
+    {
+        Elements.Add(new GUIElement
+        {
+            Go = gui.gameObject,
+            Label = "Close",
+            Type = ElementType.Button,
+            OnActivate = () => { try { onClose(); } catch (Exception ex) { Plugin.Log.LogWarning($"[SLOTCRAFT] close failed: {ex.Message}"); } }
+        });
     }
 
     /// <summary>
