@@ -41,6 +41,10 @@ internal static class CorpseScanner
             {
                 if (obj == null || obj.is_removed) continue;
 
+                // Skip DLC "ruins" the player doesn't own (souls zone, etc.) — uniform with the
+                // proximity/navigation filters, even though these hold no body today.
+                if (!ObjectNavigator.IsObjectDlcAvailable(obj)) continue;
+
                 try
                 {
                     if (obj.obj_def != null

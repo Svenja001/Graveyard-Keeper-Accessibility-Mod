@@ -1781,6 +1781,10 @@ internal static class ObjectNavigator
                 if (obj == null || obj.is_removed) continue;
                 if (InteractionDetector.IsPlayer(obj) || InteractionDetector.IsPrefab(obj)) continue;
 
+                // Skip DLC "ruins" the player doesn't own (souls zone, Euric's room, etc.) — they
+                // spawn into every save regardless of ownership but are inert without the DLC.
+                if (!IsObjectDlcAvailable(obj)) continue;
+
                 if (!TryClassify(obj, out var category)) continue;
 
                 // The game culls off-screen objects by deactivating their GameObject (they
@@ -2043,6 +2047,48 @@ internal static class ObjectNavigator
             return DLCEngine.DLCVersion.Souls;
 
         return null;
+    }
+
+    /// <summary>
+    /// The object-level twin of <see cref="ZoneRequiredDLC"/>. Souls-DLC "ruins" — broken glass,
+    /// the soul machines, the rusty dungeon hatch, Euric's abandoned room — are spawned into every
+    /// save by a GameSave save-version migration (GameSave.cs, the <c>num &lt;= 1310</c> block)
+    /// REGARDLESS of DLC ownership, so they sit in the scene as inert set-dressing for players who
+    /// don't own the DLC. ObjectDefinition has no requires_dlc field, so we infer membership from
+    /// the obj_id using deliberately specific tokens (hatch_rust not "hatch", broken_glass not
+    /// "glass") to avoid catching base-game objects. Buying the DLC flips IsDLCAvailable and they
+    /// reappear with no code change.
+    /// </summary>
+    internal static DLCEngine.DLCVersion? ObjectRequiredDLC(string objId)
+    {
+        if (string.IsNullOrEmpty(objId)) return null;
+        var id = objId.ToLowerInvariant();
+
+        if (id.Contains("soul")              // souls_zone_wall_closed, soul_healer_broken, souls_builddesk, candelabrum_3_3_souls, ...
+            || id.Contains("broken_glass")   // pile_of_broken_glass_1..6
+            || id.Contains("smiler")         // smilers_box_closed
+            || id.Contains("hatch_rust")     // rusty souls-dungeon hatch (NOT the base cellar hatch)
+            || id.Contains("dungeon_source") // dungeon_source_diamond
+            || id.Contains("euric")          // eurics_room_* (abandoned set-dressing)
+            || id.Contains("sin_shard"))     // sin_shard_body_part (the game itself gates this on Souls)
+            return DLCEngine.DLCVersion.Souls;
+
+        return null;
+    }
+
+    /// <summary>
+    /// True if <paramref name="wgo"/> may be announced/navigated — i.e. it's base-game content, or
+    /// it's DLC content the player actually owns (live gamedata_*.dat check). Used to suppress the
+    /// DLC "ruins" that spawn into the world regardless of ownership (see <see cref="ObjectRequiredDLC"/>).
+    /// </summary>
+    internal static bool IsObjectDlcAvailable(WorldGameObject wgo)
+    {
+        try
+        {
+            var req = ObjectRequiredDLC(wgo?.obj_id);
+            return !req.HasValue || DLCEngine.IsDLCAvailable(req.Value);
+        }
+        catch { return true; }
     }
 
     /// <summary>

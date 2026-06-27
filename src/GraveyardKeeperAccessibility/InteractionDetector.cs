@@ -834,6 +834,9 @@ internal static class InteractionDetector
             var nearby = allObjects
                 .Where(obj => obj != null && !obj.is_removed && !IsPlayer(obj) && !IsPrefab(obj))
                 .Where(obj => obj.gameObject.activeInHierarchy)
+                // Don't announce DLC "ruins" (souls zone, Euric's room, ...) the player doesn't own;
+                // they spawn into every save regardless of ownership but are inert without the DLC.
+                .Where(obj => ObjectNavigator.IsObjectDlcAvailable(obj))
                 .OrderBy(obj => Vector3.Distance(obj.transform.position, playerPos))
                 .FirstOrDefault();
 
