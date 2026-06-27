@@ -217,6 +217,24 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The dungeon level picker: say how many levels are reachable and focus the first one
+        // (the rest are read as the player arrows through). Without this the generic header would
+        // announce the type name "DungeonWindow" and every tile would have read "bg2".
+        if (gui is DungeonWindowGUI)
+        {
+            var levels = GetActiveElements();
+            if (levels.Count > 0)
+            {
+                SelectedIndex = 0;
+                ScreenReader.Say($"Dungeon. {DungeonAvailabilitySummary(levels)}. {levels[0].ReadLabel()}");
+            }
+            else
+            {
+                ScreenReader.Say("Dungeon. No levels available");
+            }
+            return;
+        }
+
         // Slot-based "combine" stations: the alchemy combiner (put two ingredients together to
         // get a mixture) and the organ enhancer (improve an organ's skull values). The slots are
         // empty when the window opens, so a plain "2 items" header would be wrong and unhelpful;
@@ -471,6 +489,17 @@ internal static class GUIAccessibility
         if (gui is NPCsListGUI npcsList)
         {
             DiscoverNPCsList(npcsList);
+            return;
+        }
+
+        // The dungeon entrance opens a level picker (DungeonWindowGUI): 15 DungeonLevelGUIItem
+        // tiles, each labelled only with a bare level number and backed by a UIButton whose
+        // GameObject is the background sprite ("bg2") — so the generic path read "bg2" for every
+        // tile. List each level explicitly with its state (current / completed / locked); Enter
+        // descends into an unlocked level (DungeonLevelGUIItem.OnPressed).
+        if (gui is DungeonWindowGUI dungeonWindow)
+        {
+            DiscoverDungeonLevels(dungeonWindow);
             return;
         }
 
@@ -778,6 +807,87 @@ internal static class GUIAccessibility
                 SaveSlot = slot
             });
         }
+    }
+
+    // DungeonLevelGUIItem.state is private; cache the field so we can tell apart an enterable
+    // level (Active), the one the player is currently in (Selected) and a locked one (Inactive).
+    private static FieldInfo _dungeonStateField;
+
+    // Build one navigable row per dungeon level shown in the entrance picker. The game tiles 15
+    // levels but only the cleared-so-far run is enterable; the rest are locked until the previous
+    // level is completed. Each row reads "Level N" plus its state; Enter on an unlocked level
+    // descends into it (DungeonLevelGUIItem.OnPressed, which no-ops on locked/current tiles).
+    private static void DiscoverDungeonLevels(DungeonWindowGUI gui)
+    {
+        var items = gui.GetComponentsInChildren<DungeonLevelGUIItem>(true);
+        Plugin.Log.LogInfo($"[DiscoverDungeonLevels] Found {items.Length} DungeonLevelGUIItem tiles");
+
+        // The picker clones from an inactive prefab and rebuilds the tiles each Open; order them
+        // by level so arrowing goes 1, 2, 3, … instead of in clone order.
+        foreach (var item in items.Where(i => i != null && i.gameObject.activeInHierarchy)
+                                   .OrderBy(i => i.dungeon_level))
+        {
+            var captured = item;
+            Elements.Add(new GUIElement
+            {
+                Go = item.gameObject,
+                Label = DungeonLevelLabel(item),
+                Type = ElementType.Button,
+                OnActivate = () =>
+                {
+                    try
+                    {
+                        if (DungeonLevelState(captured) == DungeonLevelGUIItem.ButtonState.Active)
+                            captured.OnPressed();
+                        else
+                            ScreenReader.Say(DungeonLevelLabel(captured));
+                    }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[DUNGEON] enter failed: {ex.Message}"); }
+                }
+            });
+        }
+    }
+
+    private static DungeonLevelGUIItem.ButtonState DungeonLevelState(DungeonLevelGUIItem item)
+    {
+        try
+        {
+            _dungeonStateField ??= AccessTools.Field(typeof(DungeonLevelGUIItem), "state");
+            if (_dungeonStateField != null)
+                return (DungeonLevelGUIItem.ButtonState)_dungeonStateField.GetValue(item);
+        }
+        catch { }
+        // Fall back to the button's enabled flag: it's on only for an enterable (Active) tile.
+        return (item.button != null && item.button.enabled)
+            ? DungeonLevelGUIItem.ButtonState.Active
+            : DungeonLevelGUIItem.ButtonState.Inactive;
+    }
+
+    // "Level 3, current" / "Level 1, completed" / "Level 2" / "Level 4, locked".
+    private static string DungeonLevelLabel(DungeonLevelGUIItem item)
+    {
+        var n = item.dungeon_level;
+        switch (DungeonLevelState(item))
+        {
+            case DungeonLevelGUIItem.ButtonState.Selected:
+                return $"Level {n}, current";
+            case DungeonLevelGUIItem.ButtonState.Inactive:
+                return $"Level {n}, locked";
+            default:
+                bool completed = false;
+                try { completed = MainGame.me.save.dungeons.GetSavedDungeon(n).is_completed; } catch { }
+                return completed ? $"Level {n}, completed" : $"Level {n}";
+        }
+    }
+
+    // "1 level open" / "3 levels open, deeper ones locked" — a short count of how many tiles the
+    // player can actually descend into, plus a note when locked levels remain beyond them.
+    private static string DungeonAvailabilitySummary(List<GUIElement> levels)
+    {
+        int open = levels.Count(e => !e.Label.EndsWith("locked", StringComparison.OrdinalIgnoreCase));
+        int locked = levels.Count - open;
+        var head = open == 1 ? "1 level open" : $"{open} levels open";
+        return locked > 0 ? $"{head}, deeper ones locked" : head;
     }
 
     // Build one navigable row per known NPC shown in the NPCs/quests tab. Each row's label

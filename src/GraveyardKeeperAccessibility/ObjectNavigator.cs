@@ -37,6 +37,7 @@ internal enum NavCategory
     Flowers,
     Mushrooms,
     Gatherables,
+    Breakables,
     Fences,
     GravesToDecorate,
     Buildables,
@@ -70,6 +71,7 @@ internal static class ObjectNavigator
         NavCategory.Flowers,
         NavCategory.Mushrooms,
         NavCategory.Gatherables,
+        NavCategory.Breakables,
         NavCategory.Fences,
         NavCategory.GravesToDecorate,
         NavCategory.Buildables,
@@ -453,6 +455,7 @@ internal static class ObjectNavigator
         NavCategory.Flowers => "Flowers",
         NavCategory.Mushrooms => "Mushrooms",
         NavCategory.Gatherables => "Gatherables",
+        NavCategory.Breakables => "Breakables",
         NavCategory.Fences => "Broken fences",
         NavCategory.GravesToDecorate => "Graves to decorate",
         NavCategory.Buildables => "Built objects",
@@ -2751,7 +2754,8 @@ internal static class ObjectNavigator
         category == NavCategory.Bushes ||
         category == NavCategory.Flowers ||
         category == NavCategory.Mushrooms ||
-        category == NavCategory.Gatherables;
+        category == NavCategory.Gatherables ||
+        category == NavCategory.Breakables;
 
     /// <summary>
     /// Classify a tool-worked / hand-gathered resource node into Trees, Stones, Ores, Bushes or
@@ -2779,6 +2783,21 @@ internal static class ObjectNavigator
             if (!axe && !pickaxe && !shovel && !hand) return false;
 
             var id = obj.obj_id ?? "";
+            // Dungeon furniture/loot props (dungeon_obj_chair_*, dungeon_obj_bench*, barrelNN,
+            // crates, vases) are destroyed by whacking them with a tool, so they carry an Axe
+            // tool_action and used to fall straight into Trees. They are not trees — give them
+            // their own Breakables bucket so the dungeon's smashable loot is found on its own and
+            // doesn't pollute the Trees list. Matched by id keyword, checked before the Axe→Trees
+            // rule below.
+            if (id.IndexOf("dungeon_obj", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("barrel", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("crate", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("vase", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("urn", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Breakables;
+                return true;
+            }
             if (id.IndexOf("bush", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Bushes;
