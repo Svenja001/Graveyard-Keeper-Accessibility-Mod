@@ -58,7 +58,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithNpcQuestInfo(WithCraftStatus(WithRepairInfo(GetObjectLabel(target), target), target), target);
+                        var label = WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target);
                         ScreenReader.Say(label, interrupt: true);
                         _lastAnnouncedObject = target.name;
                     }
@@ -71,7 +71,7 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var label = WithNpcQuestInfo(WithCraftStatus(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby);
+                    var label = WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
@@ -419,6 +419,127 @@ internal static class InteractionDetector
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The craft that upgrades a placed station to its next, already-researched tier. An upgrade in
+    /// GK has no dedicated code — it is just a <c>change_wgo</c> craft (like a repair) that swaps the
+    /// station for a better object via <c>CraftComponent.OnCraftFinished → ReplaceWithObject</c>. A
+    /// sighted player sees a floating upgrade icon; a blind player gets nothing. We surface the craft
+    /// that <see cref="GetRepairCraft"/> deliberately ignores ("ordinary stations with an
+    /// upgrade/grow change_wgo craft"), filtered so we don't mistake repairs, fences, or growing
+    /// plants/trees for upgrades. Returns null when the station can't be upgraded.
+    /// </summary>
+    internal static CraftDefinition GetUpgradeCraft(WorldGameObject wgo)
+    {
+        try
+        {
+            if (wgo?.obj_def == null || !wgo.obj_def.has_craft) return null;
+
+            // Repairs (Fixing crafts and worn fences/broken variants) are a different feature with
+            // their own cues — never relabel those as upgrades.
+            if (GetFixingCraft(wgo) != null) return null;
+            var id = wgo.obj_id ?? "";
+            if (id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
+                return null;
+
+            var crafts = wgo.components?.craft?.crafts;
+            if (crafts == null) return null;
+
+            CraftDefinition fallback = null;
+            foreach (var c in crafts)
+            {
+                if (c == null || string.IsNullOrEmpty(c.change_wgo)) continue;
+                // A transform craft, not one that outputs an item.
+                if (c.GetFirstRealOutput() != null) continue;
+                // Only upgrades the player has actually researched (same gate the build desk uses).
+                try { if (!MainGame.me.save.IsCraftVisible(c)) continue; } catch { continue; }
+                // Must turn this station into a *different* station — guards against grow crafts
+                // (sapling→tree) and self-referential transforms.
+                if (string.Equals(c.change_wgo, id, StringComparison.Ordinal)) continue;
+                if (!TargetIsStationLike(wgo, c.change_wgo)) continue;
+
+                if (fallback == null) fallback = c;
+                try { if (c.condition.EvaluateBoolean(wgo, MainGame.me.player)) return c; }
+                catch { }
+            }
+            return fallback;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // An upgrade must produce another buildable station, not a grown plant/tree. The target counts
+    // as station-like when its own definition has a craft component, or when the current object is a
+    // player-built object (has a removal craft). Conservative on purpose: the in-game regression
+    // check (broken station / growing plant) confirms this stays tight.
+    private static bool TargetIsStationLike(WorldGameObject wgo, string targetId)
+    {
+        try
+        {
+            var def = GameBalance.me?.GetDataOrNull<ObjectDefinition>(targetId)
+                      ?? GameBalance.me?.GetDataOrNull<ObjectDefinition>(targetId + "_place");
+            if (def != null && def.has_craft) return true;
+            return wgo.has_removal_craft;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Append upgrade guidance to a station's label: the tier it can become, the materials the
+    /// upgrade consumes, and what the player is still short of. Returns the bare label unchanged for
+    /// non-upgradeable objects. See <see cref="GetUpgradeCraft"/>.
+    /// </summary>
+    private static string WithUpgradeInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            var up = GetUpgradeCraft(wgo);
+            if (up == null) return label;
+
+            var newName = LocalizedObjectName(up.change_wgo);
+            var into = string.IsNullOrWhiteSpace(newName) ? "" : $" to {newName}";
+
+            var needs = up.needs;
+            if (needs == null || needs.Count == 0)
+                return $"{label}. Can be upgraded{into}, press F to upgrade";
+
+            var all = new List<string>();
+            var missing = new List<string>();
+            foreach (var need in needs)
+            {
+                if (need == null || string.IsNullOrEmpty(need.id)) continue;
+
+                var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
+                if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+                all.Add(need.value > 1 ? $"{need.value} {iname}" : iname);
+
+                int have = 0;
+                try { have = MainGame.me.player.data.GetItemsCount(need.id, count_secondary_inventory: true); }
+                catch { }
+                int shortfall = need.value - have;
+                if (shortfall > 0)
+                    missing.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
+            }
+
+            if (all.Count == 0)
+                return $"{label}. Can be upgraded{into}, press F to upgrade";
+
+            var tail = missing.Count > 0
+                ? $"You still need {string.Join(", ", missing)}"
+                : "You have the materials, press F to upgrade";
+            return $"{label}. Can be upgraded{into}, needs {string.Join(", ", all)}. {tail}";
+        }
+        catch
+        {
+            return label;
         }
     }
 

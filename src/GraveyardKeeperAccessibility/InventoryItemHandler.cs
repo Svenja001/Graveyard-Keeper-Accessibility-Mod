@@ -71,6 +71,17 @@ internal static class InventoryItemHandler
             // own inventory (to put); a flat, unlabeled list hides that distinction.
             var discovered = new List<GUIElement>();
 
+            // At the autopsy/dissection table the part cells aren't items to keep — they're what
+            // you cut out of the corpse (subtracts their skulls). And when the shared resource
+            // picker is open ON TOP of an autopsy table, it can only be the part-insertion list
+            // (adds their skulls — AutopsyGUI opens the picker for nothing else). In both cases
+            // tell DescribeItemCell to voice the body-effect, not the part's bare value.
+            BodyPartView partView = gui is AutopsyGUI
+                ? BodyPartView.Extract
+                : (gui is CraftResourcesSelectGUI && IsAutopsyTableOpen())
+                    ? BodyPartView.Insert
+                    : BodyPartView.Value;
+
             foreach (var cell in gui.GetComponentsInChildren<BaseItemCellGUI>(true))
             {
                 if (cell == null || !cell.gameObject.activeInHierarchy) continue;
@@ -82,7 +93,7 @@ internal static class InventoryItemHandler
                 if (elements.Any(e => e.Go == cell.gameObject)) continue;
                 if (discovered.Any(e => e.Go == cell.gameObject)) continue;
 
-                var label = DescribeItemCell(cell);
+                var label = DescribeItemCell(cell, partView);
                 if (string.IsNullOrEmpty(label)) continue;
 
                 var (panel, rank) = GetPanelContext(cell, gui);
@@ -142,6 +153,22 @@ internal static class InventoryItemHandler
         {
             _log?.LogError($"[INVENTORY] Error discovering item cells: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// True when an autopsy table's window is currently open. The dissection GUI stays shown
+    /// underneath when the resource picker pops up on top of it (it gets OnAboveWindowClosed),
+    /// so this lets us recognise the picker as the part-insertion list. FindObjectOfType is fine
+    /// here — it runs only during the menu-open discovery pass, not per frame.
+    /// </summary>
+    private static bool IsAutopsyTableOpen()
+    {
+        try
+        {
+            var autopsy = UnityEngine.Object.FindObjectOfType<AutopsyGUI>();
+            return autopsy != null && autopsy.is_shown;
+        }
+        catch { return false; }
     }
 
     /// <summary>
@@ -237,7 +264,18 @@ internal static class InventoryItemHandler
     /// Spoken label for an item cell: the localized item name, plus the stack count when
     /// more than one. Returns null for empty/unnamed cells.
     /// </summary>
-    internal static string DescribeItemCell(BaseItemCellGUI cell)
+    /// <summary>How a body-part cell's skull score should be voiced, depending on the screen.</summary>
+    internal enum BodyPartView
+    {
+        /// <summary>The part's own value (a loose part in a bag, a craft ingredient).</summary>
+        Value,
+        /// <summary>At the autopsy grid: the effect of cutting the part OUT of the corpse.</summary>
+        Extract,
+        /// <summary>At the insertion picker: the effect of putting the part INTO the corpse.</summary>
+        Insert,
+    }
+
+    internal static string DescribeItemCell(BaseItemCellGUI cell, BodyPartView partView = BodyPartView.Value)
     {
         try
         {
@@ -265,9 +303,18 @@ internal static class InventoryItemHandler
             if (!string.IsNullOrEmpty(perks))
                 name = $"{name}, {perks}";
 
-            // Body parts in the autopsy grid each carry their own skull score (red = bad, white =
-            // good); the on-screen skull pips never voice, so speak the values — "flesh, 2 white".
-            var partSkulls = SkullInfo.DescribePart(item);
+            // Body parts carry their own skull score (red = bad, white = good); the on-screen
+            // skull pips never voice, so speak them. At the autopsy table the value alone is
+            // misleading, because extraction SUBTRACTS the part from the corpse and insertion
+            // ADDS it — the opposite of each other. So in the cut-out grid we voice the removal
+            // effect ("cutting out removes 1 red, loses 1 white"), in the insertion picker the
+            // insertion effect ("inserting adds 3 white"), and everywhere else the bare value.
+            var partSkulls = partView switch
+            {
+                BodyPartView.Extract => SkullInfo.DescribeRemovalEffect(item),
+                BodyPartView.Insert => SkullInfo.DescribeInsertionEffect(item),
+                _ => SkullInfo.DescribePart(item),
+            };
             if (!string.IsNullOrEmpty(partSkulls))
                 name = $"{name}, {partSkulls}";
 

@@ -89,6 +89,89 @@ internal static class SkullInfo
         }
     }
 
+    /// <summary>
+    /// The effect on the corpse of <em>cutting this part out</em> at the autopsy table — which is
+    /// the inverse of the part's own value, because the corpse's skulls are the sum of the body
+    /// plus every part still inside it (<see cref="Item.GetBodySkulls"/>), and extraction does
+    /// <c>body.RemoveItem(part)</c> (AutopsyGUI.RemoveBodyPartFromBody). So removing a part that
+    /// carries red skulls makes the corpse better, and removing one with white skulls makes it
+    /// worse — the opposite of the bare value. We voice the consequence directly ("cutting out
+    /// removes 1 red, loses 1 white") so the player doesn't have to mentally invert it. Returns
+    /// null for non-part items, "cutting out changes nothing" for a part with no skull value.
+    /// </summary>
+    internal static string DescribeRemovalEffect(Item part)
+    {
+        if (part == null || part.definition == null || part.IsEmpty()) return null;
+
+        var type = part.definition.type;
+        if (type != ItemDefinition.ItemType.BodyUniversalPart
+            && type != ItemDefinition.ItemType.BodyBodyPart
+            && type != ItemDefinition.ItemType.SoulBodyPart)
+            return null;
+
+        try
+        {
+            int red = part.GetRedSkullsValue();     // q_minus — corpse loses this much red on removal
+            int white = part.GetWhiteSkullsValue();  // q_plus  — corpse loses this much white on removal
+            if (red == 0 && white == 0) return "cutting out changes nothing";
+
+            var bits = new List<string>();
+            // Red is bad for the corpse: removing a red-bearing part takes red away (good).
+            if (red > 0) bits.Add($"removes {red} red");
+            else if (red < 0) bits.Add($"adds {-red} red");
+            // White is good: removing a white-bearing part takes white away (bad).
+            if (white > 0) bits.Add($"loses {white} white");
+            else if (white < 0) bits.Add($"gains {-white} white");
+            return "cutting out " + string.Join(", ", bits);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The effect on the corpse of <em>inserting this part into the body</em> at the autopsy table
+    /// (the insertion picker) — the mirror of <see cref="DescribeRemovalEffect"/>. Inserting puts
+    /// the part into the body's inventory, so its value is ADDED to the corpse: adding red is bad,
+    /// adding white is good. We voice the consequence ("inserting adds 3 white") so the player
+    /// knows what an insertion would do before committing. Returns null for non-part items,
+    /// "inserting changes nothing" for a part with no skull value.
+    /// </summary>
+    internal static string DescribeInsertionEffect(Item part)
+    {
+        if (part == null || part.definition == null || part.IsEmpty()) return null;
+
+        var type = part.definition.type;
+        if (type != ItemDefinition.ItemType.BodyUniversalPart
+            && type != ItemDefinition.ItemType.BodyBodyPart
+            && type != ItemDefinition.ItemType.SoulBodyPart)
+            return null;
+
+        try
+        {
+            int red = part.GetRedSkullsValue();     // q_minus — added to the corpse on insertion
+            int white = part.GetWhiteSkullsValue();  // q_plus  — added to the corpse on insertion
+            if (red == 0 && white == 0) return "inserting changes nothing";
+
+            // Inserting adds the part's value to the corpse; a negative value would instead reduce
+            // that skull count. Group by direction so it reads naturally ("adds 1 red, 1 white").
+            var added = new List<string>();
+            var removed = new List<string>();
+            if (red > 0) added.Add($"{red} red"); else if (red < 0) removed.Add($"{-red} red");
+            if (white > 0) added.Add($"{white} white"); else if (white < 0) removed.Add($"{-white} white");
+
+            var parts = new List<string>();
+            if (added.Count > 0) parts.Add("adds " + string.Join(", ", added));
+            if (removed.Count > 0) parts.Add("removes " + string.Join(", ", removed));
+            return "inserting " + string.Join(", ", parts);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static bool IsBody(Item item)
     {
         return item != null
