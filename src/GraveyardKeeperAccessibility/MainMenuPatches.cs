@@ -1856,8 +1856,8 @@ internal static class GUIAccessibility
             {
                 // CraftItemGUI.OnChangeIngredient uses step +1 = "previous", -1 = "next"; map
                 // Right -> next, Left -> previous so the order feels natural, and re-announce.
-                elem.OnAdjustRight = () => { ChangeIngredient(cri, idx, -1); AnnounceFocused(); };
-                elem.OnAdjustLeft = () => { ChangeIngredient(cri, idx, 1); AnnounceFocused(); };
+                elem.OnAdjustRight = () => { if (ChangeIngredient(cri, idx, -1)) AnnounceFocused(); else ScreenReader.Say("No higher quality option"); };
+                elem.OnAdjustLeft = () => { if (ChangeIngredient(cri, idx, 1)) AnnounceFocused(); else ScreenReader.Say("No lower quality option"); };
             }
             Elements.Add(elem);
         }
@@ -1957,6 +1957,7 @@ internal static class GUIAccessibility
     private static FieldInfo _ingredientsField;
     private static FieldInfo _multiqualityIdsField;
     private static MethodInfo _onChangeIngredientMethod;
+    private static MethodInfo _ingredientHasOptionMethod;
     private static MethodInfo _isSwitchableMethod;
     private static MethodInfo _onCraftPressedMethod;
 
@@ -1998,14 +1999,41 @@ internal static class GUIAccessibility
         return false;
     }
 
-    private static void ChangeIngredient(CraftItemGUI cri, int index, int step)
+    /// <summary>
+    /// Cycle one ingredient's quality, returning whether anything actually changed.
+    /// We MUST mirror the game's own <c>ProcessIngredientStep</c> guard: it only calls
+    /// OnChangeIngredient when IngredientHasOption(index, step) is true. OnChangeIngredient
+    /// has a broken bounds check (`num2 &lt; 0 &amp;&amp; num2 &gt;= Count`, always false), so stepping
+    /// past a boundary corrupts _current_craft_index (e.g. to -1). After that every
+    /// current_craft access throws IndexOutOfRange and the whole detailed view is dead —
+    /// exactly the "got stuck, prediction not available" the book table produced.
+    /// </summary>
+    private static bool ChangeIngredient(CraftItemGUI cri, int index, int step)
     {
         try
         {
+            if (!IngredientHasOption(cri, index, step))
+                return false;
             _onChangeIngredientMethod ??= AccessTools.Method(typeof(CraftItemGUI), "OnChangeIngredient", new[] { typeof(int), typeof(int) });
             _onChangeIngredientMethod?.Invoke(cri, new object[] { index, step });
+            return true;
         }
-        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] change ingredient failed: {ex.Message}"); }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] change ingredient failed: {ex.Message}"); return false; }
+    }
+
+    /// <summary>Game's own pre-check: is there a quality option for this ingredient in this direction?</summary>
+    private static bool IngredientHasOption(CraftItemGUI cri, int index, int step)
+    {
+        try
+        {
+            _ingredientHasOptionMethod ??= AccessTools.Method(typeof(CraftItemGUI), "IngredientHasOption", new[] { typeof(int), typeof(int) });
+            if (_ingredientHasOptionMethod != null)
+                return (bool)_ingredientHasOptionMethod.Invoke(cri, new object[] { index, step });
+        }
+        catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] ingredient option check failed: {ex.Message}"); }
+        // Method unresolved (e.g. game update renamed it): fall back to legacy behaviour rather
+        // than blocking all changes. The boundary corruption is the rarer case.
+        return true;
     }
 
     /// <summary>
