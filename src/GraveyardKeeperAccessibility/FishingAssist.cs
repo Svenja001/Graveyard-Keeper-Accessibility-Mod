@@ -19,7 +19,9 @@ namespace GraveyardKeeperAccessibility;
 ///      tier and whether any fish live there are spoken live so the player can release on a good one.
 ///   2. AUTO-CATCH — the instant the fish bites (WaitingForPulling), we force a successful take-out,
 ///      awarding exactly the fish that bait+distance already selected. No reaction time, no reel
-///      tracking. This is the same idea stardew-access uses for Stardew fishing.
+///      tracking. This is the same idea stardew-access uses for Stardew fishing. If the standalone
+///      NoTimeForFishing mod is also installed we defer the catch to IT (it patches the same flow)
+///      and only narrate — see DeferToNoTimeForFishing — so the two never fight the state machine.
 ///   3. TOGGLE — Ctrl+F flips auto-catch off, leaving the vanilla mini-game for a sighted-assisted
 ///      or practising player. Off by default would make fishing unplayable blind, so it defaults ON.
 ///
@@ -30,6 +32,27 @@ internal static class FishingAssist
 {
     private static ManualLogSource _log;
     private static bool _enabled = true;   // auto-catch on by default (see class summary)
+
+    // NoTimeForFishing (p1xel8ted.gyk.notimeforfishing) is a separate mod that also auto-completes
+    // fishing — it patches the same FishingGUI flow methods. If it's installed we let IT drive the
+    // catch and only NARRATE (bait, distance, state, "Caught X"), so the two don't fight over the
+    // state machine (double speech, bait double-consume). Our own auto-catch takes over only when it
+    // isn't present. Resolved lazily on first use, not at Init, so plugin load order can't matter.
+    private const string NoTimeForFishingGuid = "p1xel8ted.gyk.notimeforfishing";
+    private static bool? _deferCache;
+    private static bool DeferToNoTimeForFishing
+    {
+        get
+        {
+            if (_deferCache.HasValue) return _deferCache.Value;
+            bool present = false;
+            try { present = Chainloader.PluginInfos != null && Chainloader.PluginInfos.ContainsKey(NoTimeForFishingGuid); }
+            catch { }
+            _deferCache = present;
+            _log?.LogInfo($"[FISHING] NoTimeForFishing detected: {present}. Auto-catch {(present ? "deferred to it" : "handled here")}.");
+            return present;
+        }
+    }
 
     // Transition tracking for the ChangeState narrator: the state we last saw entered. Lets us tell
     // a fresh cast-bar bounce-back (DistanceChoosing → BaitChoosing, "no fish there") apart from a
@@ -55,6 +78,12 @@ internal static class FishingAssist
             bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             if (ctrl && Input.GetKeyDown(KeyCode.F))
             {
+                // With NoTimeForFishing installed the catch isn't ours to toggle — it drives it.
+                if (DeferToNoTimeForFishing)
+                {
+                    ScreenReader.Say("Catch is handled by the No Time For Fishing mod.");
+                    return;
+                }
                 _enabled = !_enabled;
                 ScreenReader.Say(_enabled ? "Auto catch on" : "Auto catch off, manual fishing");
             }
@@ -80,6 +109,8 @@ internal static class FishingAssist
                     // Bounced back here from the cast bar = the chosen distance had no fish.
                     if (prev == FishingGUI.FishingState.DistanceChoosing)
                         ScreenReader.Say("No fish at that distance. Choose bait and cast again.");
+                    else if (DeferToNoTimeForFishing)
+                        ScreenReader.Say("Fishing. Tab changes bait, hold E to cast. Catch is automatic.");
                     else
                         ScreenReader.Say(_enabled
                             ? "Fishing. Tab changes bait, hold E to cast. Auto catch is on, Control F to toggle."
@@ -102,8 +133,12 @@ internal static class FishingAssist
                     break;
 
                 case FishingGUI.FishingState.Pulling:
-                    // Only reached in manual mode (auto-catch skips straight to take-out).
-                    ScreenReader.Say("Reeling in. Hold E to raise, release to lower, keep the fish in the bar.");
+                    // Pulling is passed through automatically (by us or by NoTimeForFishing) unless
+                    // the player is truly working the reel by hand — auto-catch off AND NTFF absent.
+                    // Only then do we spell out the controls; otherwise stay quiet so the flow reads
+                    // cleanly as "Bite!" then "Caught X" without a misleading instruction in between.
+                    if (!DeferToNoTimeForFishing && !_enabled)
+                        ScreenReader.Say("Reeling in. Hold E to raise, release to lower, keep the fish in the bar.");
                     break;
 
                 case FishingGUI.FishingState.TakingOut:
@@ -212,26 +247,35 @@ internal static class FishingAssist
 
     // ── Auto-catch (the two twitch steps) ───────────────────────────────────────────────────────
 
-    // The bite has landed and the fish is selected (FishingGUI set _fish/_fish_preset just before
-    // this state). With auto-catch on we skip both the reaction window and the reel tracking game:
-    // mark the pull a success and drive the state machine to TakingOut, which plays the take-out
-    // animation and awards _fish exactly as a perfect manual catch would. Returning false skips the
-    // original UpdateWaitingForPulling so it can't bounce us back to WaitingForBite first.
-    internal static bool FishingGUI_UpdateWaitingForPulling_Prefix(FishingGUI __instance)
+    // Auto-catch — the fish is hooked (WaitingForPulling) and already selected (FishingGUI set
+    // _fish/_fish_preset just before this state). We mark the pull a success and drive straight to
+    // TakingOut, awarding exactly the fish that bait+distance chose.
+    //
+    // The catch: TakingOut's award (UpdateTakingOut) is gated on taking_out_animation_finished,
+    // which is ONLY set by EndOfAnimEvent — a StateMachineBehaviour.OnStateExit on the take-out
+    // ANIMATOR state. When we move the state machine programmatically the animator never actually
+    // enters (and so never exits) that clip, the flag stays false, and UpdateTakingOut loops forever
+    // narrating "Caught X" but never handing over the fish (the hang the player hit — twice). So we
+    // set the public flag ourselves: no dependence on animator timing, the award runs next frame.
+    // A blind player doesn't see the reel animation anyway; Hide() resets the character pose to Idle.
+    // Runs only when WE own the catch (auto-catch on, NoTimeForFishing absent).
+    internal static void FishingGUI_UpdateWaitingForPulling_Postfix(FishingGUI __instance)
     {
         try
         {
-            if (!_enabled) return true;   // manual mode: run the vanilla reaction window
+            if (DeferToNoTimeForFishing || !_enabled) return;
+            if (__instance.state != FishingGUI.FishingState.WaitingForPulling) return;
 
             var t = Traverse.Create(__instance);
             t.Field("is_success_fishing").SetValue(true);
+            // ChangeState(TakingOut) resets taking_out_animation_finished to false, so set it true
+            // AFTER — that's the flag UpdateTakingOut waits on before awarding and closing.
             t.Method("ChangeState", new object[] { FishingGUI.FishingState.TakingOut }).GetValue();
-            return false;
+            __instance.taking_out_animation_finished = true;
         }
         catch (Exception ex)
         {
-            _log?.LogError($"[FISHING] auto-catch prefix error: {ex.Message}");
-            return true;   // on any failure, fall back to the real mini-game rather than hang
+            _log?.LogError($"[FISHING] auto-catch error: {ex.Message}");
         }
     }
 }

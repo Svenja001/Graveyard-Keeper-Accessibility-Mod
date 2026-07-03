@@ -1794,12 +1794,18 @@ internal static class ObjectNavigator
                 // culled. BUT inside a wall-enclosed interior that exception would x-ray the whole
                 // outdoor world (which is all culled), so there we require harvestables to be active
                 // too — the surviving active ones are only those in the interior with the player.
-                bool keepIfCulled = IsHarvestableCategory(category) && !interiorSightBlocked;
+                // Fishing spots share the harvestables' reach rules: they sit out across open water,
+                // get culled (deactivated) when off-screen, and are simple static world objects that
+                // stay valid while culled. Without this a blind player can only "see" a fishing spot
+                // once it's already on screen — i.e. can never navigate TO one. They're always
+                // outdoors, so keeping them while culled poses no interior x-ray risk.
+                bool farReach = IsHarvestableCategory(category) || category == NavCategory.FishingSpots;
+                bool keepIfCulled = farReach && !interiorSightBlocked;
                 if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
 
                 var objPos = obj.pos;
                 var distance = Vector2.Distance(objPos, playerPos);
-                var maxDist = IsHarvestableCategory(category) ? MaxHarvestableNavDistance : MaxNavDistance;
+                var maxDist = farReach ? MaxHarvestableNavDistance : MaxNavDistance;
                 if (distance > maxDist) continue;
 
                 var label = GetObjectLabelSafe(obj);

@@ -130,7 +130,10 @@ public class Plugin : BaseUnityPlugin
             typeof(FishingGUI), "UpdateDistanceChoosing", Type.EmptyTypes);
         TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_Update_Postfix),
             typeof(FishingGUI), "Update", Type.EmptyTypes);
-        TryPatchPrefix(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_UpdateWaitingForPulling_Prefix),
+        // Auto-catch: on the bite, force a successful TakingOut and set taking_out_animation_finished
+        // ourselves (the award is otherwise gated on an animator state-exit event that never fires
+        // when we drive the state machine programmatically — that was the hang).
+        TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_UpdateWaitingForPulling_Postfix),
             typeof(FishingGUI), "UpdateWaitingForPulling", Type.EmptyTypes);
 
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
