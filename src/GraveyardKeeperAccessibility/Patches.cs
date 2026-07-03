@@ -401,6 +401,61 @@ internal static class Patches
         }
     }
 
+    // The game only ever interacts with (and works on) whatever sits inside the player's forward
+    // interaction box — a collider offset AHEAD of the player that snaps to one of 4 cardinal
+    // directions (InteractionComponent). interaction.nearest, which both E (Interact) and the tool
+    // WORK path (ToolComponent.UseCurrentTool) act on via FindObjectForInteraction(), is null the
+    // moment nothing is in that box. After auto-walk the navigated object frequently ends up JUST
+    // outside it (a hair off-axis, or facing snapped to the wrong cardinal), so vanilla E / chop /
+    // mine does nothing until the player nudges with WASD to sweep the box over it. When the box
+    // found NOTHING but the object the player deliberately navigated to is within reach, fill it in
+    // as 'nearest' so the action fires without the manual nudge. Only fills when nearest is null —
+    // never overrides an object the box legitimately detected, so it can't grab the wrong tree in a
+    // dense cluster or an object the player has since turned toward. The reach check (to the
+    // object's collider edge) plus PreferredInteractionTarget's hold-distance keep it from reaching
+    // past walls or acting on something the player walked away from.
+    private static void FillNavTargetAsNearest(InteractionComponent interaction)
+    {
+        if (interaction == null || interaction.nearest != null) return;
+        var target = ObjectNavigator.InteractionTargetWithinReach();
+        // The setter also refreshes has_action/has_interaction, so FindObjectForInteraction (which
+        // returns interaction.nearest) hands this object to the caller this frame.
+        if (target != null) interaction.nearest = target;
+    }
+
+    // E / interaction path (chests, doors, stations, graves, NPCs).
+    public static void InteractionComponent_Interact_Prefix(InteractionComponent __instance)
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null || __instance != player.components?.interaction) return;
+            FillNavTargetAsNearest(__instance);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[NAVIGATOR] force-interact: {ex.Message}");
+        }
+    }
+
+    // Tool WORK path (chopping trees, mining ore, digging, harvesting) — same box-miss gate as the
+    // interaction path, so the fix must apply here too for consistency. UseTool runs after the
+    // work-key dock check has already pulled the player toward the object's dock point (a forgiving
+    // omnidirectional 1.5-tile search), so by the time we get here reach is genuinely close.
+    public static void ToolComponent_UseTool_Prefix(ToolComponent __instance)
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null || __instance != player.components?.tool) return;
+            FillNavTargetAsNearest(player.components?.interaction);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[NAVIGATOR] force-work: {ex.Message}");
+        }
+    }
+
     // While we drive the placement ghost from the keyboard, suppress the game's mouse-follow.
     // BuildModeLogics.UpdateWhilePlacing -> ProcessMovement -> MoveObjectToMouse snaps the ghost
     // back onto the cursor every frame; skipping it lets our arrow-key MoveCurrentByDir steps

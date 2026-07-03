@@ -170,6 +170,12 @@ internal static class ObjectNavigator
     private static Vector2 _arrivedTargetPos;
     private const float ArrivedTargetHoldDistance = 2.5f * TileSize;
 
+    // How close (to the object's collider edge) the arrived target must be for the E-interaction
+    // prefix to force it through even when the player's forward interaction box isn't overlapping
+    // it. The game's forward box reaches ~1 tile; 1.5 tiles to the collider edge covers the "auto-
+    // walk left me a hair off-axis" case while staying tight enough not to reach past a wall.
+    private const float InteractionForceReach = 1.5f * TileSize;
+
     // Deferred fallback walk: when A* fails we cannot re-issue GoTo synchronously
     // (the game's OnPathFailed clobbers the new request right after our callback),
     // so we queue a straight-line Direct attempt to run on the next frame.
@@ -1184,6 +1190,42 @@ internal static class ObjectNavigator
             return null;
         }
         return obj;
+    }
+
+    /// <summary>
+    /// The navigated target IF the player is physically within interaction reach of it right now —
+    /// close enough that vanilla would interact if only the player were facing it. Used by the
+    /// E-interaction prefix to fire the interaction even when the player's forward interaction box
+    /// (which points in one of 4 cardinal directions, offset ahead of the player) isn't overlapping
+    /// the object. That box-miss is exactly the "I'm standing at it but E does nothing until I nudge
+    /// with WASD" case. Distance is measured to the object's collider bounds, not its pos, so large
+    /// objects (build desks, ovens) count from their near edge rather than their depth-sort anchor.
+    /// </summary>
+    internal static WorldGameObject InteractionTargetWithinReach()
+    {
+        var obj = PreferredInteractionTarget();
+        if (obj == null) return null;
+        try
+        {
+            var pp = MainGame.me?.player?.pos;
+            if (pp == null) return null;
+            var p = pp.Value;
+
+            float dist;
+            var b = obj.GetTotalBounds();
+            if (b.size.sqrMagnitude > 0.0001f)
+            {
+                var cp = b.ClosestPoint(new Vector3(p.x, p.y, b.center.z));
+                dist = Vector2.Distance(p, new Vector2(cp.x, cp.y));
+            }
+            else
+            {
+                dist = Vector2.Distance(p, obj.pos);
+            }
+
+            return dist <= InteractionForceReach ? obj : null;
+        }
+        catch { return null; }
     }
 
     private static void FacePlayerAtTarget()

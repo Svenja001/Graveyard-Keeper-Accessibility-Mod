@@ -54,6 +54,17 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.InteractionComponent_FindCurrentInteractionNearest_Postfix),
             typeof(InteractionComponent), "FindCurrentInteractionNearest", Type.EmptyTypes);
 
+        // Also force the navigated object through at E-press time when it's within reach but the
+        // player's forward interaction box isn't overlapping it — the "standing at it but E does
+        // nothing until I nudge with WASD" case. See Patches.InteractionComponent_Interact_Prefix.
+        TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.InteractionComponent_Interact_Prefix),
+            typeof(InteractionComponent), "Interact", new[] { typeof(bool) });
+
+        // Same fix for the tool WORK path (chopping/mining/digging harvestables), which acts on the
+        // same interaction.nearest gate. See Patches.ToolComponent_UseTool_Prefix.
+        TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.ToolComponent_UseTool_Prefix),
+            typeof(ToolComponent), "UseTool", new[] { typeof(bool) });
+
         // Patch WorldGameObject.Say method for dialogue capture
         TryPatchWorldGameObjectSay(harmony);
 
