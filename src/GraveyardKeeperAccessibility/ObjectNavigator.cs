@@ -549,15 +549,6 @@ internal static class ObjectNavigator
 
     internal static void WalkToSelected()
     {
-        // Don't walk away from a station mid-craft: timed station crafts (e.g. the autopsy
-        // table cutting flesh) are performed by the player standing put, and moving cancels
-        // them — which strands the body and wedges the table. Make the player wait it out.
-        if (InteractionDetector.IsPlayerCrafting)
-        {
-            ScreenReader.Say("A craft is in progress. Stand still until it finishes.", interrupt: true);
-            return;
-        }
-
         var list = CurrentList;
         if (list.Count == 0)
         {

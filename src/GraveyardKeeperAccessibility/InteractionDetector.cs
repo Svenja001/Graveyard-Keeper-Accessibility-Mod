@@ -5,7 +5,6 @@ internal static class InteractionDetector
     private static string _lastAnnouncedObject = null;
     private static int _lastHighlightedDropId = 0;
     private static bool _wasCarrying = false;
-    private static bool _wasCrafting = false;
     // Completion tracking — remembers the specific station last seen mid-craft so we can voice
     // the outcome even after a repair replaces the object out from under us (change_wgo).
     private static bool _craftPending = false;
@@ -18,13 +17,6 @@ internal static class InteractionDetector
     private static ManualLogSource _log;
     private static bool _initialized = false;
     private const float InteractionRange = 300f;
-
-    /// <summary>
-    /// True while a station next to the player is mid-craft (autopsy table cutting flesh, etc.).
-    /// The navigator reads this to refuse auto-walk so the player doesn't accidentally abandon a
-    /// half-finished craft. Updated each frame by <see cref="AnnounceWorkState"/>.
-    /// </summary>
-    internal static bool IsPlayerCrafting => _wasCrafting;
 
     internal static void Init(ManualLogSource log)
     {
@@ -269,15 +261,6 @@ internal static class InteractionDetector
                 _craftIsFixing = false;
                 _craftOutputName = null;
             }
-
-            // Keep IsPlayerCrafting (navigator's auto-walk guard) tracking the live state.
-            // Only MANUAL crafts pin the player in place: an auto craft (current_craft.is_auto —
-            // furnaces smelting, item spawners, etc.) is advanced by the game itself, not by the
-            // player working it (DoAction even early-returns for the player on an auto craft), so
-            // walking away never cancels it. Don't make the player "stand still" for those.
-            bool isAutoCraft = false;
-            try { isAutoCraft = stationCrafting && station.current_craft.is_auto; } catch { }
-            _wasCrafting = stationCrafting && !isAutoCraft;
         }
         catch (Exception ex)
         {
