@@ -42,6 +42,7 @@ internal enum NavCategory
     GravesToDecorate,
     Buildables,
     Roofs,
+    FishingSpots,
     Other
 }
 
@@ -76,6 +77,7 @@ internal static class ObjectNavigator
         NavCategory.GravesToDecorate,
         NavCategory.Buildables,
         NavCategory.Roofs,
+        NavCategory.FishingSpots,
         NavCategory.Other
     };
 
@@ -460,6 +462,7 @@ internal static class ObjectNavigator
         NavCategory.GravesToDecorate => "Graves to decorate",
         NavCategory.Buildables => "Built objects",
         NavCategory.Roofs => "Roofs",
+        NavCategory.FishingSpots => "Fishing spots",
         _ => "Other"
     };
 
@@ -2496,6 +2499,17 @@ internal static class ObjectNavigator
         if (def == null)
             return false;
 
+        // Fishing spots: the water tiles you cast into. They have no dedicated interaction_type
+        // (they run a FlowCanvas script on E and carry no craft), so they used to fall through to
+        // Other. The definitive signal is a ReservoirsDefinition keyed by obj_id — the exact lookup
+        // FishingGUI.Open does to load the spot's fish table. GetDataOrNull is an O(1) cached
+        // dictionary hit, so this is cheap to check for every object.
+        if (!string.IsNullOrEmpty(obj.obj_id) && IsFishingSpot(obj.obj_id))
+        {
+            category = NavCategory.FishingSpots;
+            return true;
+        }
+
         // People: NPCs and mobs.
         try
         {
@@ -2610,6 +2624,23 @@ internal static class ObjectNavigator
                 }
                 return false;
         }
+    }
+
+    /// <summary>
+    /// True when an obj_id names a fishing spot — i.e. GameBalance holds a ReservoirsDefinition
+    /// (the spot's fish table, keyed by obj_id) for it. This is the same lookup FishingGUI.Open
+    /// uses to decide a spot is fishable, so it matches the game exactly. The lookup is an O(1)
+    /// cached dictionary hit once GameBalance's cache is built (it is, in-game); wrapped in a
+    /// try/catch so a missing cache/type can never break the whole classification pass.
+    /// </summary>
+    private static bool IsFishingSpot(string objId)
+    {
+        try
+        {
+            return GameBalance.me != null
+                && GameBalance.me.GetDataOrNull<ReservoirsDefinition>(objId) != null;
+        }
+        catch { return false; }
     }
 
     /// <summary>

@@ -27,6 +27,7 @@ public class Plugin : BaseUnityPlugin
         BuildPlacementHandler.Init(Log);
         DialogueChoiceHandler.Init(Log);
         CombatAssist.Init(Log);
+        FishingAssist.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -117,6 +118,20 @@ public class Plugin : BaseUnityPlugin
         // (that re-Dynamics the body and freezes the scene). See Patches.GS_SetPlayerEnable_Postfix.
         TryPatch(harmony, typeof(Patches), nameof(Patches.GS_SetPlayerEnable_Postfix),
             typeof(GS), "SetPlayerEnable", new[] { typeof(bool), typeof(bool) });
+
+        // Accessible fishing (see FishingAssist): narrate every fishing state change, the selected
+        // bait, and the live cast-distance tier; poll the Ctrl+F auto-catch toggle each frame; and
+        // (prefix) auto-complete the bite + reel mini-game when auto-catch is on.
+        TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_ChangeState_Postfix),
+            typeof(FishingGUI), "ChangeState", new[] { typeof(FishingGUI.FishingState) });
+        TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_RedrawSelectedBait_Postfix),
+            typeof(FishingGUI), "RedrawSelectedBait", Type.EmptyTypes);
+        TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_UpdateDistanceChoosing_Postfix),
+            typeof(FishingGUI), "UpdateDistanceChoosing", Type.EmptyTypes);
+        TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_Update_Postfix),
+            typeof(FishingGUI), "Update", Type.EmptyTypes);
+        TryPatchPrefix(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_UpdateWaitingForPulling_Prefix),
+            typeof(FishingGUI), "UpdateWaitingForPulling", Type.EmptyTypes);
 
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
