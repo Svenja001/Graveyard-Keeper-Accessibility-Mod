@@ -96,6 +96,16 @@ internal static class ObjectNavigator
     private static Vector2 _lastBusyPos;
     private static bool _hasBusyPos = false;
 
+    // Post-teleport navmesh recovery. TeleportWithFade moves the player but never rescans the A*
+    // navmesh at the new spot — the game only re-activates interior navmesh as chunks stream in
+    // while you move, so right after a teleport only the tile-patch around the landing is walkable
+    // (the far side of the house reads unreachable). We track the player's position EVERY frame
+    // (independent of _lastBusyPos, which is busy-only) and, on a single-frame jump, force a few
+    // bounded rescans around the new position over the next ~1s so the whole room is walkable.
+    private static Vector2 _lastPlayerPos;
+    private static bool _hasLastPlayerPos = false;
+    private static int _teleportRescanFramesLeft = 0;
+
     // Long-distance auto-walk: targets too far for the A* player-graph to path to in one go
     // (e.g. the Tavern from home) are walked in short hops. Each tick we aim a chunk-sized
     // step toward the target, snap it to walkable ground, and let native A* route that hop;
@@ -202,6 +212,16 @@ internal static class ObjectNavigator
     private static bool _astarFailedForWalk = false;
     private static Vector2 _astarFailPos;
 
+    // Reactive navmesh recovery: when a near-walk A* fails, the target may simply sit on navmesh
+    // that hasn't streamed/activated yet (post-teleport, post-sleep, or any partial-navmesh state).
+    // The first failure per user walk forces a bounded rescan around player<->target and retries the
+    // walk ONCE (deferred a few frames so the queued graph update processes) before falling through
+    // to the existing graph-0 escalation. _rescanRetried gates it to one shot so there's no loop.
+    private static bool _rescanRetried = false;
+    private static bool _rescanRetryPending = false;
+    private static int _rescanRetryFramesLeft = 0;
+    private static NavigationTarget _rescanRetryTarget;
+
     // World coordinates use 96 units per tile. Only surface points of interest
     // within a generous radius so the per-category lists stay manageable.
     private const float TileSize = 96f;
@@ -237,6 +257,12 @@ internal static class ObjectNavigator
     // A single-frame position change larger than this means the player teleported (no walk speed
     // covers 6 tiles in one frame); real teleports jump hundreds-to-thousands of units.
     private const float TeleportJumpDistance = 6f * TileSize;
+    // After a teleport jump we drive a short rescan schedule (in frames) from Update(), firing a few
+    // bounded UpdateAstarBounds passes across ~1s so late-streaming interior colliders get picked up.
+    private const int TeleportRescanTotalFrames = 60;
+    // A failed near-walk defers its one-shot rescan retry this many frames so the queued A* graph
+    // update has processed before we re-issue the walk (same reason as the _escalatePending defer).
+    private const int RescanRetryDelayFrames = 6;
     // TickLongWalk runs every frame, so this is in frames: how long the player may make less
     // than ProgressDistance of headway before we treat the native follow as stuck. Generous so
     // brief pauses at waypoints / slow stretches don't trip it.
@@ -284,6 +310,40 @@ internal static class ObjectNavigator
 
         try
         {
+            // Always-on teleport detector (runs whether or not navigation is busy): a single-frame
+            // position jump means the player teleported (stone/fast-travel/dungeon). TeleportWithFade
+            // doesn't rescan the navmesh at the landing, so schedule a few bounded rescans over the
+            // next ~1s to re-activate the whole room (see ForceNavmeshRescanAround). The busy-only
+            // guard below still handles tearing down a stale in-progress walk.
+            {
+                var plr = MainGame.me?.player;
+                if (plr != null)
+                {
+                    var ppos = plr.pos;
+                    if (_hasLastPlayerPos && Vector2.Distance(ppos, _lastPlayerPos) >= TeleportJumpDistance)
+                    {
+                        _teleportRescanFramesLeft = TeleportRescanTotalFrames;
+                        _log?.LogInfo($"[NAVIGATOR] Teleport jump detected ({Vector2.Distance(ppos, _lastPlayerPos):F0}u), scheduling post-teleport navmesh rescans");
+                    }
+                    _lastPlayerPos = ppos;
+                    _hasLastPlayerPos = true;
+                }
+            }
+
+            // Fire the scheduled post-teleport rescans around the (now-settled) player position. The
+            // position change is deferred into a camera fade, and interior colliders stream in over a
+            // few frames, so we rescan a few times across the window rather than once immediately.
+            if (_teleportRescanFramesLeft > 0)
+            {
+                int elapsed = TeleportRescanTotalFrames - _teleportRescanFramesLeft;
+                if (elapsed == 5 || elapsed == 25 || elapsed == 55)
+                {
+                    var prp = MainGame.me?.player?.pos;
+                    if (prp.HasValue) ForceNavmeshRescanAround(prp.Value);
+                }
+                _teleportRescanFramesLeft--;
+            }
+
             // Teleport guard: if the player jumped a long way in a single frame while a walk/beacon
             // is active, they were teleported (Ruhestein, etc.). Tear down the stale navigation so
             // it doesn't mistake the jump for a stuck walk and chatter at a now-wrong target.
@@ -326,10 +386,22 @@ internal static class ObjectNavigator
                 }
             }
 
+            // A near-walk failed and we forced a navmesh rescan around the target — re-issue the
+            // walk once the queued graph update has processed (a few frames later). If it fails again
+            // _rescanRetried is already set, so it falls through to the graph-0 escalation below.
+            if (_rescanRetryPending)
+            {
+                if (--_rescanRetryFramesLeft <= 0)
+                {
+                    _rescanRetryPending = false;
+                    _log?.LogInfo($"[NAVIGATOR] Retrying walk to {_rescanRetryTarget.Label} after navmesh rescan");
+                    WalkToTarget(_rescanRetryTarget);
+                }
+            }
             // A* failed on a short walk — retry through the fence-aware graph-0 route (gates)
             // before resorting to the straight line. Runs next frame so the game's OnPathFailed
             // has finished clobbering the previous request.
-            if (_escalatePending)
+            else if (_escalatePending)
             {
                 _escalatePending = false;
                 StartLongWalk(_shortWalkTarget);
@@ -569,8 +641,11 @@ internal static class ObjectNavigator
         var target = list[_selectedIndex];
 
         // Fresh user walk: clear the "A* already failed" guard so this attempt may use A*/handoff,
-        // and drop any previous arrival bias (the new arrival sets its own).
+        // give this walk a fresh one-shot rescan retry, and drop any previous arrival bias (the new
+        // arrival sets its own).
         _astarFailedForWalk = false;
+        _rescanRetried = false;
+        _rescanRetryPending = false;
         ClearArrivedTarget();
 
         // For a faraway target (e.g. the Tavern from home) the A* player graph can't path
@@ -1588,6 +1663,25 @@ internal static class ObjectNavigator
                         // but WILL retry once the player has walked closer and the area has activated.
                         _astarFailedForWalk = true;
                         _astarFailPos = MainGame.me?.player?.pos ?? Vector2.zero;
+                        // First failure this walk: the target may just sit on navmesh that hasn't
+                        // streamed/activated yet (post-teleport, post-sleep, any partial-navmesh
+                        // state). Force a bounded rescan around player<->target and retry the walk
+                        // once (deferred a few frames so the queued graph update processes) before
+                        // resorting to the graph-0 escalation. _rescanRetried gates it to one shot.
+                        if (!_rescanRetried && (_shortWalkTarget.Object != null || _shortWalkTarget.DropGo != null))
+                        {
+                            _rescanRetried = true;
+                            var pPos = MainGame.me?.player?.pos ?? Vector2.zero;
+                            var mid = (pPos + _shortWalkTarget.Position) * 0.5f;
+                            float span = Vector2.Distance(pPos, _shortWalkTarget.Position) / TileSize + 12f;
+                            ForceNavmeshRescanAround(mid, span);
+                            _rescanRetryTarget = _shortWalkTarget;
+                            _rescanRetryFramesLeft = RescanRetryDelayFrames;
+                            _rescanRetryPending = true;
+                            _isWalking = false;
+                            _log?.LogWarning($"[NAVIGATOR] A* failed to {label}, forcing navmesh rescan + retry");
+                            return;
+                        }
                         // A* failed (no path / endpoint too far) — typically the target sits
                         // behind a fence the player graph can't path through. Escalate to the
                         // fence-aware graph-0 route (threads gates like an NPC) instead of a
@@ -1650,6 +1744,43 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
+    /// Clear stale per-walk recovery state on a scene change / save-load / day change. Sleeping and
+    /// loading don't teleport or reload navmesh, so without this the "A* already failed" guard and
+    /// the one-shot rescan retry could linger into the new session. Cheap insurance — the reactive
+    /// rescan path self-heals anyway. Called from Plugin.Update's scene-change branch.
+    /// </summary>
+    internal static void ResetNavStateOnSceneChange()
+    {
+        _astarFailedForWalk = false;
+        _rescanRetried = false;
+        _rescanRetryPending = false;
+        _teleportRescanFramesLeft = 0;
+        _hasLastPlayerPos = false;
+    }
+
+    /// <summary>
+    /// Force the game's own bounded navmesh update (graph 0 + the player graph) over a room-sized
+    /// box around a point, mirroring what the game does when a chunk streams in
+    /// (ChunkedGameObject.RescanAStar -> ChunkManager.RecalcAStarBounds -> UpdateAstarBounds). Used to
+    /// re-activate interior navmesh after a teleport/sleep, where the game otherwise waits for the
+    /// player to physically move before the far side of the room becomes walkable. Cheap vs a full
+    /// AStarTools.Rescan(); no visible/audible effect.
+    /// </summary>
+    private static void ForceNavmeshRescanAround(Vector2 center, float tiles = 20f)
+    {
+        try
+        {
+            float size = tiles * TileSize;
+            AStarTools.UpdateAstarBounds(new Bounds(center, Vector3.one * size));
+            _log?.LogInfo($"[NAVIGATOR] Forced navmesh rescan around {center} (~{tiles:F0} tiles)");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] ForceNavmeshRescanAround failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Full navigation teardown after a teleport. Unlike CancelNavigation (which only handles the
     /// three top-level states), this clears every pending/in-flight flag so no stale route, hop, or
     /// beacon survives the position jump, releases scripted control, and gives a single short notice.
@@ -1671,6 +1802,8 @@ internal static class ObjectNavigator
             _pullbackTries = 0;
             _stalledRecomputes = 0;
             _astarFailedForWalk = false;
+            _rescanRetried = false;
+            _rescanRetryPending = false;
             _exitAssisting = false;
             _hasBusyPos = false;
             ClearArrivedTarget();

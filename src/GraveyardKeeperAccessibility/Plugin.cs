@@ -167,6 +167,8 @@ public class Plugin : BaseUnityPlugin
                 ZoneAnnouncer.Reset();
                 // Re-baseline health/energy silently so a save load doesn't announce the whole bar.
                 HealthEnergyAnnouncer.Reset();
+                // Drop stale per-walk navmesh-recovery state so a save-load/day change starts clean.
+                ObjectNavigator.ResetNavStateOnSceneChange();
             }
 
             // Speak any items the player just received ("Got 4 wood"). Runs regardless of GUI
