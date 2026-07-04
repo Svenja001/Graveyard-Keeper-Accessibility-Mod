@@ -130,6 +130,17 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.GS_SetPlayerEnable_Postfix),
             typeof(GS), "SetPlayerEnable", new[] { typeof(bool), typeof(bool) });
 
+        // Speak "Game saved" whenever the game writes a save (sleeping/autosave, manual save,
+        // save-and-exit, save-slots menu) — the game only shows a silent disk icon, which a blind
+        // player can't see. ShowSavingStatus(true/false) brackets every save. See Patches.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.GUIElements_ShowSavingStatus_Postfix),
+            typeof(GUIElements), "ShowSavingStatus", new[] { typeof(bool) });
+
+        // Speak "Achievement unlocked: <name>" on every Steam achievement — the game only shows a
+        // silent toast. Every unlock routes through PlatformSpecific.OnAchievementComplete. See Patches.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.PlatformSpecific_OnAchievementComplete_Postfix),
+            typeof(PlatformSpecific), "OnAchievementComplete", new[] { typeof(AchievementDefinition) });
+
         // Accessible fishing (see FishingAssist): narrate every fishing state change, the selected
         // bait, and the live cast-distance tier; poll the Ctrl+F auto-catch toggle each frame; and
         // (prefix) auto-complete the bite + reel mini-game when auto-catch is on.

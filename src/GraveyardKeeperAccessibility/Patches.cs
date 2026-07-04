@@ -201,6 +201,99 @@ internal static class Patches
         }
     }
 
+    // The game shows a silent on-screen disk indicator whenever it writes a save. Every save
+    // path — sleeping (autosave), the manual save key, save-and-exit, and the save-slots menu —
+    // funnels through PlatformSpecific.SaveGame, which calls ShowSavingStatus(true) as the write
+    // begins and ShowSavingStatus(false) once it completes. A blind player never sees that flash,
+    // so they have no way to know the game saved (e.g. after going to sleep). We mirror it with
+    // speech: confirm "Game saved" on completion (the false edge), guarded by the true edge so a
+    // stray false can't announce a save that never happened.
+    private static bool _saveInProgress;
+
+    public static void GUIElements_ShowSavingStatus_Postfix(bool __0)
+    {
+        try
+        {
+            if (__0)
+            {
+                _saveInProgress = true;
+                return;
+            }
+
+            if (!_saveInProgress) return;
+            _saveInProgress = false;
+            ScreenReader.Say("Game saved", interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[SAVE] ShowSavingStatus postfix: {ex.Message}");
+        }
+    }
+
+    // Achievements only surface as a silent Steam toast a blind player can't see. Every unlock
+    // funnels through PlatformSpecific.OnAchievementComplete (from AchievementsSystem — both the
+    // live CheckKeyQuests path and the load-time VerifyAndSetMissedAchievements resync), so we
+    // hook it and speak the achievement. Dedupe by id per session so a resync (or the counter
+    // path) can't announce the same one twice. The postfix runs even without Steam, so the name
+    // lookup falls back to a prettified id when Steam's display attribute is unavailable.
+    private static readonly HashSet<string> _announcedAchievements = new();
+    private static MethodInfo _steamDisplayAttrMethod;
+    private static bool _steamDisplayAttrResolved;
+
+    public static void PlatformSpecific_OnAchievementComplete_Postfix(AchievementDefinition __0)
+    {
+        try
+        {
+            var id = __0?.id;
+            if (string.IsNullOrEmpty(id)) return;
+            if (!_announcedAchievements.Add(id)) return;
+
+            ScreenReader.Say($"Achievement unlocked: {GetAchievementName(id)}", interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[ACHIEVEMENT] OnAchievementComplete postfix: {ex.Message}");
+        }
+    }
+
+    // Steam holds the human-readable, localized achievement title ("First Blood"); the game's own
+    // AchievementDefinition only carries the raw Steam API id ("d_first_blood"). Reach the title
+    // via Steamworks.SteamUserStats.GetAchievementDisplayAttribute(id, "name") by reflection so we
+    // don't take a hard Steamworks reference. Fall back to a prettified id if Steam has nothing.
+    private static string GetAchievementName(string id)
+    {
+        try
+        {
+            if (!_steamDisplayAttrResolved)
+            {
+                _steamDisplayAttrResolved = true;
+                var t = AccessTools.TypeByName("Steamworks.SteamUserStats");
+                _steamDisplayAttrMethod = t == null ? null
+                    : AccessTools.Method(t, "GetAchievementDisplayAttribute", new[] { typeof(string), typeof(string) });
+            }
+
+            if (_steamDisplayAttrMethod != null)
+            {
+                var name = _steamDisplayAttrMethod.Invoke(null, new object[] { id, "name" }) as string;
+                if (!string.IsNullOrWhiteSpace(name)) return name.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[ACHIEVEMENT] Steam name lookup failed for '{id}': {ex.Message}");
+        }
+
+        return PrettifyId(id);
+    }
+
+    // "d_first_blood" -> "First blood". A rough last resort only when Steam gives no display name.
+    private static string PrettifyId(string id)
+    {
+        var s = id.Replace('_', ' ').Trim();
+        if (s.Length == 0) return id;
+        return char.ToUpper(s[0]) + s.Substring(1);
+    }
+
     // AutopsyGUI._body holds the corpse being prepared. Cached so we don't reflect every open.
     private static System.Reflection.FieldInfo _autopsyBodyField;
 
