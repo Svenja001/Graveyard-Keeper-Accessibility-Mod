@@ -42,6 +42,12 @@ internal static class BuildPlacementHandler
     // Which sub-mode we were last in, so transitions read the right "left X" message.
     private static string _lastMode;
 
+    // Wall-decoration placement: the WorldSubZone mount strips this object may sit on, plus the
+    // GameObjects we temporarily switched on so the game's physics-based validity check can see
+    // them (they ship inactive with zero-size colliders). Restored when placement ends.
+    private static List<WorldSubZone> _wallZones;
+    private static readonly List<GameObject> _tempActivated = new List<GameObject>();
+
     /// <summary>True only while we are driving the placement ghost or remove cursor (read by the Harmony prefix).</summary>
     internal static bool Active => _wasActive;
 
@@ -115,6 +121,7 @@ internal static class BuildPlacementHandler
             // Left the sub-mode by a route other than our own keys (e.g. the game cancelled it).
             _wasActive = false;
             _removables = null;
+            RestoreSubZones();
             ScreenReader.Say(_lastMode == "Removing" ? "Left removal" : "Left placement", interrupt: true);
         }
 
@@ -143,9 +150,74 @@ internal static class BuildPlacementHandler
     {
         var name = CurrentBuildName();
         var what = string.IsNullOrEmpty(name) ? "Placement" : $"Placing {name}";
+
+        // Wall decorations (Wandleuchter etc.) carry a sub_zone_id and can only sit on the wall
+        // mount strips. Those strips ship as inactive GameObjects (zero-size colliders the game's
+        // physics validity check can't see), so switch them on for the whole placement session —
+        // otherwise no spot ever reads as buildable. Restored when placement ends.
+        var subZoneId = CurrentSubZoneId();
+        if (!string.IsNullOrEmpty(subZoneId))
+        {
+            _wallZones = CollectMatchingSubZones(subZoneId);
+            EnsureSubZonesActive(_wallZones);
+        }
+
+        var snapHint = string.IsNullOrEmpty(subZoneId)
+            ? "Space snaps to a free spot"
+            : "This is a wall decoration, Space finds a spot on the wall";
+
         ScreenReader.Say(
-            $"{what}. Arrow keys move, Space snaps to a free spot, R rotates, Enter places, Escape cancels. {Validity()}.",
+            $"{what}. Arrow keys move, {snapHint}, R rotates, Enter places, Escape cancels. {Validity()}.",
             interrupt: true);
+    }
+
+    /// <summary>
+    /// Switch on every GameObject in each matching sub-zone's parent chain that is currently off,
+    /// so its trigger collider becomes visible to the game's physics-based build-validity checks.
+    /// We remember exactly what we changed so <see cref="RestoreSubZones"/> can put it all back.
+    /// </summary>
+    private static void EnsureSubZonesActive(List<WorldSubZone> matching)
+    {
+        if (matching == null) return;
+        foreach (var z in matching)
+        {
+            if (z == null) continue;
+            try
+            {
+                // Collect the chain root→self, then activate top-down so activeInHierarchy resolves.
+                var chain = new List<Transform>();
+                for (var t = z.transform; t != null; t = t.parent) chain.Add(t);
+                for (int k = chain.Count - 1; k >= 0; k--)
+                {
+                    var go = chain[k].gameObject;
+                    if (!go.activeSelf)
+                    {
+                        go.SetActive(true);
+                        _tempActivated.Add(go);
+                        _log?.LogInfo($"[BUILD] activated sub-zone chain GO '{go.name}'");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.LogError($"[BUILD] EnsureSubZonesActive failed: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>Undo every temporary activation done by <see cref="EnsureSubZonesActive"/>.</summary>
+    private static void RestoreSubZones()
+    {
+        for (int k = _tempActivated.Count - 1; k >= 0; k--)
+        {
+            var go = _tempActivated[k];
+            if (go != null)
+            {
+                try { go.SetActive(false); } catch { }
+            }
+        }
+        _tempActivated.Clear();
+        _wallZones = null;
     }
 
     private static void HandleInput()
@@ -236,6 +308,7 @@ internal static class BuildPlacementHandler
     private static void Cancel()
     {
         var logics = Logics;
+        RestoreSubZones();
         try
         {
             _cancelPlacing?.Invoke(logics, null);
@@ -447,33 +520,204 @@ internal static class BuildPlacementHandler
             return;
         }
 
+        var subZoneId = CurrentSubZoneId();
         var origin = FloatingWorldGameObject.cur_floating_pos;
-        const int maxRings = 25;   // ~8 tiles in every direction
 
-        for (int ring = 1; ring <= maxRings; ring++)
+        Vector2 playerPos = origin;
+        try
         {
-            for (int dx = -ring; dx <= ring; dx++)
+            var player = MainGame.me?.player;
+            if (player != null) playerPos = player.pos;
+        }
+        catch { }
+
+        // Build the list of rectangles to sweep. For a wall/sub-zone object we target each matching
+        // WorldSubZone collider directly (they're thin mount strips a coarse grid steps right past),
+        // sweeping them finely. For a floor object we sweep the whole build-zone bounds.
+        List<WorldSubZone> matching = null;
+        if (!string.IsNullOrEmpty(subZoneId))
+        {
+            // Reuse the strips activated on entry; recollect+activate if we somehow got here first.
+            matching = _wallZones ?? CollectMatchingSubZones(subZoneId);
+            EnsureSubZonesActive(matching);
+            _wallZones = matching;
+        }
+        var rects = new List<Bounds>();
+        if (matching != null)
+        {
+            foreach (var z in matching)
             {
-                for (int dy = -ring; dy <= ring; dy++)
+                if (z == null) continue;
+                bool any = false;
+                foreach (var col in z.GetComponentsInChildren<Collider2D>(includeInactive: true))
                 {
-                    // Only the outer border of this ring (inner cells were tested already).
-                    if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != ring) continue;
+                    if (col == null) continue;
+                    var b = col.bounds;
+                    if (b.size.sqrMagnitude < 1f) continue;
+                    b.Expand(new Vector3(TileSize, TileSize, 0f)); // half-tile margin each side
+                    rects.Add(b);
+                    any = true;
+                }
+                if (!any) rects.Add(new Bounds(z.transform.position, new Vector3(2 * TileSize, 2 * TileSize, 0f)));
+            }
+        }
 
-                    var cand = new Vector2(origin.x + dx * Step, origin.y + dy * Step);
+        // Fine step over the thin wall strips; coarse (one-cell) step over an open floor.
+        float step = rects.Count > 0 ? 16f : Step;
+        if (rects.Count == 0)
+        {
+            Bounds bounds = new Bounds(origin, new Vector3(16 * TileSize, 16 * TileSize, 0f));
+            try
+            {
+                var zone = Logics?.cur_build_zone;
+                if (zone != null)
+                {
+                    var zb = zone.GetBounds();
+                    if (zb.size.sqrMagnitude > 1f) bounds = zb;
+                }
+            }
+            catch { }
+            rects.Add(bounds);
+        }
+
+        Vector2? best = null;
+        float bestSqr = float.MaxValue;
+        int tested = 0, valid = 0;
+        const int maxSamples = 12000;   // safety cap
+
+        foreach (var rect in rects)
+        {
+            for (float x = rect.min.x; x <= rect.max.x && tested < maxSamples; x += step)
+            {
+                for (float y = rect.min.y; y <= rect.max.y && tested < maxSamples; y += step)
+                {
+                    tested++;
+                    var cand = new Vector2(x, y);
                     FloatingWorldGameObject.MoveCurrentFloatingObject(cand, is_global_pos: true);
+                    if (!FloatingWorldGameObject.can_be_built) continue;
 
-                    if (FloatingWorldGameObject.can_be_built)
-                    {
-                        ScreenReader.Say($"Found a free spot. {DirectionFromPlayer()}. Valid.", interrupt: true);
-                        return;
-                    }
+                    valid++;
+                    float d = (cand - playerPos).sqrMagnitude;
+                    if (d < bestSqr) { bestSqr = d; best = cand; }
                 }
             }
         }
 
-        // Nothing within range — put the ghost back where it was.
+        if (best.HasValue)
+        {
+            FloatingWorldGameObject.MoveCurrentFloatingObject(best.Value, is_global_pos: true);
+            var word = string.IsNullOrEmpty(subZoneId) ? "free spot" : "wall spot";
+            ScreenReader.Say($"Found a {word}. {DirectionFromPlayer()}. Valid.", interrupt: true);
+            return;
+        }
+
+        // Nothing valid. Restore the ghost, log the full picture (incl. per-zone details), and
+        // speak a diagnosis so we can tell WHY without a log dive.
         FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
-        ScreenReader.Say("No free spot nearby. Try moving closer.", interrupt: true);
+        ReportNoSpotDiagnostic(subZoneId, matching, tested, origin);
+        FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
+    }
+
+    /// <summary>All WorldSubZone objects (active or not) whose sub_zone_id matches, i.e. the wall
+    /// mount strips this decoration may sit on.</summary>
+    private static List<WorldSubZone> CollectMatchingSubZones(string subZoneId)
+    {
+        var list = new List<WorldSubZone>();
+        try
+        {
+            var all = UnityEngine.Object.FindObjectsOfType<WorldSubZone>(includeInactive: true);
+            if (all != null)
+                foreach (var z in all)
+                    if (z != null && z.sub_zone_id == subZoneId)
+                        list.Add(z);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] CollectMatchingSubZones failed: {ex.Message}");
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// The sub-zone id the current build is restricted to (wall decorations set this), or null for
+    /// ordinary floor objects. Prefer the live craft definition; fall back to the build grid's own
+    /// active sub-zone.
+    /// </summary>
+    private static string CurrentSubZoneId()
+    {
+        try
+        {
+            var fromCraft = CurrentCraft()?.sub_zone_id;
+            if (!string.IsNullOrEmpty(fromCraft)) return fromCraft;
+            var fromGrid = BuildGrid.GetCurrentSubZoneID();
+            return string.IsNullOrEmpty(fromGrid) ? null : fromGrid;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The sweep found no buildable cell. Log everything useful — including per-zone details for the
+    /// matching wall strips (active state, collider bounds, and the game's can_be_built when the
+    /// ghost is dropped on each zone's centre) — and speak a short diagnosis the user can relay.
+    /// </summary>
+    private static void ReportNoSpotDiagnostic(string subZoneId, List<WorldSubZone> matching, int tested, Vector3 origin)
+    {
+        string objId = null;
+        try { objId = FloatingWorldGameObject.cur_floating?.wobj?.obj_id; } catch { }
+
+        int matchCount = matching?.Count ?? 0;
+        _log?.LogInfo(
+            $"[BUILD] No valid spot. obj='{objId}' craftSubZone='{CurrentCraft()?.sub_zone_id}' " +
+            $"gridSubZone='{SafeGridSubZone()}' buildZone='{Logics?.cur_build_zone_id}' " +
+            $"tested={tested} subZonesMatch={matchCount}");
+
+        int activeAtCenter = 0;
+        if (matching != null)
+        {
+            int i = 0;
+            foreach (var z in matching)
+            {
+                if (z == null || i >= 12) { i++; continue; }
+                bool active = false; string colInfo = "none"; bool cbb = false; Vector3 pos = Vector3.zero;
+                try
+                {
+                    active = z.gameObject.activeInHierarchy;
+                    pos = z.transform.position;
+                    var cols = z.GetComponentsInChildren<Collider2D>(includeInactive: true);
+                    if (cols.Length > 0) colInfo = $"{cols.Length}col enabled={cols[0].enabled} bounds={cols[0].bounds.size}";
+                    FloatingWorldGameObject.MoveCurrentFloatingObject(z.transform.position, is_global_pos: true);
+                    cbb = FloatingWorldGameObject.can_be_built;
+                    if (cbb) activeAtCenter++;
+                }
+                catch { }
+                _log?.LogInfo($"[BUILD]  wallzone#{i} active={active} pos={pos} {colInfo} can_be_built@center={cbb}");
+                i++;
+            }
+        }
+        // Undo the probing moves.
+        FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
+
+        if (!string.IsNullOrEmpty(subZoneId))
+        {
+            ScreenReader.Say(
+                matchCount == 0
+                    ? "This is a wall object, but no matching wall zone exists here. The wall it needs may not be built."
+                    : $"Found {matchCount} wall zone{(matchCount == 1 ? "" : "s")}, but no free spot on {(matchCount == 1 ? "it" : "them")}.",
+                interrupt: true);
+        }
+        else
+        {
+            ScreenReader.Say("No buildable spot anywhere in this build area.", interrupt: true);
+        }
+    }
+
+    private static string SafeGridSubZone()
+    {
+        try { return BuildGrid.GetCurrentSubZoneID(); }
+        catch { return null; }
     }
 
     private static void AnnouncePosition()
