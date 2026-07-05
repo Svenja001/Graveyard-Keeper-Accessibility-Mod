@@ -27,6 +27,7 @@ public class Plugin : BaseUnityPlugin
         BuildPlacementHandler.Init(Log);
         DialogueChoiceHandler.Init(Log);
         CombatAssist.Init(Log);
+        AutoConsume.Init(Log);
         FishingAssist.Init(Log);
 
         // Test TTS
@@ -238,6 +239,9 @@ public class Plugin : BaseUnityPlugin
 
                 // Real-time combat assistance (auto-aim, enemy radar, one-key attack).
                 CombatAssist.Update();
+
+                // Dungeon survival: auto-eat food / drink potions when a bar runs low (U toggles).
+                AutoConsume.Tick();
             }
 
             // Only check title screen if no BaseGUI is active
@@ -520,6 +524,8 @@ public class Plugin : BaseUnityPlugin
                 QuestAnnouncer.Open();
             else if (Input.GetKeyDown(KeyCode.K) && !ctrl)
                 CorpseScanner.Announce();
+            else if (Input.GetKeyDown(KeyCode.U) && !ctrl)
+                AutoConsume.Toggle();
         }
         catch (Exception ex)
         {

@@ -17,8 +17,11 @@ namespace GraveyardKeeperAccessibility;
 ///                    swings in the direction we aimed, so the hit connects.
 ///   3. ONE-KEY HIT — C faces the nearest enemy and performs the swing directly
 ///                    (attack.Perform), so the player doesn't even have to aim with Space.
-/// Toggle the whole thing with B (the auto-facing in particular, in case it ever fights the
-/// player's own movement).
+///   4. AUTO-ATTACK  — X toggles a mode that swings on its own whenever an enemy is actually in
+///                    melee reach and the player is standing still, so they don't have to jab C /
+///                    Space (and waste energy) while still out of range. Moving cancels it, so you
+///                    can always walk away to flee.
+/// Toggle the awareness/auto-facing with B (in case it ever fights the player's own movement).
 /// </summary>
 internal static class CombatAssist
 {
@@ -27,9 +30,11 @@ internal static class CombatAssist
     private const float AutoFaceRange = 4f * TileSize;   // keep facing an enemy this close
     private const float AttackRange = 4f * TileSize;     // C will swing at an enemy this close
     private const float AdjacentRange = 1.8f * TileSize; // "enemy striking" danger range
+    private const float AutoAttackRange = 2.4f * TileSize; // auto-attack only when a hit will connect
 
     private static ManualLogSource _log;
     private static bool _enabled = true;
+    private static bool _autoAttack;   // X toggles auto-swinging at in-reach enemies (off by default)
 
     // Per-enemy HP bookkeeping, keyed by Unity instance id. We treat the highest HP ever seen for
     // an enemy as its max so we can report a percentage without resolving the obj_def HP formula.
@@ -46,7 +51,7 @@ internal static class CombatAssist
     internal static void Init(ManualLogSource log)
     {
         _log = log;
-        _log?.LogInfo("[COMBAT] CombatAssist initialized (C attack, V scan, B toggle)");
+        _log?.LogInfo("[COMBAT] CombatAssist initialized (X auto-attack, C attack, V scan, B toggle)");
     }
 
     internal static void Update()
@@ -72,6 +77,14 @@ internal static class CombatAssist
                 ScreenReader.Say(_enabled ? "Combat assist on" : "Combat assist off");
             }
 
+            if (!ctrl && Input.GetKeyDown(KeyCode.X))
+            {
+                _autoAttack = !_autoAttack;
+                ScreenReader.Say(_autoAttack
+                    ? "Auto attack on. I'll swing at enemies in reach while you stand still; move to back off."
+                    : "Auto attack off");
+            }
+
             var enemies = FindEnemies(player.pos);
             var nearest = Nearest(enemies, player.pos);
 
@@ -80,6 +93,9 @@ internal static class CombatAssist
 
             if (!ctrl && Input.GetKeyDown(KeyCode.C))
                 AttackNearest(player, character, nearest);
+
+            if (_autoAttack)
+                AutoAttack(player, character, nearest);
 
             if (_enabled)
                 AutoFace(player, character, nearest);
@@ -142,33 +158,71 @@ internal static class CombatAssist
 
             // Mirror the game's own energy gate (BaseCharacterComponent.CheckEnegryForPlayerAtack)
             // so we don't drive energy negative or swing for nothing.
-            var weapon = player.GetEquippedWeapon();
-            float cost = 0f;
-            try
-            {
-                var p = weapon?.definition?.params_on_use;
-                if (p != null && !p.IsEmpty()) cost = p.Get("energy") * -1f;
-            }
-            catch { }
-            if (player.energy < cost)
+            if (!HasEnergyToAttack(player))
             {
                 ScreenReader.Say("Too tired to attack", interrupt: true);
                 return;
             }
 
-            character.LookAt(nearest);
-
-            var attack = character.attack;
-            if (attack == null || attack.performing_attack) return;
-
-            // Same call ProcessAttack makes for a player sword swing; the callback chains the next
-            // swing when Space/repeat is held, which we don't, so it just ends cleanly.
-            attack.Perform(character.anim_direction, 0, character.OnPlayersAttackPerformed);
+            PerformSwing(player, character, nearest);
         }
         catch (Exception ex)
         {
             _log?.LogError($"[COMBAT] AttackNearest error: {ex.Message}");
         }
+    }
+
+    // ── Auto-attack (X) ───────────────────────────────────────────────────────────────────────────
+
+    // Swing on our own at an enemy that's actually within melee reach, so the player doesn't have
+    // to jab C/Space (and waste energy) while still out of range. Gated exactly like AutoFace: only
+    // while the player is standing still, so moving away always lets them flee instead of being
+    // locked into swings. Silent by design — TrackFeedback already speaks "Hit" / "Enemy defeated",
+    // and staying quiet on the too-tired/too-far cases avoids per-frame spam.
+    private static void AutoAttack(WorldGameObject player, BaseCharacterComponent character, WorldGameObject nearest)
+    {
+        try
+        {
+            if (nearest == null || !character.control_enabled) return;
+            if (player.GetEquippedWeaponType() != ItemDefinition.ItemType.Sword) return;
+
+            // Player is steering — let them walk away without being pinned by auto-swings.
+            if (LazyInput.GetDirection().magnitude > 0.01f) return;
+
+            if (Vector2.Distance(player.pos, nearest.pos) > AutoAttackRange) return;
+            if (!HasEnergyToAttack(player)) return;
+
+            PerformSwing(player, character, nearest);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[COMBAT] AutoAttack error: {ex.Message}");
+        }
+    }
+
+    // Mirror the game's energy gate (BaseCharacterComponent.CheckEnegryForPlayerAtack): a swing
+    // costs the weapon's params_on_use "energy" (stored negative), so don't swing below that.
+    private static bool HasEnergyToAttack(WorldGameObject player)
+    {
+        float cost = 0f;
+        try
+        {
+            var p = player.GetEquippedWeapon()?.definition?.params_on_use;
+            if (p != null && !p.IsEmpty()) cost = p.Get("energy") * -1f;
+        }
+        catch { }
+        return player.energy >= cost;
+    }
+
+    // Face the enemy and perform one sword swing. Facing first is what makes the hit connect (the
+    // combat collider tracks anim_direction); ProcessAttack ignores a zero movement input, so a
+    // stationary swing keeps the aim we just set. No-op if a swing is already in progress.
+    private static void PerformSwing(WorldGameObject player, BaseCharacterComponent character, WorldGameObject nearest)
+    {
+        character.LookAt(nearest);
+        var attack = character.attack;
+        if (attack == null || attack.performing_attack) return;
+        attack.Perform(character.anim_direction, 0, character.OnPlayersAttackPerformed);
     }
 
     // ── On-demand scan (V) ──────────────────────────────────────────────────────────────────────

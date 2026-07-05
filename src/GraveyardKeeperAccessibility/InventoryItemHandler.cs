@@ -573,6 +573,50 @@ internal static class InventoryItemHandler
         }
     }
 
+    /// <summary>
+    /// Compute what USING a consumable does to the player's three bars, as whole numbers:
+    /// <paramref name="energy"/>, <paramref name="hp"/>, <paramref name="sanity"/> (positive =
+    /// restores, negative = drains). Reads the same data as <see cref="DescribeUsePerks"/> — the
+    /// fixed <see cref="ItemDefinition.params_on_use"/> plus any scaling values in
+    /// <see cref="ItemDefinition.on_use_expressions"/> — so <see cref="AutoConsume"/> picks items
+    /// by the very numbers the item cell speaks. Returns false (all zero) for items that can't be
+    /// used at all.
+    /// </summary>
+    internal static bool ComputeUseEffect(ItemDefinition def, out int energy, out int hp, out int sanity)
+    {
+        energy = hp = sanity = 0;
+        try
+        {
+            if (def == null || !def.can_be_used) return false;
+
+            float e = def.params_on_use?.Get("energy") ?? 0f;
+            float h = def.params_on_use?.Get("hp") ?? 0f;
+            float s = def.params_on_use?.Get("sanity") ?? 0f;
+
+            if (def.on_use_expressions != null)
+            {
+                foreach (var expr in def.on_use_expressions)
+                {
+                    if (expr == null || expr.HasNoExpresion()) continue;
+                    var parsed = GameRes.ParseSmartExpression(expr);
+                    e += parsed.Get("energy");
+                    h += parsed.Get("hp");
+                    s += parsed.Get("sanity");
+                }
+            }
+
+            energy = Mathf.RoundToInt(e);
+            hp = Mathf.RoundToInt(h);
+            sanity = Mathf.RoundToInt(s);
+            return true;
+        }
+        catch
+        {
+            energy = hp = sanity = 0;
+            return false;
+        }
+    }
+
     /// <summary>Add "gives N energy" / "drains N energy" to <paramref name="parts"/> when N != 0.</summary>
     private static void AppendPerk(List<string> parts, int value, string label)
     {
