@@ -428,6 +428,15 @@ internal static class InteractionDetector
                 id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
                 return null;
 
+            // Garden beds are ordinary Craft stations (interaction_type == Craft): each "plant
+            // seed" recipe is a change_wgo transform (empty bed → growing crop) that outputs no
+            // item, so it looks exactly like an upgrade craft. It isn't — planting is done through
+            // the bed's craft menu (press E), not an upgrade. All beds/crops start with "garden"
+            // by the game's own convention (see WorldGameObject.ProcessMultiQualityOutput_OLD and
+            // WheresMaVeggies). Never relabel them "can be upgraded".
+            if (id.StartsWith("garden", StringComparison.OrdinalIgnoreCase))
+                return null;
+
             var crafts = wgo.components?.craft?.crafts;
             if (crafts == null) return null;
 
