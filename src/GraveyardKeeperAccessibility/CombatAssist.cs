@@ -87,15 +87,19 @@ internal static class CombatAssist
 
             var enemies = FindEnemies(player.pos);
             var nearest = Nearest(enemies, player.pos);
+            // Destructible loot props (dungeon vases/pots) smashed by a sword swing, not a tool.
+            // A blind player can't aim a manual swing, so C/X target the nearest one when no enemy
+            // is in reach.
+            var nearestBreakable = Nearest(FindBreakables(player.pos), player.pos);
 
             if (!ctrl && Input.GetKeyDown(KeyCode.V))
                 AnnounceScan(player, enemies, nearest);
 
             if (!ctrl && Input.GetKeyDown(KeyCode.C))
-                AttackNearest(player, character, nearest);
+                AttackNearest(player, character, nearest, nearestBreakable);
 
             if (_autoAttack)
-                AutoAttack(player, character, nearest);
+                AutoAttack(player, character, nearest, nearestBreakable);
 
             if (_enabled)
                 AutoFace(player, character, nearest);
@@ -133,7 +137,8 @@ internal static class CombatAssist
 
     // ── One-key attack ──────────────────────────────────────────────────────────────────────────
 
-    private static void AttackNearest(WorldGameObject player, BaseCharacterComponent character, WorldGameObject nearest)
+    private static void AttackNearest(WorldGameObject player, BaseCharacterComponent character,
+        WorldGameObject nearest, WorldGameObject nearestBreakable)
     {
         try
         {
@@ -143,28 +148,38 @@ internal static class CombatAssist
                 return;
             }
 
-            if (nearest == null)
+            // Prefer an enemy in reach; otherwise fall back to smashing the nearest loot prop
+            // (vase/pot). Mirror the game's own energy gate
+            // (BaseCharacterComponent.CheckEnegryForPlayerAtack) before any swing so we don't drive
+            // energy negative or swing for nothing.
+            bool enemyInReach = nearest != null && Vector2.Distance(player.pos, nearest.pos) <= AttackRange;
+            if (enemyInReach)
+            {
+                if (!HasEnergyToAttack(player)) { ScreenReader.Say("Too tired to attack", interrupt: true); return; }
+                PerformSwing(player, character, nearest);
+                return;
+            }
+
+            bool propInReach = nearestBreakable != null && Vector2.Distance(player.pos, nearestBreakable.pos) <= AttackRange;
+            if (propInReach)
+            {
+                // Loot props are destroyed directly (BreakProp) — one blow, no energy — so no
+                // energy gate here, unlike the enemy path above.
+                ScreenReader.Say($"Smashing {EnemyName(nearestBreakable)}", interrupt: true);
+                BreakProp(nearestBreakable);
+                return;
+            }
+
+            // Neither an enemy nor a prop is in reach.
+            if (nearest == null && nearestBreakable == null)
             {
                 ScreenReader.Say("No enemies nearby", interrupt: true);
                 return;
             }
 
-            float dist = Vector2.Distance(player.pos, nearest.pos);
-            if (dist > AttackRange)
-            {
-                ScreenReader.Say($"Enemy too far, move closer. {CompassDirection(player.pos, nearest.pos)}", interrupt: true);
-                return;
-            }
-
-            // Mirror the game's own energy gate (BaseCharacterComponent.CheckEnegryForPlayerAtack)
-            // so we don't drive energy negative or swing for nothing.
-            if (!HasEnergyToAttack(player))
-            {
-                ScreenReader.Say("Too tired to attack", interrupt: true);
-                return;
-            }
-
-            PerformSwing(player, character, nearest);
+            // Something exists but is out of range — point the player at the closest of the two.
+            var target = Nearest(new List<WorldGameObject> { nearest, nearestBreakable }, player.pos);
+            ScreenReader.Say($"Too far, move closer. {CompassDirection(player.pos, target.pos)}", interrupt: true);
         }
         catch (Exception ex)
         {
@@ -179,20 +194,31 @@ internal static class CombatAssist
     // while the player is standing still, so moving away always lets them flee instead of being
     // locked into swings. Silent by design — TrackFeedback already speaks "Hit" / "Enemy defeated",
     // and staying quiet on the too-tired/too-far cases avoids per-frame spam.
-    private static void AutoAttack(WorldGameObject player, BaseCharacterComponent character, WorldGameObject nearest)
+    private static void AutoAttack(WorldGameObject player, BaseCharacterComponent character,
+        WorldGameObject nearest, WorldGameObject nearestBreakable)
     {
         try
         {
-            if (nearest == null || !character.control_enabled) return;
+            if (!character.control_enabled) return;
             if (player.GetEquippedWeaponType() != ItemDefinition.ItemType.Sword) return;
 
             // Player is steering — let them walk away without being pinned by auto-swings.
             if (LazyInput.GetDirection().magnitude > 0.01f) return;
 
-            if (Vector2.Distance(player.pos, nearest.pos) > AutoAttackRange) return;
-            if (!HasEnergyToAttack(player)) return;
+            // Prefer an enemy in reach (energy-gated, since a sword swing costs energy). Only smash a
+            // loot prop when no enemy is close, so we don't destroy pots in the middle of a fight.
+            if (nearest != null && Vector2.Distance(player.pos, nearest.pos) <= AutoAttackRange)
+            {
+                if (!HasEnergyToAttack(player)) return;
+                PerformSwing(player, character, nearest);
+                return;
+            }
 
-            PerformSwing(player, character, nearest);
+            // Prop smashing goes through BreakProp — one blow, no energy — so it's not energy-gated.
+            if (nearestBreakable != null && Vector2.Distance(player.pos, nearestBreakable.pos) <= AutoAttackRange)
+            {
+                BreakProp(nearestBreakable);
+            }
         }
         catch (Exception ex)
         {
@@ -223,6 +249,39 @@ internal static class CombatAssist
         var attack = character.attack;
         if (attack == null || attack.performing_attack) return;
         attack.Perform(character.anim_direction, 0, character.OnPlayersAttackPerformed);
+    }
+
+    // Destroy a loot prop (vase/pot) in one blow. Sighted players chip a prop's hp with several
+    // sword swings, but each of our aimed swings costs the player energy — punishing for a blind
+    // player who can't see the pot's remaining hp. Instead we deal lethal damage straight through
+    // the game's own kill path, HPActionComponent.DecHP (the same call CombatComponent/projectiles
+    // use to break objects). DecHP costs the player NO energy and the object's destruction + loot
+    // drop fires exactly once via HPActionComponent.UpdateComponent, so there's no double-drop.
+    private static void BreakProp(WorldGameObject prop)
+    {
+        try
+        {
+            LogSmash(prop);
+            var hpc = prop?.components?.hp;
+            if (hpc != null && hpc.enabled && !prop.is_dead)
+            {
+                // A large value guarantees a one-shot kill after the object's armor/damage_factor
+                // are applied inside DecHP (loot props always have damage_factor > 0, else nothing
+                // could damage them).
+                hpc.DecHP(999999f);
+            }
+            else if (prop != null && !prop.is_dead)
+            {
+                // No active hp component to run the passive zero-hp check — trigger the break
+                // directly (safe here precisely because that component isn't updating to re-fire it).
+                prop.hp = 0f;
+                prop.DoPreZeroHPActivity();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[COMBAT] BreakProp error: {ex.Message}");
+        }
     }
 
     // ── On-demand scan (V) ──────────────────────────────────────────────────────────────────────
@@ -359,12 +418,49 @@ internal static class CombatAssist
         return list;
     }
 
+    // Smashable loot props (dungeon vases/pots, barrels/crates/urns). Uses the SAME predicate as the
+    // nav tracker (ObjectNavigator.IsBreakableLootProp) so what the Breakables category lists is
+    // exactly what C/X can smash — no more "it's in the list but won't break". That predicate already
+    // excludes mobs/NPCs, spent "..._broken" leftovers, and tool-harvested resource nodes (trees/ore).
+    private static List<WorldGameObject> FindBreakables(Vector2 playerPos)
+    {
+        var list = new List<WorldGameObject>();
+        try
+        {
+            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(false))
+            {
+                if (obj == null || obj.is_dead) continue;
+                if (!obj.gameObject.activeInHierarchy) continue;
+                if (obj.hp <= 0f) continue;
+                if (Vector2.Distance(obj.pos, playerPos) > DetectRange) continue;
+                if (!ObjectNavigator.IsBreakableLootProp(obj)) continue;
+                list.Add(obj);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[COMBAT] FindBreakables failed: {ex.Message}");
+        }
+        return list;
+    }
+
+    private static void LogSmash(WorldGameObject prop)
+    {
+        try
+        {
+            int drops = prop?.obj_def?.drop_items?.Count ?? 0;
+            _log?.LogInfo($"[COMBAT] Smash {prop?.obj_id} hp={prop?.hp:0} drops={drops}");
+        }
+        catch { }
+    }
+
     private static WorldGameObject Nearest(List<WorldGameObject> enemies, Vector2 from)
     {
         WorldGameObject best = null;
         float bestDist = float.MaxValue;
         foreach (var e in enemies)
         {
+            if (e == null) continue;
             float d = Vector2.Distance(e.pos, from);
             if (d < bestDist) { bestDist = d; best = e; }
         }

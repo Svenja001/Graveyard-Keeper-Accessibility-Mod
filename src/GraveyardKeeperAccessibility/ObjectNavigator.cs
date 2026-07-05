@@ -2772,6 +2772,24 @@ internal static class ObjectNavigator
                 category = obj.has_removal_craft ? NavCategory.Buildables : NavCategory.Other;
                 return true;
             default:
+                // Smashable loot props (dungeon vases/pots, barrels/crates/urns): destructible
+                // objects you break for loot. Decided here — BEFORE the harvestable sort — because a
+                // barrel carries an Axe action and would otherwise be swept into Trees. Shared with
+                // CombatAssist via IsBreakableLootProp, so what's listed is exactly what C/X can smash.
+                if (IsBreakableLootProp(obj))
+                {
+                    category = NavCategory.Breakables;
+                    return true;
+                }
+
+                // The spent "..._broken" replacement left after a smash is inert scenery. Skip it
+                // outright (don't let a broken barrel's leftover Axe action drop it into Trees below).
+                if (IsSpentBrokenProp(obj) && HasLootPropKeyword(obj))
+                {
+                    category = NavCategory.Other;
+                    return false;
+                }
+
                 // Resource nodes worked with a tool (chop a tree, mine a stone, dig out a
                 // bush) or gathered/picked up by hand: these have no special interaction_type
                 // (None) but carry a non-empty tool_actions list. Sort them into Trees /
@@ -2973,6 +2991,76 @@ internal static class ObjectNavigator
     /// then fall back to the tool. Pure-Hammer nodes (construction/repair) are not harvestables
     /// and are skipped. Returns false when the object isn't a resource node.
     /// </summary>
+    /// <summary>
+    /// A spent, already-smashed loot prop. When a vase/pot/barrel is destroyed the game runs
+    /// ReplaceWithObject to swap it for a "..._broken" variant (e.g. dungeon_obj_vase02 →
+    /// dungeon_obj_vase01_broken) — inert scenery with no interaction and no loot. Those broken defs
+    /// still carry an hp formula + drop_items, so IsSmashableLootProp (and the keyword rule) would
+    /// keep listing them under Breakables forever. Drop them by their "_broken" id so the tracker
+    /// only shows props still worth smashing. (Repairable broken fences / morgue desks embed
+    /// "broken" too but are classified earlier by their fence/craft interaction, so this never
+    /// reaches them.)
+    /// </summary>
+    private static bool IsSpentBrokenProp(WorldGameObject obj) =>
+        !string.IsNullOrEmpty(obj?.obj_id) &&
+        obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0;
+
+    /// <summary>
+    /// Obj_id keyword for an explicit smashable loot prop — barrels/crates/vases/urns and generic
+    /// dungeon smashables. These may carry a tool_action (you can chop a barrel), which is what
+    /// distinguishes them from a plain resource node: they're still loot props, not trees.
+    /// </summary>
+    private static bool HasLootPropKeyword(WorldGameObject obj)
+    {
+        var id = obj?.obj_id;
+        if (string.IsNullOrEmpty(id)) return false;
+        return id.IndexOf("dungeon_obj", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               id.IndexOf("barrel", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               id.IndexOf("crate", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               id.IndexOf("vase", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               id.IndexOf("urn", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>
+    /// A smashable loot prop: a destructible object (has an hp formula) that the player breaks for
+    /// loot — dungeon vases/pots (smashed by attacking, no tool_action) and barrels/crates/urns
+    /// (which may also carry a tool_action). This is the SINGLE source of truth shared by the nav
+    /// tracker (Breakables category) and CombatAssist (what C/X can smash), so anything listed can
+    /// actually be broken and vice-versa. Excludes: mobs/NPCs (enemies, not loot); the spent
+    /// "..._broken" replacement left after a smash (inert scenery); and plain resource nodes
+    /// (trees/stone/ore/bushes — tool-worked, no loot-prop keyword) so X never chops a tree.
+    /// </summary>
+    internal static bool IsBreakableLootProp(WorldGameObject obj)
+    {
+        try
+        {
+            var def = obj?.obj_def;
+            if (def == null) return false;
+            if (def.IsMob() || def.IsNPC() ||
+                def.type == ObjectDefinition.ObjType.NPC ||
+                def.type == ObjectDefinition.ObjType.Mob) return false;
+            if (def.hp == null) return false;          // not destructible
+            if (IsSpentBrokenProp(obj)) return false;  // already smashed
+            // Must actually drop loot when broken. Excludes inert destructibles that give nothing
+            // (e.g. dungeon_obj_table02: hpFormula but 0 drops) — pointless to list/smash.
+            if (def.drop_items == null || def.drop_items.Count == 0) return false;
+
+            // A named loot prop (barrel/vase/crate/urn/dungeon smashable) counts even if it carries
+            // a tool_action — that's how it differs from a resource node.
+            if (HasLootPropKeyword(obj)) return true;
+
+            // Otherwise only an attack-smashed prop with no tool_action — this excludes tool-worked
+            // resource nodes (trees/stone/ore) and random hp scenery.
+            var tools = def.tool_actions;
+            bool hasTool = tools != null && !tools.no_actions;
+            return !hasTool;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool TryClassifyHarvestable(WorldGameObject obj, ObjectDefinition def, out NavCategory category)
     {
         category = NavCategory.Other;
@@ -2990,21 +3078,9 @@ internal static class ObjectNavigator
             if (!axe && !pickaxe && !shovel && !hand) return false;
 
             var id = obj.obj_id ?? "";
-            // Dungeon furniture/loot props (dungeon_obj_chair_*, dungeon_obj_bench*, barrelNN,
-            // crates, vases) are destroyed by whacking them with a tool, so they carry an Axe
-            // tool_action and used to fall straight into Trees. They are not trees — give them
-            // their own Breakables bucket so the dungeon's smashable loot is found on its own and
-            // doesn't pollute the Trees list. Matched by id keyword, checked before the Axe→Trees
-            // rule below.
-            if (id.IndexOf("dungeon_obj", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                id.IndexOf("barrel", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                id.IndexOf("crate", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                id.IndexOf("vase", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                id.IndexOf("urn", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                category = NavCategory.Breakables;
-                return true;
-            }
+            // Note: smashable loot props (barrels/crates/vases/urns/dungeon smashables) are handled
+            // by IsBreakableLootProp in TryClassify's default branch BEFORE this method is called, so
+            // they never reach the Axe→Trees rule below.
             if (id.IndexOf("bush", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Bushes;
