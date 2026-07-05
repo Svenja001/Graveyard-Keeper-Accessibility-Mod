@@ -36,6 +36,7 @@ internal enum NavCategory
     Bushes,
     Flowers,
     Mushrooms,
+    Beehives,
     Gatherables,
     Breakables,
     Fences,
@@ -71,6 +72,7 @@ internal static class ObjectNavigator
         NavCategory.Bushes,
         NavCategory.Flowers,
         NavCategory.Mushrooms,
+        NavCategory.Beehives,
         NavCategory.Gatherables,
         NavCategory.Breakables,
         NavCategory.Fences,
@@ -534,6 +536,7 @@ internal static class ObjectNavigator
         NavCategory.Bushes => "Bushes",
         NavCategory.Flowers => "Flowers",
         NavCategory.Mushrooms => "Mushrooms",
+        NavCategory.Beehives => "Beehives",
         NavCategory.Gatherables => "Gatherables",
         NavCategory.Breakables => "Breakables",
         NavCategory.Fences => "Broken fences",
@@ -2957,6 +2960,7 @@ internal static class ObjectNavigator
         category == NavCategory.Bushes ||
         category == NavCategory.Flowers ||
         category == NavCategory.Mushrooms ||
+        category == NavCategory.Beehives ||
         category == NavCategory.Gatherables ||
         category == NavCategory.Breakables;
 
@@ -3020,6 +3024,19 @@ internal static class ObjectNavigator
             if (id.IndexOf("mushroom", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Mushrooms;
+                return true;
+            }
+            // Bee hives sit ON trees, so their obj_id is a tree id with a "bees" suffix
+            // (tree_3_2_bees while producing, tree_3_2_bees_done when honey is ready — confirmed
+            // in-game) — that "tree" substring dumped them into the Trees bucket, burying the honey
+            // producers among every plain tree. Also the standalone beehouse / refugee-camp hive.
+            // They're harvested by whacking (Axe tool_action), so this must be checked BEFORE the
+            // "tree"/Axe→Trees rule below. Gives the player a short list to walk to for honey/wax/bees.
+            if (id.IndexOf("bees", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("beehouse", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("hive", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                category = NavCategory.Beehives;
                 return true;
             }
             if (axe || id.IndexOf("tree", StringComparison.OrdinalIgnoreCase) >= 0 ||
