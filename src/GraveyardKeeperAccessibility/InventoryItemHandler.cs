@@ -303,6 +303,13 @@ internal static class InventoryItemHandler
             if (!string.IsNullOrEmpty(perks))
                 name = $"{name}, {perks}";
 
+            // Tools and weapons wear out; the on-screen condition bar never voices, so a blind
+            // player can't tell a fresh pickaxe from one about to snap. Speak the condition
+            // percent (and a warning near the end) for any item that has durability.
+            var condition = DescribeDurability(item);
+            if (!string.IsNullOrEmpty(condition))
+                name = $"{name}, {condition}";
+
             // Body parts carry their own skull score (red = bad, white = good); the on-screen
             // skull pips never voice, so speak them. At the autopsy table the value alone is
             // misleading, because extraction SUBTRACTS the part from the corpse and insertion
@@ -529,6 +536,36 @@ internal static class InventoryItemHandler
             AppendPerk(parts, Mathf.RoundToInt(sanity), "sanity");
 
             return parts.Count == 0 ? null : string.Join(", ", parts);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Spoken condition of a tool/weapon — "condition 45%" — with a spoken warning as it nears
+    /// breaking, or null for items that don't wear out (most resources, food, etc.). Mirrors the
+    /// game's own <see cref="Item.durability_state"/> thresholds: below 20% is PreBroken (the
+    /// on-screen bar turns red), and 0% is Broken. Durability is a 0..1 float; we round the same
+    /// way the tooltip does (<see cref="Item.GetDurabilityHint"/>).
+    /// </summary>
+    private static string DescribeDurability(Item item)
+    {
+        try
+        {
+            if (item?.definition == null || !item.definition.has_durability) return null;
+
+            int percent = Mathf.RoundToInt(item.durability * 100f);
+            switch (item.durability_state)
+            {
+                case Item.DurabilityState.Broken:
+                    return "broken";
+                case Item.DurabilityState.PreBroken:
+                    return $"condition {percent} percent, almost broken";
+                default:
+                    return $"condition {percent} percent";
+            }
         }
         catch
         {
