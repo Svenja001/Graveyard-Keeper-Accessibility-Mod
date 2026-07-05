@@ -981,6 +981,7 @@ internal static class InteractionDetector
     {
         var id = (wgo?.obj_id ?? "").ToLowerInvariant();
         string kind =
+            id.Contains("dungeon_exit") ? "Dungeon exit" :
             id.Contains("inside") ? "Door inside" :
             id.Contains("outside") ? "Door outside" :
             id.Contains("hatch") ? "Hatch" :

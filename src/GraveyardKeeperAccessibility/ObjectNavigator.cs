@@ -1927,6 +1927,17 @@ internal static class ObjectNavigator
             bool interiorSightBlocked =
                 EnvironmentEngine.me?.data?.state == EnvironmentEngine.State.Inside;
 
+            // A dungeon is the ONE enclosed interior where we deliberately reveal everything at
+            // once — a blind player can't scout ahead, so they need every enemy, the exit, and the
+            // loot located in one pass instead of only whatever happens to be on screen. This is
+            // safe from the outdoor x-ray the guard above prevents because a dungeon level is a
+            // single self-contained unit: every tile/mob/object is instantiated as a child of
+            // dungeon_root (TextureDrawer), and NO outdoor object is — so scoping to dungeon_root's
+            // children reveals the whole level and nothing beyond it. See isDungeonObj in the loop.
+            bool inDungeon = MainGame.me?.dungeon_root != null &&
+                             MainGame.me.dungeon_root.dungeon_is_loaded_now;
+            Transform dungeonRoot = inDungeon ? MainGame.me.dungeon_root.transform : null;
+
             // Remember what is currently selected so we can keep the cursor on it
             // across refreshes even as distances change. Drops have no WorldGameObject,
             // so track their GameObject separately.
@@ -1977,13 +1988,21 @@ internal static class ObjectNavigator
                 // stay valid while culled. Without this a blind player can only "see" a fishing spot
                 // once it's already on screen — i.e. can never navigate TO one. They're always
                 // outdoors, so keeping them while culled poses no interior x-ray risk.
+                // In a dungeon, reveal the whole self-contained level: keep every dungeon object
+                // (a child of dungeon_root) listed even while culled, and lift its distance cap so
+                // far rooms of a large level still appear. Scoped to dungeon_root children, so the
+                // outdoor world is never x-rayed. isDungeonObj is only ever true while inDungeon, so
+                // there's zero cost/behaviour change anywhere else.
+                bool isDungeonObj = dungeonRoot != null && obj.transform != null &&
+                                    obj.transform.IsChildOf(dungeonRoot);
                 bool farReach = IsHarvestableCategory(category) || category == NavCategory.FishingSpots;
-                bool keepIfCulled = farReach && !interiorSightBlocked;
+                bool keepIfCulled = (farReach && !interiorSightBlocked) || isDungeonObj;
                 if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
 
                 var objPos = obj.pos;
                 var distance = Vector2.Distance(objPos, playerPos);
-                var maxDist = farReach ? MaxHarvestableNavDistance : MaxNavDistance;
+                var maxDist = isDungeonObj ? float.MaxValue
+                                           : (farReach ? MaxHarvestableNavDistance : MaxNavDistance);
                 if (distance > maxDist) continue;
 
                 var label = GetObjectLabelSafe(obj);
@@ -2665,6 +2684,18 @@ internal static class ObjectNavigator
     {
         category = NavCategory.Other;
 
+        // The dungeon exit (the portal back up to the cellar) is a WorldGameObject whose obj_id
+        // contains "dungeon_exit" — the game's own door constant
+        // (DungeonRoomInterior.DOORS_CONTAINS_THIS_WORDS). Its object NAME carries no "teleport"
+        // token, so the check below would miss it; file it under Doors explicitly so a blind player
+        // can always find and auto-walk back to the way out instead of dying to leave the level.
+        if (!string.IsNullOrEmpty(obj.obj_id) &&
+            obj.obj_id.IndexOf("dungeon_exit", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            category = NavCategory.Doors;
+            return true;
+        }
+
         // Doors / zone exits are detected by name (the game has no explicit
         // teleport interaction_type). Skip the non-usable arrival anchors
         // (e.g. teleport_point, interaction_type None) — you can't walk through those,
@@ -3213,6 +3244,12 @@ internal static class ObjectNavigator
     {
         try
         {
+            // The dungeon exit localizes to a raw id / tileset name; give it a clear, recognizable
+            // label so the Doors entry reads as the way out (it's classified Doors in TryClassify).
+            if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
+                obj.obj_id.IndexOf("dungeon_exit", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Dungeon exit";
+
             // The broken morgue's throw-in (obj_id "morgue_throw_in_broken") localizes to
             // "Leiche hineinwerfen" (Throw body in) — identical to the river-disposal the Yorick
             // quest needs, but it only opens an unusable craft window; the real spot is the
