@@ -2409,12 +2409,14 @@ internal static class GUIAccessibility
                 var amt = need.value;
 
                 // Prefer the game's own localized name so we match the cells and what a sighted
-                // player reads. Only when there's no readable label (some study-point icons strip
-                // to nothing) fall back to a spelled-out resource name, so a cost is never silently dropped.
-                var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? "")?.Trim();
-                Plugin.Log?.LogInfo($"[CRAFT NEED] id='{need.id}', definition={need.definition != null}, localized='{iname}'");
-                if (string.IsNullOrWhiteSpace(iname)) iname = SpecialNeedName(need.id) ?? need.id;
-                Plugin.Log?.LogInfo($"[CRAFT NEED] Final: id='{need.id}' -> label='{iname}'");
+                // player reads. Many recipe needs are abstract "group" ids with no direct
+                // ItemDefinition ("cover", "chapter", "book:book_hard") — resolve those the same way
+                // the ingredient cell does (first concrete item of the base name). Only when nothing
+                // readable exists fall back to a spelled-out resource name, then the raw id, so a
+                // cost is never silently dropped.
+                var iname = ResolveNeedItemName(need)
+                            ?? SpecialNeedName(need.id)
+                            ?? need.id;
                 if (string.IsNullOrWhiteSpace(iname)) continue;
                 parts.Add(amt > 1 ? $"{amt} {iname}" : iname);
             }
@@ -2441,6 +2443,86 @@ internal static class GUIAccessibility
             case "gratitude_points": return "gratitude points";
             default: return null;
         }
+    }
+
+    /// <summary>
+    /// Best-effort localized name for a craft "need" whose id may be an abstract group ("cover",
+    /// "chapter") or a base:variant reference ("book:book_hard") that has no direct ItemDefinition.
+    /// Mirrors how the ingredient cell resolves such ids (BaseItemCellGUI.DrawItem falls back to the
+    /// first concrete item of the same base name) so the spoken name matches what a sighted player
+    /// sees instead of the raw id. Returns null if nothing readable can be found.
+    /// </summary>
+    private static string ResolveNeedItemName(Item need)
+    {
+        if (need == null) return null;
+        try
+        {
+            // 1. Direct definition (ordinary items).
+            var direct = LocalizedItemName(need.definition, need.id);
+            if (direct != null) return direct;
+
+            // 2. Multiquality group: the game shows the first listed concrete variant.
+            if (need.multiquality_items != null && need.multiquality_items.Count > 0)
+            {
+                var mq = need.multiquality_items[0];
+                var mName = LocalizedItemName(GameBalance.me.GetDataOrNull<ItemDefinition>(mq), mq)
+                            ?? FirstVariantName(mq);
+                if (mName != null) return mName;
+            }
+
+            // 3. Abstract group id with no definition ("cover"/"chapter"): first concrete item of
+            //    that base name — exactly what the cell falls back to.
+            var byBase = FirstVariantName(need.id);
+            if (byBase != null) return byBase;
+
+            // 4. base:variant reference ("book:book_hard"): try the specific variant, then the base.
+            if (!string.IsNullOrEmpty(need.id) && need.id.Contains(":"))
+            {
+                int c = need.id.LastIndexOf(':');
+                var variant = need.id.Substring(c + 1);
+                var baseId = need.id.Substring(0, c);
+
+                var vName = LocalizedItemName(GameBalance.me.GetDataOrNull<ItemDefinition>(variant), variant)
+                            ?? FirstVariantName(variant);
+                if (vName != null) return vName;
+
+                var bName = LocalizedItemName(GameBalance.me.GetDataOrNull<ItemDefinition>(baseId), baseId)
+                            ?? FirstVariantName(baseId);
+                if (bName != null) return bName;
+            }
+
+            // 5. Last chance: some abstract ids carry their own localization key.
+            var loc = ScreenReader.StripNguiCodes(GJL.L(need.id) ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(loc) && loc != need.id) return loc;
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>Localized name of a definition, or null if it didn't localize past the raw id.</summary>
+    private static string LocalizedItemName(ItemDefinition def, string rawId)
+    {
+        if (def == null) return null;
+        try
+        {
+            var n = ScreenReader.StripNguiCodes(def.GetItemName() ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(n) || n == rawId) return null;
+            return n;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Localized name of the first concrete item sharing this base name, or null.</summary>
+    private static string FirstVariantName(string baseId)
+    {
+        if (string.IsNullOrEmpty(baseId)) return null;
+        try
+        {
+            var variants = GameBalance.me.GetItemsOfBaseName(baseId);
+            if (variants == null || variants.Count == 0) return null;
+            return LocalizedItemName(GameBalance.me.GetDataOrNull<ItemDefinition>(variants[0]), variants[0]);
+        }
+        catch { return null; }
     }
 
     private static readonly System.Reflection.FieldInfo _crafteryWgoField =
