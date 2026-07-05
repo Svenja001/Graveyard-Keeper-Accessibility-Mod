@@ -35,7 +35,9 @@ internal static class CombatAssist
     // an enemy as its max so we can report a percentage without resolving the obj_def HP formula.
     private static readonly Dictionary<int, float> _enemyMaxHp = new Dictionary<int, float>();
     private static readonly Dictionary<int, float> _enemyLastHp = new Dictionary<int, float>();
-    private static readonly HashSet<int> _knownEnemies = new HashSet<int>();
+    // Keep the actual object per known enemy so that when one leaves the scan list we can tell a
+    // real death (is_dead / hp<=0) apart from an enemy the player simply ran away from.
+    private static readonly Dictionary<int, WorldGameObject> _knownEnemies = new Dictionary<int, WorldGameObject>();
 
     private static float _lastPlayerHp = -1f;
     private static float _hitCooldown;      // throttles "Hit" spam across rapid multi-frame damage
@@ -215,7 +217,7 @@ internal static class CombatAssist
             float hp = e.hp;
 
             // First sighting: announce the approach and seed HP tracking.
-            if (!_knownEnemies.Contains(id))
+            if (!_knownEnemies.ContainsKey(id))
             {
                 _enemyMaxHp[id] = hp;
                 _enemyLastHp[id] = hp;
@@ -236,17 +238,34 @@ internal static class CombatAssist
             _enemyLastHp[id] = hp;
         }
 
-        // Deaths / out-of-range: anything known last frame that's gone or now dead.
-        foreach (var id in _knownEnemies)
+        // Anything known last frame that's no longer in the scan list either died or the player
+        // ran out of range. FindEnemies drops both cases, so distinguish them via the kept object:
+        // announce a defeat only if the enemy is actually dead — otherwise it just fled, stay quiet.
+        foreach (var kv in _knownEnemies)
         {
+            int id = kv.Key;
             if (currentIds.Contains(id)) continue;
-            ScreenReader.Say("Enemy defeated", interrupt: false);
+
+            var obj = kv.Value;
+            bool defeated;
+            try
+            {
+                // A killed mob has is_dead set / hp<=0 (it's still a valid object on the death
+                // frame). A Unity-destroyed reference (obj == null) also means it's gone for good,
+                // which only happens on death here, not on running away.
+                defeated = obj == null || obj.is_dead || obj.hp <= 0f;
+            }
+            catch { defeated = false; }
+
+            if (defeated)
+                ScreenReader.Say("Enemy defeated", interrupt: false);
+
             _enemyMaxHp.Remove(id);
             _enemyLastHp.Remove(id);
         }
 
         _knownEnemies.Clear();
-        foreach (var id in currentIds) _knownEnemies.Add(id);
+        foreach (var e in enemies) _knownEnemies[e.GetInstanceID()] = e;
 
         // Pre-hit warning: an adjacent enemy is mid-swing — a chance to step away.
         if (nearest != null && _strikeCooldown <= 0f
