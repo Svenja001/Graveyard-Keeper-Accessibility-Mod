@@ -3702,6 +3702,41 @@ internal static class GUIAccessibility
         }
     }
 
+    /// <summary>
+    /// While the player's own inventory is open with an item cell focused, pressing a number key
+    /// 1-4 assigns that item to the matching quick-use hotbar slot (or clears it if it was already
+    /// there). This is the accessible stand-in for dragging an item onto the bottom bar. Returns
+    /// true when a hotbar number key was consumed so <see cref="Plugin"/> stops further handling.
+    /// Safe to call every frame: it no-ops outside the inventory or off an item cell.
+    /// </summary>
+    internal static bool TryHandleToolbarAssign()
+    {
+        if (!(_currentGUI is InventoryGUI)) return false;
+
+        int slot = PressedToolbarSlot();
+        if (slot < 0) return false;
+
+        var active = GetActiveElements();
+        if (SelectedIndex < 0 || SelectedIndex >= active.Count) return false;
+
+        var elem = active[SelectedIndex];
+        if (elem.Type != ElementType.ItemCell || elem.Cell == null) return false;
+
+        var msg = ToolbarHandler.AssignItemToSlot(elem.Cell.item, slot);
+        if (!string.IsNullOrEmpty(msg)) ScreenReader.Say(msg);
+        return true;
+    }
+
+    /// <summary>Which hotbar slot (0-based) a just-pressed number key maps to, or -1 for none.</summary>
+    private static int PressedToolbarSlot()
+    {
+        if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) return 0;
+        if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) return 1;
+        if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) return 2;
+        if (Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4)) return 3;
+        return -1;
+    }
+
     internal static void AdjustLeft()
     {
         var active = GetActiveElements();

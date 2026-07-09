@@ -29,6 +29,7 @@ public class Plugin : BaseUnityPlugin
         CombatAssist.Init(Log);
         AutoConsume.Init(Log);
         FishingAssist.Init(Log);
+        ToolbarHandler.Init(Log);
 
         // Test TTS
         Log.LogInfo("[TTS TEST] Speaking test message...");
@@ -158,6 +159,13 @@ public class Plugin : BaseUnityPlugin
         // when we drive the state machine programmatically — that was the hang).
         TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_UpdateWaitingForPulling_Postfix),
             typeof(FishingGUI), "UpdateWaitingForPulling", Type.EmptyTypes);
+
+        // Accessible quick-use hotbar (number keys 1-4): announce the result whenever the player
+        // triggers a slot in the world ("Used bread, 2 left" / "Slot 2 empty"). The prefix snapshots
+        // the stock before the game uses the item; the postfix reads what changed. See ToolbarHandler.
+        TryPatchPrefixPostfix(harmony, typeof(ToolbarHandler),
+            nameof(ToolbarHandler.UseItemFromToolbar_Prefix), nameof(ToolbarHandler.UseItemFromToolbar_Postfix),
+            typeof(BaseCharacterComponent), "UseItemFromToolbar", new[] { typeof(int) });
 
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
@@ -296,6 +304,11 @@ public class Plugin : BaseUnityPlugin
             // button decomposes a whole stack in one hold). Consumes Enter when it applies so the
             // single-press path below doesn't also fire; returns false for everything else.
             if (GUIAccessibility.TryHandleHoldRepeat())
+                return;
+
+            // In the player's own inventory, number keys 1-4 assign the focused item to that
+            // hotbar slot (the accessible replacement for dragging it onto the bottom bar).
+            if (GUIAccessibility.TryHandleToolbarAssign())
                 return;
 
             if (Input.GetKeyDown(KeyCode.DownArrow))
@@ -526,6 +539,8 @@ public class Plugin : BaseUnityPlugin
                 CorpseScanner.Announce();
             else if (Input.GetKeyDown(KeyCode.U) && !ctrl)
                 AutoConsume.Toggle();
+            else if (Input.GetKeyDown(KeyCode.Y) && !ctrl)
+                ToolbarHandler.ReadHotbar();
         }
         catch (Exception ex)
         {
