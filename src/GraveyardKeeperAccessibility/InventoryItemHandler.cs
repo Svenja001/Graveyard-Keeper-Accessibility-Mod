@@ -358,26 +358,60 @@ internal static class InventoryItemHandler
             var parts = new List<string>();
             foreach (var outp in surveyCraft.output)
             {
-                if (outp == null || outp.value <= 0) continue;
+                if (outp == null) continue;
                 if (!TechDefinition.TECH_POINTS.Contains(outp.id)) continue;
 
-                int value = outp.value;
+                // The raw output .value is only a stale default. The game computes the real award by
+                // evaluating each output's min_value/max_value expression — see
+                // ResModificator.ProcessItemsListBeforeDrop, the same call ItemDefinition uses to
+                // render the survey tooltip. Mirror that so the spoken count matches what's granted.
+                // (This replaces an earlier hard "-1 for blue" hack: the "51 -> 50" gap is that
+                // min_value override, which is per-item, not a universal +1 — so the -1 wrongly
+                // reported 49 for items with no offset.)
+                var amount = SurveyRewardAmount(outp);
+                if (amount == null) continue;   // evaluates to zero => nothing actually granted
 
-                // The blue ("b") output always carries a phantom +1 over what the player actually
-                // receives in-game (data 51 -> 50 received; data 1 -> 0 received, just a junk filler).
-                // Source of the +1 is unclear, but it's consistent, so we strip it: subtract 1 and
-                // drop the blue entirely if nothing real is left. Other colours have no such offset.
-                if (outp.id == "b")
-                {
-                    value -= 1;
-                    if (value <= 0) continue;
-                }
-
-                parts.Add($"{value} {PointColorName(outp.id)}");
+                parts.Add($"{amount} {PointColorName(outp.id)}");
             }
             return parts.Count > 0 ? $"studying gives {string.Join(", ", parts)}" : null;
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// The whole-number tech-point amount a single survey output actually grants, spoken (e.g. "50",
+    /// or "45 to 55" for a randomized range), or null when it grants nothing. Mirrors the value step
+    /// of <see cref="ResModificator.ProcessItemsListBeforeDrop"/> minus the RNG: a min_value/max_value
+    /// expression, when present, is authoritative and overrides the raw <c>.value</c> default (that
+    /// override is the real source of the blue "51 -> 50" discrepancy); with no expression the raw
+    /// value stands. Evaluated with the same (wgo = null, character = player) context the game uses.
+    /// </summary>
+    private static string SurveyRewardAmount(Item outp)
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+
+            if (outp.min_value != null && !outp.min_value.HasNoExpresion())
+            {
+                int min = Mathf.RoundToInt(outp.min_value.EvaluateFloat(null, player));
+                if (min < 0) min = 0;
+
+                int max = min;
+                if (outp.max_value != null && !outp.max_value.HasNoExpresion())
+                    max = Mathf.RoundToInt(outp.max_value.EvaluateFloat(null, player));
+                if (max < min) max = min;   // ResModificator falls back to min when max < min
+
+                if (max <= 0) return null;
+                return min == max ? min.ToString() : $"{min} to {max}";
+            }
+
+            return outp.value > 0 ? outp.value.ToString() : null;
+        }
+        catch
+        {
+            return outp.value > 0 ? outp.value.ToString() : null;
+        }
     }
 
     /// <summary>Fallback spoken name for a tech-point pool when no localized name is available (r/g/b/v colors or gratitude).</summary>
