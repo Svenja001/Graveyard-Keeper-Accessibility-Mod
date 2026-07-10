@@ -71,7 +71,7 @@ internal static class FishingAssist
 
     // ── Toggle (polled every frame the fishing UI is open) ──────────────────────────────────────
 
-    internal static void FishingGUI_Update_Postfix()
+    internal static void FishingGUI_Update_Postfix(FishingGUI __instance)
     {
         try
         {
@@ -86,6 +86,26 @@ internal static class FishingAssist
                 }
                 _enabled = !_enabled;
                 ScreenReader.Say(_enabled ? "Auto catch on" : "Auto catch off, manual fishing");
+                return;
+            }
+
+            // Bait switching — vanilla only binds this to the gamepad shoulder buttons
+            // (GameKey.NextTab/PrevTab have NO keyboard binding at all), so a keyboard player can
+            // never change bait. We drive the game's own public OnNextBait off Tab, matching the
+            // "Tab changes bait" narration. Tab is otherwise dead here: it maps to GameKey.GameGUI,
+            // which is gated behind PlayerControlIsDisabled (true during fishing) so it never opens
+            // the game menu. RedrawSelectedBait's own postfix speaks the new bait, so we don't
+            // announce it here.
+            //
+            // Forward-only, no Shift+Tab reverse: Shift+Tab was observed to hang the game (Shift is
+            // the Dash movement key; something at the engine/input level misbehaves with it held even
+            // though OnPrevBait itself is symmetric and safe). Tab cycles through every bait AND the
+            // "no bait" state with wraparound, so forward stepping still reaches any bait — the
+            // reverse was only a convenience and isn't worth the hang.
+            if (!ctrl && __instance != null && __instance.state == FishingGUI.FishingState.BaitChoosing
+                && Input.GetKeyDown(KeyCode.Tab))
+            {
+                __instance.OnNextBait();
             }
         }
         catch (Exception ex)
