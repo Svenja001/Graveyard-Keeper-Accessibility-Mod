@@ -2051,7 +2051,21 @@ internal static class ObjectNavigator
                 bool isDungeonObj = dungeonRoot != null && obj.transform != null &&
                                     obj.transform.IsChildOf(dungeonRoot);
                 bool farReach = IsHarvestableCategory(category) || category == NavCategory.FishingSpots;
-                bool keepIfCulled = (farReach && !interiorSightBlocked) || isDungeonObj;
+
+                // Built/placed structures — crafting stations, other built objects, roofs — are static
+                // world objects the player deliberately placed and often needs to walk back to. The
+                // marquee case is a one-time quest build like "Das Buffet aufbauen" on the witch hill:
+                // you find it once, then can't relocate it. Like harvestables, a blind player can't pan
+                // the camera to spot one, and the game culls (deactivates) it the moment it leaves the
+                // screen — so from a landmark anchor a few tiles away it silently drops out of the
+                // "Crafting stations" list. Keep these listed while culled too, under the same interior-
+                // sight guard as harvestables (never x-ray a wall-enclosed interior) and the same normal
+                // 60-tile cap (no reach bump — they're not part of farReach). They stay valid culled.
+                bool builtCategory = category == NavCategory.Stations ||
+                                     category == NavCategory.Buildables ||
+                                     category == NavCategory.Roofs;
+                bool keepIfCulled =
+                    ((farReach || builtCategory) && !interiorSightBlocked) || isDungeonObj;
                 if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
 
                 var objPos = obj.pos;
