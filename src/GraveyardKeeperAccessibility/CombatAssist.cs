@@ -31,6 +31,11 @@ internal static class CombatAssist
     private const float AttackRange = 4f * TileSize;     // C will swing at an enemy this close
     private const float AdjacentRange = 1.8f * TileSize; // "enemy striking" danger range
     private const float AutoAttackRange = 2.4f * TileSize; // auto-attack only when a hit will connect
+    private const float SwingReach = 1.5f * TileSize;      // auto-walk in until this close, then swing
+    private const float ApproachRange = 6f * TileSize;     // auto-walk toward an enemy up to this far
+    private const float MeleeHitReach = 1.7f * TileSize;   // deal a swing's damage deterministically within this
+    private const float WhiffHoldSeconds = 1.5f;  // pause auto-swings after repeated misses
+    private const int WhiffLimit = 2;             // consecutive misses before pausing
 
     private static ManualLogSource _log;
     private static bool _enabled = true;
@@ -47,6 +52,22 @@ internal static class CombatAssist
     private static float _lastPlayerHp = -1f;
     private static float _hitCooldown;      // throttles "Hit" spam across rapid multi-frame damage
     private static float _strikeCooldown;   // throttles the "enemy striking" warning
+
+    // Auto-attack whiff handling: the sword's combat collider only reaches ~1 tile and snaps to a
+    // cardinal direction, so a swing at a mob milling just out of reach connects with nobody yet
+    // still spends energy up front. Rather than tell the player to move, we walk them in (see
+    // AutoApproach) and only swing point-blank; a brief hold after any residual miss stops us
+    // draining energy on a stuck diagonal until the enemy's own movement lines it up.
+    private static int _consecutiveWhiffs;
+    private static float _reachHoldUntil;   // suppress auto-swings until this Time.time
+
+    // Auto-walk toward an out-of-reach enemy by feeding the game its own movement input via
+    // LazyInput.simulate_direction (so the player moves through the normal, collision-respecting
+    // path — no scripted-control conflicts). We only ever clear what WE set.
+    private static LazyInput _lazyInput;
+    private static bool _weSetSimulate;     // true while our simulate_direction override is active
+    private static bool _approaching;       // true this engagement so "Closing in" is said just once
+    private static float _lastApproachSpeak;
 
     internal static void Init(ManualLogSource log)
     {
@@ -80,8 +101,9 @@ internal static class CombatAssist
             if (!ctrl && Input.GetKeyDown(KeyCode.X))
             {
                 _autoAttack = !_autoAttack;
+                if (!_autoAttack) ClearApproach();
                 ScreenReader.Say(_autoAttack
-                    ? "Auto attack on. I'll swing at enemies in reach while you stand still; move to back off."
+                    ? "Auto attack on. I'll walk you to enemies and swing when in reach; press a movement key to take over."
                     : "Auto attack off");
             }
 
@@ -99,7 +121,9 @@ internal static class CombatAssist
                 AttackNearest(player, character, nearest, nearestBreakable);
 
             if (_autoAttack)
-                AutoAttack(player, character, nearest, nearestBreakable);
+                AutoAttack(player, character, enemies, nearestBreakable);
+            else
+                ClearApproach();
 
             if (_enabled)
                 AutoFace(player, character, nearest);
@@ -189,41 +213,155 @@ internal static class CombatAssist
 
     // ── Auto-attack (X) ───────────────────────────────────────────────────────────────────────────
 
-    // Swing on our own at an enemy that's actually within melee reach, so the player doesn't have
-    // to jab C/Space (and waste energy) while still out of range. Gated exactly like AutoFace: only
-    // while the player is standing still, so moving away always lets them flee instead of being
-    // locked into swings. Silent by design — TrackFeedback already speaks "Hit" / "Enemy defeated",
-    // and staying quiet on the too-tired/too-far cases avoids per-frame spam.
+    // Drive the whole close-quarters loop: walk the player to the nearest enemy, then swing once
+    // they're point-blank. Walking in (instead of announcing "step closer") is what a blind player
+    // actually needs, and it means swings only fire at melee range so we stop draining energy on
+    // whiffs. Pressing a movement key hands control straight back, so fleeing always works.
     private static void AutoAttack(WorldGameObject player, BaseCharacterComponent character,
-        WorldGameObject nearest, WorldGameObject nearestBreakable)
+        List<WorldGameObject> enemies, WorldGameObject nearestBreakable)
     {
         try
         {
-            if (!character.control_enabled) return;
-            if (player.GetEquippedWeaponType() != ItemDefinition.ItemType.Sword) return;
+            if (!character.control_enabled) { ClearApproach(); return; }
+            if (player.GetEquippedWeaponType() != ItemDefinition.ItemType.Sword) { ClearApproach(); return; }
 
-            // Player is steering — let them walk away without being pinned by auto-swings.
-            if (LazyInput.GetDirection().magnitude > 0.01f) return;
+            // Player is steering by hand — release our auto-walk and don't pin them with swings.
+            if (PlayerIsSteering()) { ClearApproach(); return; }
 
-            // Prefer an enemy in reach (energy-gated, since a sword swing costs energy). Only smash a
-            // loot prop when no enemy is close, so we don't destroy pots in the middle of a fight.
-            if (nearest != null && Vector2.Distance(player.pos, nearest.pos) <= AutoAttackRange)
+            var nearest = Nearest(enemies, player.pos);
+            if (nearest == null)
             {
-                if (!HasEnergyToAttack(player)) return;
-                PerformSwing(player, character, nearest);
+                ClearApproach();
+                // No enemy: smash an adjacent loot prop (one blow, no energy — not gated).
+                if (nearestBreakable != null && Vector2.Distance(player.pos, nearestBreakable.pos) <= AutoAttackRange)
+                    BreakProp(nearestBreakable);
                 return;
             }
 
-            // Prop smashing goes through BreakProp — one blow, no energy — so it's not energy-gated.
-            if (nearestBreakable != null && Vector2.Distance(player.pos, nearestBreakable.pos) <= AutoAttackRange)
+            float dist = Vector2.Distance(player.pos, nearest.pos);
+
+            // Out of melee reach: walk in if it's close enough to be worth it, otherwise stand pat
+            // (don't march blindly across the map — awareness cues already flag distant enemies).
+            if (dist > SwingReach)
             {
-                BreakProp(nearestBreakable);
+                if (dist <= ApproachRange) AutoApproach(player, nearest);
+                else ClearApproach();
+                return;
             }
+
+            // Point-blank: stop walking and swing at the most hittable enemy (energy-gated).
+            ClearApproach();
+            var target = PickAutoAttackTarget(player, enemies);
+            if (target == null) return;
+            if (Time.time < _reachHoldUntil) return;         // brief pause after a residual whiff
+            if (!HasEnergyToAttack(player)) return;
+            PerformSwing(player, character, target, auto: true);
         }
         catch (Exception ex)
         {
             _log?.LogError($"[COMBAT] AutoAttack error: {ex.Message}");
+            ClearApproach();
         }
+    }
+
+    // ── Auto-approach (walk the player into melee range) ─────────────────────────────────────────
+
+    private static LazyInput Lazy
+    {
+        get
+        {
+            if (_lazyInput == null) _lazyInput = UnityEngine.Object.FindObjectOfType<LazyInput>();
+            return _lazyInput;
+        }
+    }
+
+    // Any real movement key held means the player wants to steer themselves. We can't read
+    // LazyInput.GetDirection() to detect this while we're overriding it via simulate_direction, so
+    // we watch the raw keys (WASD + arrows cover the game's default bindings).
+    private static bool PlayerIsSteering()
+    {
+        return Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D)
+            || Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.DownArrow)
+            || Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.RightArrow);
+    }
+
+    // Feed the game a movement input toward the enemy. LazyInput.GetDirection() returns
+    // simulate_direction whenever it's non-zero, so the player's own UpdatePlayer walks them there
+    // through the normal, collision-respecting movement path — no scripted control, no state fights.
+    private static void AutoApproach(WorldGameObject player, WorldGameObject enemy)
+    {
+        var dir = enemy.pos - player.pos;
+        if (dir.sqrMagnitude < 0.0001f) { ClearApproach(); return; }
+
+        var lz = Lazy;
+        if (lz == null) return;
+        lz.simulate_direction = dir.normalized;
+        _weSetSimulate = true;
+
+        if (!_approaching)
+        {
+            _approaching = true;
+            if (Time.time - _lastApproachSpeak >= 4f)
+            {
+                _lastApproachSpeak = Time.time;
+                ScreenReader.Say($"Closing in, {CompassDirection(player.pos, enemy.pos)}", interrupt: false);
+            }
+        }
+    }
+
+    // Drop our movement override (only ever clearing what we set, so we never stomp a cutscene's).
+    private static void ClearApproach()
+    {
+        if (_weSetSimulate)
+        {
+            if (_lazyInput != null) _lazyInput.simulate_direction = Vector2.zero;
+            _weSetSimulate = false;
+        }
+        _approaching = false;
+    }
+
+    // Among enemies within melee reach, choose the one a cardinal-snapped swing is most likely to
+    // hit: closest, but penalised for how far its bearing sits off the nearest N/E/S/W axis (the
+    // combat collider only faces cardinals). Returns null when nothing is in reach, so we hold fire
+    // instead of swinging at empty air.
+    private static WorldGameObject PickAutoAttackTarget(WorldGameObject player, List<WorldGameObject> enemies)
+    {
+        WorldGameObject best = null;
+        float bestScore = float.MaxValue;
+        foreach (var e in enemies)
+        {
+            if (e == null) continue;
+            var d = e.pos - player.pos;
+            float dist = d.magnitude;
+            if (dist > AutoAttackRange) continue;
+            float bearing = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+            // Distance from the bearing to its nearest cardinal (0..45 degrees). 1.6 px/degree makes
+            // a fully diagonal (45 degree) mob cost ~0.75 tile of extra "distance" versus one dead
+            // ahead, so a square-on mob is preferred without ignoring a much closer diagonal one.
+            float misalign = Mathf.Abs(Mathf.DeltaAngle(bearing, Mathf.Round(bearing / 90f) * 90f));
+            float score = dist + misalign * 1.6f;
+            if (score < bestScore) { bestScore = score; best = e; }
+        }
+        return best;
+    }
+
+    // Called (via the swing's own result callback) after an auto-swing resolves. success is true iff
+    // the game registered a hit. Repeated point-blank misses (a mob stuck exactly diagonal to the
+    // cardinal-only collider) briefly pause swinging so we don't drain energy — the enemy's own
+    // movement, or our re-approach, lines it up again. Silent: approach handles the positioning, and
+    // the player asked us not to chatter. Any landed hit clears the streak immediately.
+    private static void OnAutoSwingResult(bool success)
+    {
+        if (success)
+        {
+            _consecutiveWhiffs = 0;
+            _reachHoldUntil = 0f;
+            return;
+        }
+
+        _consecutiveWhiffs++;
+        if (_consecutiveWhiffs < WhiffLimit) return;
+        _reachHoldUntil = Time.time + WhiffHoldSeconds;
     }
 
     // Mirror the game's energy gate (BaseCharacterComponent.CheckEnegryForPlayerAtack): a swing
@@ -243,12 +381,75 @@ internal static class CombatAssist
     // Face the enemy and perform one sword swing. Facing first is what makes the hit connect (the
     // combat collider tracks anim_direction); ProcessAttack ignores a zero movement input, so a
     // stationary swing keeps the aim we just set. No-op if a swing is already in progress.
-    private static void PerformSwing(WorldGameObject player, BaseCharacterComponent character, WorldGameObject nearest)
+    private static bool PerformSwing(WorldGameObject player, BaseCharacterComponent character,
+        WorldGameObject target, bool auto = false)
     {
-        character.LookAt(nearest);
+        character.LookAt(target);
         var attack = character.attack;
-        if (attack == null || attack.performing_attack) return;
-        attack.Perform(character.anim_direction, 0, character.OnPlayersAttackPerformed);
+        if (attack == null || attack.performing_attack) return false;
+
+        // Wrap the game's own on-performed callback so we learn whether the swing actually connected
+        // (success is set by CombatComponent.SuccessAttack only when a hit lands). Auto-swings feed
+        // the whiff tracker; a manual C miss just nudges the player to close the gap.
+        BaseCharacterAttack.AttackResult cb = success =>
+        {
+            try
+            {
+                if (auto) OnAutoSwingResult(success);
+                else if (!success) ScreenReader.Say("Missed, get closer", interrupt: false);
+            }
+            catch { }
+            character.OnPlayersAttackPerformed(success);
+        };
+
+        bool started = attack.Perform(character.anim_direction, 0, cb);
+
+        // The sword swing is a CARDINAL lunge (CurvedAttack.Perform → CurveMove along a snapped
+        // N/E/S/W direction): the collider only sweeps along that axis, so an enemy that's even
+        // slightly off-axis is physically missed — the swing costs energy and hurts nobody. Since
+        // a blind player can't nudge themselves onto the axis, deal the hit deterministically once
+        // the swing actually starts, but only when the target is genuinely at melee range. This
+        // routes through the game's own damage path (HitOther → WasHitBy, real weapon damage) and
+        // shares CombatComponent._collided_ids with the physics collider, so it can't double-hit.
+        if (started && target != null && !target.is_dead
+            && Vector2.Distance(player.pos, target.pos) <= MeleeHitReach)
+            ApplyMeleeHit(player, target);
+
+        return started;
+    }
+
+    // Deterministically land the current swing on an in-reach enemy via the game's own attacker
+    // path, so accessibility swings don't whiff on the cardinal lunge geometry. Requires an
+    // in-progress attack (HitOther's own guard) — always true here because we just started one.
+    private static void ApplyMeleeHit(WorldGameObject player, WorldGameObject target)
+    {
+        try
+        {
+            var pc = player.components?.combat;
+            var tc = target.components?.combat;
+            if (pc == null || tc == null) return;
+            pc.HitOther(tc, GetSwordDamageType(player));
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[COMBAT] ApplyMeleeHit error: {ex.Message}");
+        }
+    }
+
+    // The damage type the equipped weapon's swing collider deals. GetDamage maps it to the weapon's
+    // "damage"/"damage_N" param, so reading it off the player's own collider keeps the deterministic
+    // hit identical to a physics-connected one. Falls back to Damage_0 (the base "damage" param).
+    private static ObjectDefinition.DamageType GetSwordDamageType(WorldGameObject player)
+    {
+        try
+        {
+            var cols = player.components?.combat?.combat_colliders;
+            if (cols != null)
+                foreach (var c in cols)
+                    if (c != null) return c.damage;
+        }
+        catch { }
+        return ObjectDefinition.DamageType.Damage_0;
     }
 
     // Destroy a loot prop (vase/pot) in one blow. Sighted players chip a prop's hp with several
