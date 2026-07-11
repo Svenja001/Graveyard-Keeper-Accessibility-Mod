@@ -1030,7 +1030,45 @@ internal static class ObjectNavigator
             }
         }
 
+        // Graph-0 can't reach the target. For a NEARBY target this is the tell-tale of a building
+        // interior — the house/mortuary sit on a graph-0 island disconnected from the outdoor
+        // navmesh, and the player graph frequently has no node near the object either (e.g. the
+        // bed inside the house: "No walkable player-graph node near target"). Rather than dumping a
+        // blind player onto the manual compass beacon, glide there in a straight line: during a
+        // scripted walk the body is Kinematic (control disabled), so it slides to the spot without
+        // jamming on the walls, and inside a single room the line to the target is clear. Bounded to
+        // short hops — a FAR graph-0 failure would try to glide across the whole map through walls,
+        // so that still beacons. An outdoor target behind a fence never reaches here (graph-0 routes
+        // it through the gate), so this doesn't clip through outdoor fences.
+        var pl = MainGame.me?.player;
+        if (pl != null && Vector2.Distance(pl.pos, _longWalkTarget.Position) <= LongWalkStartDistance)
+        {
+            var target = _longWalkTarget;
+            _longWalkActive = false;
+            _log?.LogInfo($"[NAVIGATOR] Graph-0 unreachable but {target.Label} is near; direct glide fallback");
+            DirectGlideTo(target);
+            return;
+        }
+
         BeaconBail("Graph-0 route unavailable");
+    }
+
+    /// <summary>
+    /// Last-resort short auto-walk: a straight-line Kinematic glide to a nearby target when neither
+    /// the player graph nor graph-0 can path to it — the typical situation inside a building interior
+    /// (a disconnected navmesh island). Used instead of the compass beacon so a blind player still
+    /// gets driven to the bed/chest inside the house. StartWalk disables control (Kinematic body), so
+    /// the straight line slides along without colliding; on Direct failure it releases and reports.
+    /// </summary>
+    private static void DirectGlideTo(NavigationTarget target)
+    {
+        var dest = InteractionDest(target, out var facePos);
+        _fallbackPending = false;
+        _escalatePending = false;
+        _shortWalkTarget = target;   // so on_complete biases vanilla E onto it
+        _walkFacePos = facePos;      // face it on arrival so plain E interacts
+        // No fresh "Walking to…" — StartLongWalk already announced this walk; a second would double up.
+        StartWalk(dest, target.Label, MovementComponent.GoToMethod.Direct);
     }
 
     private static NavigationTarget? NearestDoor()
@@ -1642,6 +1680,14 @@ internal static class ObjectNavigator
                 return;
             }
 
+            // Disable player control so the body becomes Kinematic (UpdateBodyPhysics), exactly
+            // like the long-distance native walk. A Dynamic body physically collides and JAMS on
+            // walls/fences — the reason auto-walk got stuck bumping around inside the house — while
+            // a Kinematic body glides along the A* path like an NPC. Restored in on_complete /
+            // ReleaseScriptControl. Idempotent if a retry re-enters here with control already off.
+            character.control_enabled = false;
+            _weDisabledControl = true;
+
             // from_script:true suspends player input so the movement state machine
             // drives the character cleanly. AStar routes around obstacles; Direct is
             // the straight-line fallback used when A* can't find a valid path.
@@ -1651,6 +1697,15 @@ internal static class ObjectNavigator
                 on_complete: () =>
                 {
                     _isWalking = false;
+                    // Restore player control / Dynamic body (we forced Kinematic for the glide),
+                    // unless a cutscene has grabbed the player mid-walk — then leave control alone
+                    // so we don't re-Dynamic the body and jam its scripted scene.
+                    if (!_gameOwnsPlayer)
+                    {
+                        var ch = MainGame.me?.player?.components?.character;
+                        if (ch != null) ch.control_enabled = true;
+                        _weDisabledControl = false;
+                    }
                     FacePlayerAtTarget();
                     // Bias vanilla E onto the object we walked to, not a closer neighbour.
                     SetArrivedTarget(_shortWalkTarget.Object);
