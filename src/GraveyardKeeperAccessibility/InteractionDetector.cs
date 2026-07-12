@@ -492,38 +492,54 @@ internal static class InteractionDetector
     // each stand's obj_id to what it actually demands so we can say the quality out loud.
     private sealed class BuffetNeed
     {
-        public string ItemId;      // exact gold-quality id the serve script checks for
-        public int Count;          // how many the quest wants total
-        public string Description;  // spoken phrase, e.g. "gold-quality beer"
+        public string ItemId;  // exact gold-quality id the serve script checks for
+        public int Count;      // how many the quest wants total
+        public string Noun;    // spoken noun, e.g. "beer" / "burgers"
     }
 
-    private static readonly Dictionary<string, BuffetNeed> _buffetStands = new Dictionary<string, BuffetNeed>
+    // The buffet is a single crafting station (obj_id "vendor_stall", whose object def is literally
+    // named "Buffet"; beer_barrels_place / burgers_place are only its custom tags, NOT the obj_id we
+    // see at runtime). Pressing E opens its craft window whose two "serve" recipes each demand an
+    // exact gold-quality ingredient. Read out BOTH requirements in a fixed order (an array, not a
+    // dict, to keep that order deterministic) whenever the player reaches the stand.
+    private static readonly BuffetNeed[] _buffetNeeds =
     {
-        ["beer_barrels_place"] = new BuffetNeed { ItemId = "cup_beer:3", Count = 10, Description = "gold-quality beer" },
-        ["burgers_place"] = new BuffetNeed { ItemId = "meal:burger:3", Count = 5, Description = "gold-quality burgers" },
+        new BuffetNeed { ItemId = "cup_beer:3", Count = 10, Noun = "beer" },
+        new BuffetNeed { ItemId = "meal:burger:3", Count = 5, Noun = "burgers" },
+    };
+
+    private static readonly HashSet<string> _buffetStandIds = new HashSet<string>
+    {
+        "vendor_stall",
     };
 
     /// <summary>
-    /// Append the buffet serve requirement to a Witch Hill buffet stand's label: the exact quality
-    /// tier the serve script demands and how many the player still owes. Returns the bare label
-    /// unchanged for anything that isn't a buffet stand.
+    /// Append the whole Witch Hill buffet's serve requirements to a buffet stand's label — the exact
+    /// quality tier each serve script demands and how many the player still owes — so a blind player
+    /// learns both up front on approach/E instead of by trial-and-error feeding items in. Returns the
+    /// bare label unchanged for anything that isn't a buffet stand.
     /// </summary>
     private static string WithBuffetInfo(string label, WorldGameObject wgo)
     {
         try
         {
             var id = wgo?.obj_id;
-            if (string.IsNullOrEmpty(id) || !_buffetStands.TryGetValue(id, out var need))
+            if (string.IsNullOrEmpty(id) || !_buffetStandIds.Contains(id))
                 return label;
 
-            int have = 0;
-            try { have = MainGame.me.player.data.GetItemsCount(need.ItemId, count_secondary_inventory: true); }
-            catch { }
+            var parts = new List<string>();
+            foreach (var need in _buffetNeeds)
+            {
+                int have = 0;
+                try { have = MainGame.me.player.data.GetItemsCount(need.ItemId, count_secondary_inventory: true); }
+                catch { }
 
-            var tail = have >= need.Count
-                ? $"you have enough"
-                : $"you have {have}";
-            return $"{label}. Needs {need.Count} {need.Description}. {tail}";
+                var tail = have >= need.Count ? "you have enough" : $"you have {have}";
+                parts.Add($"requires {need.Count} {need.Noun}, golden quality, {tail}");
+            }
+            var result = $"{label}. {string.Join(". ", parts)}";
+            _log?.LogInfo($"[INTERACTION] Buffet requirements announced: {result}");
+            return result;
         }
         catch
         {

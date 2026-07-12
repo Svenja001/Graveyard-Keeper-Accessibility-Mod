@@ -277,16 +277,23 @@ internal static class GUIAccessibility
         if (!string.IsNullOrEmpty(emptyDesc))
             header += $". {emptyDesc}";
 
+        // A crafting station (anvil, oven, the buffet, ...) opens its window the instant you press
+        // E, which normally cuts off whatever was just spoken — e.g. the object's own approach line
+        // telling you what materials/quality it needs. Queue the craft window's announcement after
+        // that prior speech instead of interrupting it, so the two read back-to-back. Other windows
+        // keep interrupting (opening a menu should normally win the voice immediately).
+        var interruptOnOpen = !(gui is BaseCraftGUI);
+
         // Auto-focus the first entry so the player lands on something immediately instead of
         // having to press down once to enter the list.
         if (active.Count > 0)
         {
             SelectedIndex = 0;
-            ScreenReader.Say($"{header}. {active[0].ReadLabel()}");
+            ScreenReader.Say($"{header}. {active[0].ReadLabel()}", interrupt: interruptOnOpen);
         }
         else
         {
-            ScreenReader.Say(header);
+            ScreenReader.Say(header, interrupt: interruptOnOpen);
         }
     }
 
