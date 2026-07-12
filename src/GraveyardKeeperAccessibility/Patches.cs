@@ -177,7 +177,13 @@ internal static class Patches
     {
         try
         {
-            ZoneAnnouncer.OnZoneBanner(__0);
+            // Resolve the zone the player is physically in so the announcer can DLC-gate it. The
+            // game just computed this same zone in PlayerComponent.UpdateZone (line ~212) before
+            // pushing the banner; PlayerComponent.current_zone isn't updated until AFTER this call,
+            // so we re-query GetMyWorldZone (cheap at the banner's ~2x/sec cadence). null => "...".
+            string zoneId = null;
+            try { zoneId = MainGame.me?.player?.GetMyWorldZone()?.id; } catch { }
+            ZoneAnnouncer.OnZoneBanner(__0, zoneId);
         }
         catch (Exception ex)
         {

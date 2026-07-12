@@ -40,7 +40,7 @@ internal static class ZoneAnnouncer
     /// <summary>
     /// Postfix target for <c>HUD.UpdateZoneInfo</c>. Speaks the area name on change.
     /// </summary>
-    internal static void OnZoneBanner(string name)
+    internal static void OnZoneBanner(string name, string zoneId = null)
     {
         try
         {
@@ -50,6 +50,13 @@ internal static class ZoneAnnouncer
             string text = name == "..."
                 ? WildernessLabel
                 : ScreenReader.StripNguiCodes(name ?? "").Trim();
+
+            // A DLC zone the player doesn't own (e.g. the Stranger Sins "Tavernenkeller") still
+            // spawns active in the scene as inert set-dressing, so the game's banner fires for it.
+            // Voicing its name would leak DLC content — treat it as open ground so the player still
+            // hears they left the last named area.
+            if (!string.IsNullOrEmpty(zoneId) && !ObjectNavigator.IsZoneDlcAvailable(zoneId))
+                text = WildernessLabel;
 
             if (string.IsNullOrEmpty(text)) return;
             if (text == _lastSpoken) return;   // same area as last banner — stay quiet

@@ -2344,11 +2344,18 @@ internal static class ObjectNavigator
             || id.Contains("sin_shard"))     // sin_shard_body_part (the game itself gates this on Souls)
             return DLCEngine.DLCVersion.Souls;
 
-        // Stranger Sins — the player-run tavern and its equipment (spawned at the player-tavern
-        // coords by the num < 1200 migration). "players_tavern" and "tavern_time_machin" are
-        // unambiguous: the base-game town tavern is a separate zone and never uses these ids.
-        if (id.Contains("players_tavern")    // players_tavern_builddesk, players_tavern_cellar_builddesk
-            || id.Contains("tavern_time_machin")) // tavern_time_machin_wall_inactive (the time machine)
+        // Stranger Sins — the player-run tavern, its cellar, and all their equipment (spawned at the
+        // player-tavern coords by the num < 1200 migration; see GameSave lines ~1096–1121). Every
+        // token below is unambiguous — the base-game town tavern is a separate open zone that never
+        // uses these ids (verified: tavern_oven/tavern_kitchen exist only as player-tavern
+        // barmen-output stations, and no base teleport tag contains "tavern"+"cellar"). The
+        // teleport doors carry a generic obj_id ("teleport_point"/"teleport_inside") but their
+        // custom_tag is "tp_tavern_*_cellar_*", so IsObjectDlcAvailable feeds the tag through here too.
+        if (id.Contains("players_tavern")     // players_tavern_builddesk, players_tavern_cellar_builddesk
+            || id.Contains("tavern_time_machin") // tavern_time_machin_wall_inactive (the time machine)
+            || id.Contains("tavern_oven")     // player-tavern cooking oven (barmen-output station)
+            || id.Contains("tavern_kitchen")  // player-tavern kitchen (barmen-output station)
+            || (id.Contains("tavern") && id.Contains("cellar"))) // tavern_cellar_rack + tp_tavern_*_cellar_* doors (via custom_tag)
             return DLCEngine.DLCVersion.Stories;
 
         return null;
@@ -2363,7 +2370,26 @@ internal static class ObjectNavigator
     {
         try
         {
-            var req = ObjectRequiredDLC(wgo?.obj_id);
+            // Check obj_id first, then custom_tag: teleport doors share generic obj_ids
+            // ("teleport_point"/"teleport_inside") and only carry their DLC identity in the
+            // custom_tag (e.g. "tp_tavern_from_cellar_b"), so the obj_id alone can't gate them.
+            var req = ObjectRequiredDLC(wgo?.obj_id) ?? ObjectRequiredDLC(wgo?.custom_tag);
+            return !req.HasValue || DLCEngine.IsDLCAvailable(req.Value);
+        }
+        catch { return true; }
+    }
+
+    /// <summary>
+    /// True if a world zone may be announced — i.e. it's base-game, or it's a DLC zone the player
+    /// owns (live gamedata_*.dat check). The zone twin of <see cref="IsObjectDlcAvailable"/>: DLC
+    /// zones sit active in the scene regardless of ownership, so the zone announcer must gate on
+    /// this or it voices e.g. "Tavernenkeller" to a non-owner.
+    /// </summary>
+    internal static bool IsZoneDlcAvailable(string zoneId)
+    {
+        try
+        {
+            var req = ZoneRequiredDLC(zoneId);
             return !req.HasValue || DLCEngine.IsDLCAvailable(req.Value);
         }
         catch { return true; }
