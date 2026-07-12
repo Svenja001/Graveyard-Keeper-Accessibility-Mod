@@ -705,7 +705,7 @@ internal static class BuildPlacementHandler
             ScreenReader.Say(
                 matchCount == 0
                     ? "This is a wall object, but no matching wall zone exists here. The wall it needs may not be built."
-                    : $"Found {matchCount} wall zone{(matchCount == 1 ? "" : "s")}, but no free spot on {(matchCount == 1 ? "it" : "them")}.",
+                    : "No free wall mount for this decoration. The wall spots here are already taken or too full for another one, so the church may only hold a limited number.",
                 interrupt: true);
         }
         else
