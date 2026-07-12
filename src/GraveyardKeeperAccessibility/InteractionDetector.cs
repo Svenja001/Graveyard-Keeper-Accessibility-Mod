@@ -50,7 +50,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target);
+                        var label = WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target);
                         ScreenReader.Say(label, interrupt: true);
                         _lastAnnouncedObject = target.name;
                     }
@@ -63,7 +63,7 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var label = WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby);
+                    var label = WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
@@ -481,6 +481,53 @@ internal static class InteractionDetector
         catch
         {
             return false;
+        }
+    }
+
+    // The Witch Hill "Buffet" quest (Build the buffet → Serve the beer / Serve the burgers) has two
+    // scripted serve stands. Unlike the quest text ("Make 10 Beers and 5 Burgers") the serve action
+    // is a Flow that checks the player's inventory for the EXACT gold-quality item id — cup_beer:3
+    // and meal:burger:3 — so bronze/silver beer or burgers are silently refused with no on-screen
+    // hint. A sighted player learns this by trial; a blind player just hears "nothing happened". Map
+    // each stand's obj_id to what it actually demands so we can say the quality out loud.
+    private sealed class BuffetNeed
+    {
+        public string ItemId;      // exact gold-quality id the serve script checks for
+        public int Count;          // how many the quest wants total
+        public string Description;  // spoken phrase, e.g. "gold-quality beer"
+    }
+
+    private static readonly Dictionary<string, BuffetNeed> _buffetStands = new Dictionary<string, BuffetNeed>
+    {
+        ["beer_barrels_place"] = new BuffetNeed { ItemId = "cup_beer:3", Count = 10, Description = "gold-quality beer" },
+        ["burgers_place"] = new BuffetNeed { ItemId = "meal:burger:3", Count = 5, Description = "gold-quality burgers" },
+    };
+
+    /// <summary>
+    /// Append the buffet serve requirement to a Witch Hill buffet stand's label: the exact quality
+    /// tier the serve script demands and how many the player still owes. Returns the bare label
+    /// unchanged for anything that isn't a buffet stand.
+    /// </summary>
+    private static string WithBuffetInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            var id = wgo?.obj_id;
+            if (string.IsNullOrEmpty(id) || !_buffetStands.TryGetValue(id, out var need))
+                return label;
+
+            int have = 0;
+            try { have = MainGame.me.player.data.GetItemsCount(need.ItemId, count_secondary_inventory: true); }
+            catch { }
+
+            var tail = have >= need.Count
+                ? $"you have enough"
+                : $"you have {have}";
+            return $"{label}. Needs {need.Count} {need.Description}. {tail}";
+        }
+        catch
+        {
+            return label;
         }
     }
 
