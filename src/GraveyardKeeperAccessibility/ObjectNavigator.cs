@@ -2311,22 +2311,24 @@ internal static class ObjectNavigator
         if (id.Contains("refugee") || id.Contains("alarich") || id.Contains("crone"))
             return DLCEngine.DLCVersion.Refugees;
 
-        // Better Save Soul — any soul-content zone (no base-game zone uses this word).
-        if (id.Contains("soul"))
+        // Better Save Soul — any soul-content zone (no base-game zone uses this word), plus
+        // Euric's abandoned room (zone_euric_room), a Souls "ruin" that spawns into every save
+        // via the save-version migration regardless of ownership (see ObjectRequiredDLC).
+        if (id.Contains("soul") || id.Contains("euric"))
             return DLCEngine.DLCVersion.Souls;
 
         return null;
     }
 
     /// <summary>
-    /// The object-level twin of <see cref="ZoneRequiredDLC"/>. Souls-DLC "ruins" — broken glass,
-    /// the soul machines, the rusty dungeon hatch, Euric's abandoned room — are spawned into every
-    /// save by a GameSave save-version migration (GameSave.cs, the <c>num &lt;= 1310</c> block)
-    /// REGARDLESS of DLC ownership, so they sit in the scene as inert set-dressing for players who
-    /// don't own the DLC. ObjectDefinition has no requires_dlc field, so we infer membership from
-    /// the obj_id using deliberately specific tokens (hatch_rust not "hatch", broken_glass not
-    /// "glass") to avoid catching base-game objects. Buying the DLC flips IsDLCAvailable and they
-    /// reappear with no code change.
+    /// The object-level twin of <see cref="ZoneRequiredDLC"/>. DLC content is spawned into every
+    /// save by GameSave save-version migrations (GameSave.cs — the Souls <c>num &lt;= 1310</c> block,
+    /// the Stories <c>num &lt; 1200</c> block) REGARDLESS of DLC ownership, so it sits in the scene
+    /// as inert set-dressing for players who don't own the DLC. ObjectDefinition has no requires_dlc
+    /// field, so we infer membership from the obj_id using deliberately specific tokens (hatch_rust
+    /// not "hatch", broken_glass not "glass", players_tavern not "tavern" — the base-game town tavern
+    /// must stay visible) to avoid catching base-game objects. Buying the DLC flips IsDLCAvailable
+    /// and the objects reappear with no code change.
     /// </summary>
     internal static DLCEngine.DLCVersion? ObjectRequiredDLC(string objId)
     {
@@ -2341,6 +2343,13 @@ internal static class ObjectNavigator
             || id.Contains("euric")          // eurics_room_* (abandoned set-dressing)
             || id.Contains("sin_shard"))     // sin_shard_body_part (the game itself gates this on Souls)
             return DLCEngine.DLCVersion.Souls;
+
+        // Stranger Sins — the player-run tavern and its equipment (spawned at the player-tavern
+        // coords by the num < 1200 migration). "players_tavern" and "tavern_time_machin" are
+        // unambiguous: the base-game town tavern is a separate zone and never uses these ids.
+        if (id.Contains("players_tavern")    // players_tavern_builddesk, players_tavern_cellar_builddesk
+            || id.Contains("tavern_time_machin")) // tavern_time_machin_wall_inactive (the time machine)
+            return DLCEngine.DLCVersion.Stories;
 
         return null;
     }
