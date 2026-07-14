@@ -562,9 +562,8 @@ internal static class BuildPlacementHandler
             }
         }
 
-        // Fine step over the thin wall strips; coarse (one-cell) step over an open floor.
-        float step = rects.Count > 0 ? 16f : Step;
-        if (rects.Count == 0)
+        bool wallSweep = rects.Count > 0;
+        if (!wallSweep)
         {
             Bounds bounds = new Bounds(origin, new Vector3(16 * TileSize, 16 * TileSize, 0f));
             try
@@ -580,10 +579,28 @@ internal static class BuildPlacementHandler
             rects.Add(bounds);
         }
 
+        // Placement doesn't snap to a grid (MoveWhenPlacingGlobalPos sets the position exactly), so a
+        // large object's valid-anchor band can be only a few units wide — a coarse one-cell step walks
+        // straight past it (this is why the pyre in the cramped cremation room reported "no spot"). Step
+        // finely: 16u over thin wall strips; for open floor, adapt the step to the zone so a small room
+        // is swept densely while a huge zone stays under the sample cap.
+        const int maxSamples = 12000;   // safety cap
+        float step;
+        if (wallSweep)
+        {
+            step = 16f;
+        }
+        else
+        {
+            var b = rects[0];
+            float w = Mathf.Max(b.size.x, 1f), h = Mathf.Max(b.size.y, 1f);
+            // Aim for ~8000 samples: as fine as 8u in a small room, no coarser than the 32u cell grid.
+            step = Mathf.Clamp(Mathf.Sqrt(w * h / 8000f), 8f, Step);
+        }
+
         Vector2? best = null;
         float bestSqr = float.MaxValue;
         int tested = 0, valid = 0;
-        const int maxSamples = 12000;   // safety cap
 
         foreach (var rect in rects)
         {
@@ -611,8 +628,20 @@ internal static class BuildPlacementHandler
             return;
         }
 
-        // Nothing valid. Restore the ghost, log the full picture (incl. per-zone details), and
-        // speak a diagnosis so we can tell WHY without a log dive.
+        // Nothing valid. Log the footprint size + swept area/step so a repeat tells us whether the
+        // object simply can't fit the zone (many cells) or the sweep was still too coarse.
+        try
+        {
+            int cellCount = FloatingWorldGameObject.cur_floating?
+                .gameObject.GetComponentsInChildren<FlowGridCell>()?.Length ?? -1;
+            var sb = rects.Count > 0 ? rects[0] : new Bounds();
+            _log?.LogInfo($"[BUILD] no-spot detail: footprintCells={cellCount} step={step} " +
+                $"sweptBounds=center{sb.center}size{sb.size} rects={rects.Count}");
+        }
+        catch { }
+
+        // Restore the ghost, log the full picture (incl. per-zone details), and speak a diagnosis so
+        // we can tell WHY without a log dive.
         FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
         ReportNoSpotDiagnostic(subZoneId, matching, tested, origin);
         FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);

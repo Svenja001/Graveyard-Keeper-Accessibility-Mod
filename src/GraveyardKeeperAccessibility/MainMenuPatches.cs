@@ -1303,6 +1303,13 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The build desk groups its buildables into category tabs (Graveyard, Base, Farm, ...) just
+        // like a regular crafting station. Without exposing them, only the currently-shown category
+        // is reachable — e.g. the pyre / crematorium ("a place to burn corpses") lives in the
+        // graveyard build tab and is otherwise invisible. Same generic tab rows as the craft window;
+        // switching a tab re-enters this method for the newly-shown category.
+        DiscoverCraftTabs(craftGui);
+
         int added = 0;
         foreach (var cri in items)
         {
@@ -2992,17 +2999,94 @@ internal static class GUIAccessibility
         AccessTools.Field(typeof(GraveGUI), "_fence");
     private static readonly System.Reflection.FieldInfo _graveCrossField =
         AccessTools.Field(typeof(GraveGUI), "_cross");
+    private static readonly System.Reflection.FieldInfo _graveBodyField =
+        AccessTools.Field(typeof(GraveGUI), "_body");
     private static readonly System.Reflection.MethodInfo _gravePartPressedMethod =
         AccessTools.Method(typeof(GraveGUI), "OnGravePartPressed");
 
-    // List the grave's repairable parts (fence first — that's the worn-fence/repair-kit case the
-    // player came for — then cross). Each is a navigable row reading the part's condition; Enter
-    // opens its repair/replace craft. The body (exhumation) is left to the dedicated dig flow.
+    // List the grave's parts. When a body is interred, the exhume row comes first — that's the
+    // Yorick dig-out-the-neighbour case the player came for; its Enter drives the game's own
+    // btn_body_extract path (OnBodyExtractPressed). Then the repairable/decoratable fence and cross
+    // rows (fence first — the worn-fence/repair-kit case), each reading the part's condition with
+    // Enter opening its repair/replace craft.
     private static void DiscoverGraveParts(GraveGUI grave)
     {
+        AddGraveBodyElement(grave);
         AddGravePartElement(grave, "Fence", _graveFenceField, ItemDefinition.ItemType.GraveFence);
         AddGravePartElement(grave, "Cross", _graveCrossField, ItemDefinition.ItemType.GraveStone);
         Plugin.Log.LogInfo($"[GRAVE] Discovered {Elements.Count} grave part element(s)");
+    }
+
+    // The exhume row. Only added when a body is actually interred (empty graves have nothing to
+    // dig out). Enter calls the grave's own OnBodyExtractPressed — the exact handler wired to the
+    // btn_body_extract button — which opens the permit-consuming confirm dialog (or, if the player
+    // has no exhumation permit, the game's own "you need a permit" dialog). The label explains when
+    // exhuming is blocked, mirroring the game's rule: a fence or cross must be removed first.
+    private static void AddGraveBodyElement(GraveGUI grave)
+    {
+        try
+        {
+            var body = _graveBodyField?.GetValue(grave) as Item;
+            if (body == null || body.IsEmpty())
+                return;
+        }
+        catch
+        {
+            return;
+        }
+
+        Elements.Add(new GUIElement
+        {
+            Go = grave.gameObject,
+            Label = GraveBodyLabel(grave),
+            Type = ElementType.Button,
+            ReadDynamic = () => GraveBodyLabel(grave),
+            OnActivate = () => ActivateGraveBody(grave)
+        });
+    }
+
+    // "Body: John's dead body, press Enter to exhume", or — when a fence or cross still blocks the
+    // dig (btn_body_extract disabled) — an explanation of what to clear first.
+    private static string GraveBodyLabel(GraveGUI grave)
+    {
+        try
+        {
+            var body = _graveBodyField?.GetValue(grave) as Item;
+            var itemName = ScreenReader.StripNguiCodes(body?.definition?.GetItemName() ?? "body")?.Trim();
+            if (string.IsNullOrWhiteSpace(itemName)) itemName = "body";
+
+            bool canExhume = grave.btn_body_extract != null && grave.btn_body_extract.isEnabled;
+            if (canExhume)
+                return $"Body: {itemName}, press Enter to exhume";
+
+            var fence = _graveFenceField?.GetValue(grave) as Item;
+            var cross = _graveCrossField?.GetValue(grave) as Item;
+            bool hasFence = fence != null && !fence.IsEmpty();
+            bool hasCross = cross != null && !cross.IsEmpty();
+            if (hasFence && hasCross)
+                return $"Body: {itemName}. Remove the fence and cross first to exhume";
+            if (hasFence)
+                return $"Body: {itemName}. Remove the fence first to exhume";
+            if (hasCross)
+                return $"Body: {itemName}. Remove the cross first to exhume";
+            return $"Body: {itemName}, can't exhume right now";
+        }
+        catch
+        {
+            return "Body";
+        }
+    }
+
+    private static void ActivateGraveBody(GraveGUI grave)
+    {
+        try
+        {
+            grave.OnBodyExtractPressed();
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[GRAVE] body-extract activate failed: {ex.Message}");
+        }
     }
 
     private static void AddGravePartElement(GraveGUI grave, string name,
