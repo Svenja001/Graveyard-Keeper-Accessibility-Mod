@@ -8,6 +8,11 @@ namespace GraveyardKeeperAccessibility;
 /// ghost sits relative to the player. After every move we read the game's own
 /// <see cref="FloatingWorldGameObject.can_be_built"/> flag and announce valid/blocked.
 ///
+/// We also drive the fixed-slot interior-furniture stage (<c>Mode.ScriptBuilding</c>): pieces like
+/// the cupboard or cooking table have no floating ghost — a FlowScript drops them at a
+/// predetermined spot in the room and waits for a confirming click. Mouse-free we expose Enter to
+/// confirm, Escape to cancel (refunding materials), and R to cycle the piece's style variations.
+///
 /// We also drive the build desk's "Entfernen"/Remove stage (<c>Mode.Removing</c>), which is
 /// normally a mouse cursor you hover over a building and left-click to demolish. Mouse-free we
 /// present the zone's removable objects as a list: Up/Down cycle through them (the cursor snaps
@@ -35,6 +40,15 @@ internal static class BuildPlacementHandler
     private static MethodInfo _doPlace;      // private void DoPlace()
     private static MethodInfo _cancelPlacing; // private void CancelPlacing()
     private static MethodInfo _cancelRemoving; // private void CancelRemoving()
+    private static MethodInfo _removeMarks;   // private void RemoveMarksFromAllWGOs()
+
+    // Script-building (fixed-slot interior furniture) confirm/cancel/rotate hooks. These are
+    // private static events on BuildModeLogics that the placement FlowScript subscribes to; we
+    // invoke them to finalize or abort exactly as the game's own UpdateWhileScriptBuilding does.
+    private static FieldInfo _applyEvent;     // on_apply_while_script_building
+    private static FieldInfo _cancelEvent;    // on_cancel_while_script_building
+    private static FieldInfo _rotLeftEvent;   // on_rotate_left_while_script_building
+    private static FieldInfo _rotRightEvent;  // on_rotate_right_while_script_building
 
     // Remove-mode state: the zone's removable objects (sorted nearest-first) and our cursor in it.
     private static List<WorldGameObject> _removables;
@@ -63,6 +77,11 @@ internal static class BuildPlacementHandler
             _doPlace = AccessTools.Method(t, "DoPlace");
             _cancelPlacing = AccessTools.Method(t, "CancelPlacing");
             _cancelRemoving = AccessTools.Method(t, "CancelRemoving");
+            _removeMarks = AccessTools.Method(t, "RemoveMarksFromAllWGOs");
+            _applyEvent = AccessTools.Field(t, "on_apply_while_script_building");
+            _cancelEvent = AccessTools.Field(t, "on_cancel_while_script_building");
+            _rotLeftEvent = AccessTools.Field(t, "on_rotate_left_while_script_building");
+            _rotRightEvent = AccessTools.Field(t, "on_rotate_right_while_script_building");
             _log?.LogInfo("[BUILD] BuildPlacementHandler initialized");
         }
         catch (Exception ex)
@@ -88,6 +107,10 @@ internal static class BuildPlacementHandler
                 return FloatingWorldGameObject.IsFloating() ? "Placing" : null;
             if (mode == "Removing")
                 return "Removing";
+            // Interior furniture (cupboard, cooking table…) placed at a fixed room slot by a
+            // FlowScript; no floating ghost, just confirm/cancel/style.
+            if (mode == "ScriptBuilding")
+                return "ScriptBuilding";
             return null;
         }
         catch
@@ -131,6 +154,7 @@ internal static class BuildPlacementHandler
         try
         {
             if (mode == "Removing") HandleRemoveInput();
+            else if (mode == "ScriptBuilding") HandleScriptBuildInput();
             else HandleInput();
         }
         catch (Exception ex)
@@ -143,6 +167,7 @@ internal static class BuildPlacementHandler
     private static void AnnounceModeEntry(string mode)
     {
         if (mode == "Removing") EnterRemoving();
+        else if (mode == "ScriptBuilding") AnnounceScriptEntry();
         else AnnounceEntry();
     }
 
@@ -318,6 +343,125 @@ internal static class BuildPlacementHandler
             _log?.LogError($"[BUILD] CancelPlacing failed: {ex.Message}");
         }
         ScreenReader.Say("Placement cancelled", interrupt: true);
+    }
+
+    // ---- script-building (fixed-slot interior furniture) ------------------
+
+    /// <summary>
+    /// Announce a script-built piece (cupboard, cooking table, bed…). These don't float — the game
+    /// spawns them at a predetermined spot in the room and waits for a click to confirm. So there's
+    /// nothing to move; we just tell the player how to confirm, cancel, or (if the piece has
+    /// alternative looks) change its style.
+    /// </summary>
+    private static void AnnounceScriptEntry()
+    {
+        var name = CurrentBuildName();
+        var what = string.IsNullOrEmpty(name) ? "Placement" : $"Placing {name}";
+        var cd = CurrentCraft();
+        var style = (cd != null && cd.has_variations) ? " R changes the style." : "";
+        ScreenReader.Say(
+            $"{what}. This piece goes to its fixed spot in the room. Enter confirms, Escape cancels.{style}",
+            interrupt: true);
+    }
+
+    private static void HandleScriptBuildInput()
+    {
+        var shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) { ConfirmScriptBuild(); return; }
+        if (Input.GetKeyDown(KeyCode.Escape)) { CancelScriptBuild(); return; }
+        if (Input.GetKeyDown(KeyCode.R)) { RotateScriptVariation(!shift); return; }
+        if (Input.GetKeyDown(KeyCode.I)) { AnnounceScriptEntry(); return; }
+    }
+
+    /// <summary>Invoke a BuildModeLogics private-static script-building event (apply/cancel/rotate).</summary>
+    private static void InvokeScriptEvent(FieldInfo f)
+    {
+        try { (f?.GetValue(null) as Action)?.Invoke(); }
+        catch (Exception ex) { _log?.LogError($"[BUILD] script-build event invoke failed: {ex.Message}"); }
+    }
+
+    private static object ModeNone() => Enum.Parse(_modeField.FieldType, "None");
+
+    /// <summary>
+    /// Confirm the fixed-slot placement — mirrors the Interaction/LeftClick branch of
+    /// <c>BuildModeLogics.UpdateWhileScriptBuilding</c>: clear the build zone, fire the apply event
+    /// (the FlowScript that owns the piece finalizes it), hide the build GUIs and leave build mode.
+    /// </summary>
+    private static void ConfirmScriptBuild()
+    {
+        var logics = Logics;
+        if (logics == null) return;
+        var name = CurrentBuildName();
+
+        try
+        {
+            logics.SetCurrentBuildZone(string.Empty);
+            InvokeScriptEvent(_applyEvent);
+            GUIElements.me.build_mode_gui.Hide();
+            _modeField.SetValue(logics, ModeNone());
+            GUIElements.me.craft.Hide();
+            MainGame.me.ExitBuildMode();
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] ConfirmScriptBuild failed: {ex.Message}");
+            ScreenReader.Say("Placement failed", interrupt: true);
+            return;
+        }
+
+        // Suppress the generic "Left placement" transition message on the next frame.
+        _wasActive = false;
+        _lastMode = null;
+        ScreenReader.Say(string.IsNullOrEmpty(name) ? "Placed" : $"{name} placed", interrupt: true);
+    }
+
+    /// <summary>
+    /// Abort the fixed-slot placement — mirrors the Back/RightClick branch: refund the materials
+    /// (they were consumed on entry), fire the cancel event, tear down build mode, and reopen the
+    /// build desk catalog so the player can pick something else.
+    /// </summary>
+    private static void CancelScriptBuild()
+    {
+        var logics = Logics;
+        if (logics == null) return;
+
+        try
+        {
+            var cd = CurrentCraft();
+            if (cd?.needs != null) MainGame.me.player.AddToInventory(cd.needs);
+            logics.SetCurrentBuildZone(string.Empty);
+            InvokeScriptEvent(_cancelEvent);
+            GUIElements.me.build_mode_gui.Hide();
+            MainGame.me.ExitBuildMode();
+            GUIElements.me.craft.Hide();
+            _modeField.SetValue(logics, ModeNone());
+            _removeMarks?.Invoke(logics, null);
+            MainGame.me.ExitBuildMode();
+            MainGame.me.OpenBuildObjectGUI(BuildModeLogics.last_build_desk);
+            logics.cur_build_zone?.RedrawQualities(false);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] CancelScriptBuild failed: {ex.Message}");
+        }
+
+        _wasActive = false;
+        _lastMode = null;
+        ScreenReader.Say("Placement cancelled", interrupt: true);
+    }
+
+    /// <summary>Cycle a script-built piece's alternative look (only some pieces have variations).</summary>
+    private static void RotateScriptVariation(bool right)
+    {
+        var cd = CurrentCraft();
+        if (cd == null || !cd.has_variations)
+        {
+            ScreenReader.Say("This has no other styles", interrupt: true);
+            return;
+        }
+        InvokeScriptEvent(right ? _rotRightEvent : _rotLeftEvent);
+        ScreenReader.Say("Changed style", interrupt: true);
     }
 
     // ---- remove mode ------------------------------------------------------
