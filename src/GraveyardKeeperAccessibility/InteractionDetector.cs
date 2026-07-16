@@ -10,6 +10,7 @@ internal static class InteractionDetector
     private static bool _craftPending = false;
     private static WorldGameObject _craftStation = null;
     private static bool _craftIsFixing = false;
+    private static bool _craftIsRemoving = false;
     private static string _craftOutputName = null;
     private static WorldGameObject _lastWorkHighlight = null;
     private static bool _wasWorking = false;
@@ -234,21 +235,29 @@ internal static class InteractionDetector
             var station = (nearby != null && nearby.obj_def != null && nearby.obj_def.has_craft)
                 ? nearby.components?.craft : null;
             bool stationCrafting = station != null && station.is_crafting && station.current_craft != null;
+            // Demolition also runs through a craft, but the object may not carry obj_def.has_craft,
+            // so key it off is_removing rather than the station lookup above.
+            bool removing = nearby != null && nearby.is_removing;
 
-            if (stationCrafting)
+            if (stationCrafting || removing)
             {
-                // Refresh what's cooking each frame so we can name it once it's done. A repair
-                // craft is the one the game tags Fixing (see GetFixingCraft).
+                // Refresh what's happening each frame so we can name it once it's done. A repair
+                // craft is the one the game tags Fixing (see GetFixingCraft); a demolition is
+                // whatever we're removing.
                 _craftPending = true;
                 _craftStation = nearby;
-                _craftIsFixing = station.current_craft.craft_type == CraftDefinition.CraftType.Fixing;
-                _craftOutputName = _craftIsFixing ? null : CraftOutputName(station.current_craft);
+                _craftIsRemoving = removing;
+                _craftIsFixing = !removing && station.current_craft.craft_type == CraftDefinition.CraftType.Fixing;
+                _craftOutputName = (removing || _craftIsFixing) ? null : CraftOutputName(station.current_craft);
             }
-            else if (_craftPending && !IsStationStillCrafting(_craftStation))
+            else if (_craftPending && !IsStationStillCrafting(_craftStation) && !IsBeingRemoved(_craftStation))
             {
                 // The remembered craft is no longer running: it finished, or its object was
-                // swapped for the repaired version (the old WGO now reads as destroyed/null).
-                if (_craftIsFixing)
+                // swapped for the repaired version, or the demolition completed and destroyed it
+                // (the old WGO now reads as destroyed/null).
+                if (_craftIsRemoving)
+                    ScreenReader.Say("Removed", interrupt: false);
+                else if (_craftIsFixing)
                     ScreenReader.Say("Repaired", interrupt: false);
                 else if (string.IsNullOrEmpty(_craftOutputName))
                     ScreenReader.Say("Finished", interrupt: false);
@@ -259,6 +268,7 @@ internal static class InteractionDetector
                 _craftPending = false;
                 _craftStation = null;
                 _craftIsFixing = false;
+                _craftIsRemoving = false;
                 _craftOutputName = null;
             }
         }
@@ -325,6 +335,14 @@ internal static class InteractionDetector
         {
             return false;
         }
+    }
+
+    // True while the remembered object is still marked for demolition (removal not yet finished).
+    // A destroyed object reads as Unity-null → false, which is exactly when we announce "Removed".
+    private static bool IsBeingRemoved(WorldGameObject wgo)
+    {
+        try { return wgo != null && wgo.is_removing; }
+        catch { return false; }
     }
 
     // Readable name of a craft's main output, for the "X crafted" completion cue. Null when the
@@ -672,6 +690,15 @@ internal static class InteractionDetector
     {
         try
         {
+            // An object marked for demolition runs a "removal craft" whose output is the refunded
+            // material (e.g. stone). Reporting that as "Making stone" is misleading — it's being
+            // torn down, not built. Say so instead, and never fall through to the crafting branch.
+            if (wgo != null && wgo.is_removing)
+            {
+                int rpct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
+                return $"{label}. Marked for removal, {rpct} percent torn down. Press F to remove";
+            }
+
             var craft = (wgo?.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
             if (craft == null) return label;
 
