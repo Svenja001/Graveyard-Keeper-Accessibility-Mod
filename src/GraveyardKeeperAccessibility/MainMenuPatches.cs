@@ -1374,10 +1374,79 @@ internal static class GUIAccessibility
         if (string.IsNullOrWhiteSpace(name)) name = "Build option";
 
         var label = name;
+
+        // The rating this object will add to its zone — the same number the game appends to the
+        // catalog description for sighted players. Spoken right after the name so it's heard before
+        // committing to the build (church decorations, graveyard objects, cellar equipment…).
+        var points = BuildCatalogPointsText(cri);
+        if (!string.IsNullOrEmpty(points)) label += $". {points}";
+
         var needs = CraftNeedsText(cri);
         if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
         label += CanBuild(cri) ? ". Ready" : ". Not enough materials";
         return label;
+    }
+
+    /// <summary>
+    /// "Gives 8 church points" for a build-catalog row, or null when the object shows no rating.
+    /// Mirrors the game's own catalog readout in <c>CraftDefinition.GetDescription</c>: only a
+    /// <c>Put</c> build of an object whose quality is <c>Shown</c> (or a non-zero <c>Grave</c>)
+    /// gets a number, read straight from the object definition's <c>quality</c> expression (with the
+    /// "_place" ghost resolved to its base object). The zone name is the current build desk's zone.
+    /// </summary>
+    private static string BuildCatalogPointsText(CraftItemGUI cri)
+    {
+        try
+        {
+            if (!(cri.craft_definition is ObjectCraftDefinition oc)) return null;
+            if (oc.id == "_remove_" || oc.build_type != ObjectCraftDefinition.BuildType.Put) return null;
+
+            var data = GameBalance.me?.GetData<ObjectDefinition>(oc.out_obj);
+            if (data == null) return null;
+
+            bool shows = data.quality_type == ObjectDefinition.QualityType.Shown
+                || (data.quality_type == ObjectDefinition.QualityType.Grave
+                    && Mathf.Abs(data.quality.EvaluateFloat()) > 0.0001f);
+            if (!shows) return null;
+
+            float num = data.quality.EvaluateFloat();
+            if (!string.IsNullOrEmpty(data.id) && data.id.EndsWith("_place"))
+            {
+                var baseDef = GameBalance.me.GetData<ObjectDefinition>(data.id.Replace("_place", ""));
+                if (baseDef != null && (baseDef.quality_type == ObjectDefinition.QualityType.Shown
+                        || baseDef.quality_type == ObjectDefinition.QualityType.Grave))
+                    num = baseDef.quality.EvaluateFloat();
+            }
+
+            if (Mathf.Abs(num) < 0.05f) return null;
+            var val = num.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            var zone = BuildZoneLabel();
+            return zone != null ? $"Gives {val} {zone} points" : $"Gives {val} points";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Localized name of the current build desk's zone, or null when it isn't a scored
+    /// zone (so the caller says a plain "Gives N points"). Matches the HUD banner naming.</summary>
+    private static string BuildZoneLabel()
+    {
+        try
+        {
+            var zone = MainGame.me?.build_mode_logics?.cur_build_zone;
+            if (zone?.definition == null) return null;
+            if (zone.definition.calc_method == WorldZoneDefinition.QualityCalcMethod.None) return null;
+
+            var key = "zone_" + zone.id;
+            var loc = ScreenReader.StripNguiCodes(GJL.L(key) ?? "").Trim();
+            return (string.IsNullOrEmpty(loc) || loc == key) ? null : loc;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static bool CanBuild(CraftItemGUI cri)
@@ -3034,10 +3103,55 @@ internal static class GUIAccessibility
     // Enter opening its repair/replace craft.
     private static void DiscoverGraveParts(GraveGUI grave)
     {
+        AddGraveRatingElement(grave);
         AddGraveBodyElement(grave);
         AddGravePartElement(grave, "Fence", _graveFenceField, ItemDefinition.ItemType.GraveFence);
         AddGravePartElement(grave, "Cross", _graveCrossField, ItemDefinition.ItemType.GraveStone);
         Plugin.Log.LogInfo($"[GRAVE] Discovered {Elements.Count} grave part element(s)");
+    }
+
+    // A read-only "Grave rating" row placed first, so opening the grave immediately voices how many
+    // graveyard points it currently contributes — the number a sighted player sees floating over the
+    // grave. Dynamic so it updates after a fence/cross is repaired or replaced. Enter just re-reads.
+    private static void AddGraveRatingElement(GraveGUI grave)
+    {
+        Elements.Add(new GUIElement
+        {
+            Go = grave.gameObject,
+            Label = GraveRatingLabel(grave),
+            Type = ElementType.Button,
+            ReadDynamic = () => GraveRatingLabel(grave),
+            OnActivate = () => ScreenReader.Say(GraveRatingLabel(grave))
+        });
+    }
+
+    // "Grave rating: 3 of 5 possible points" — the grave's live quality (net white skulls it adds to
+    // the graveyard), plus the body's cap and any red skulls dragging it down. Adding a better cross
+    // or fence raises the rating up to the body's cap. Empty graves prompt to bury someone first.
+    private static string GraveRatingLabel(GraveGUI grave)
+    {
+        try
+        {
+            var wgo = _graveWgoField?.GetValue(grave) as WorldGameObject;
+            if (wgo == null) return "Grave rating unknown";
+
+            float q = wgo.quality;
+            var val = q.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+            var body = _graveBodyField?.GetValue(grave) as Item;
+            if (body == null || body.IsEmpty())
+                return $"Grave rating: {val} points. Bury a body to raise it";
+
+            body.GetBodySkulls(out int negative, out _, out int positive);
+            var text = $"Grave rating: {val} of {positive} possible points";
+            if (negative > 0)
+                text += $", {negative} red skull{(negative == 1 ? "" : "s")} reduce it";
+            return text;
+        }
+        catch
+        {
+            return "Grave rating unknown";
+        }
     }
 
     // The exhume row. Only added when a body is actually interred (empty graves have nothing to
@@ -3139,7 +3253,12 @@ internal static class GUIAccessibility
             int pct = Mathf.RoundToInt(Mathf.Clamp01(item.durability) * 100f);
             var itemName = ScreenReader.StripNguiCodes(item.definition?.GetItemName() ?? name)?.Trim();
             if (string.IsNullOrWhiteSpace(itemName)) itemName = name;
-            return $"{name}: {itemName}, condition {pct} percent. Press Enter to repair";
+
+            // The part's own quality is what it feeds into the grave rating; sighted players see it
+            // as "(wr)N" on the cell. Surface it so the player can judge whether a better one helps.
+            int worth = Mathf.RoundToInt(item.GetItemQuality());
+            var worthText = worth > 0 ? $", worth {worth} rating" : "";
+            return $"{name}: {itemName}, condition {pct} percent{worthText}. Press Enter to repair";
         }
         catch
         {

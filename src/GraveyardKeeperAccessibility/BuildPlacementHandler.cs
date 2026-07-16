@@ -192,7 +192,7 @@ internal static class BuildPlacementHandler
             : "This is a wall decoration, Space finds a spot on the wall";
 
         ScreenReader.Say(
-            $"{what}. Arrow keys move, {snapHint}, R rotates, Enter places, Escape cancels. {Validity()}.",
+            $"{what}. Arrow keys move, {snapHint}, R rotates, Enter places, Escape cancels. {Validity()}.{PointsSuffix()}",
             interrupt: true);
     }
 
@@ -360,7 +360,7 @@ internal static class BuildPlacementHandler
         var cd = CurrentCraft();
         var style = (cd != null && cd.has_variations) ? " R changes the style." : "";
         ScreenReader.Say(
-            $"{what}. This piece goes to its fixed spot in the room. Enter confirms, Escape cancels.{style}",
+            $"{what}. This piece goes to its fixed spot in the room. Enter confirms, Escape cancels.{style}{PointsSuffix()}",
             interrupt: true);
     }
 
@@ -768,7 +768,7 @@ internal static class BuildPlacementHandler
         {
             FloatingWorldGameObject.MoveCurrentFloatingObject(best.Value, is_global_pos: true);
             var word = string.IsNullOrEmpty(subZoneId) ? "free spot" : "wall spot";
-            ScreenReader.Say($"Found a {word}. {DirectionFromPlayer()}. Valid.", interrupt: true);
+            ScreenReader.Say($"Found a {word}. {DirectionFromPlayer()}. Valid.{PointsSuffix()}", interrupt: true);
             return;
         }
 
@@ -895,7 +895,70 @@ internal static class BuildPlacementHandler
 
     private static void AnnouncePosition()
     {
-        ScreenReader.Say($"{DirectionFromPlayer()}. {Validity()}.", interrupt: true);
+        ScreenReader.Say($"{DirectionFromPlayer()}. {Validity()}.{PointsSuffix()}", interrupt: true);
+    }
+
+    /// <summary>
+    /// Leading-space, sentence-terminated form of <see cref="PointsText"/> for appending to
+    /// another spoken line, or "" when the object contributes no visible rating.
+    /// </summary>
+    private static string PointsSuffix()
+    {
+        var p = PointsText();
+        return string.IsNullOrEmpty(p) ? "" : $" {p}.";
+    }
+
+    /// <summary>
+    /// How many rating points the object being placed will add to its zone — the same number a
+    /// sighted player sees floating over the ghost (e.g. the graveyard or church quality icon).
+    /// Null when the object shows no number: its quality is Hidden, it isn't counted at the zone,
+    /// its contribution rounds to zero, or it sits in an unscored zone (ordinary house furniture).
+    /// </summary>
+    private static string PointsText()
+    {
+        try
+        {
+            var w = FloatingWorldGameObject.cur_floating?.wobj;
+            if (w == null || w.obj_def == null) return null;
+            if (w.obj_def.quality_type == ObjectDefinition.QualityType.Hidden) return null;
+            if (w.obj_def.ignore_counting_at_zone) return null;
+
+            float q = w.quality;
+            if (Mathf.Abs(q) < 0.05f) return null;
+
+            var zone = ZoneLabelFor(w);
+            var val = q.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            return zone != null ? $"Gives {val} {zone} points" : $"Gives {val} points";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Friendly name of the scored zone the ghost currently sits in (graveyard, church, the alchemy
+    /// cellar, the tavern…), or null when the zone isn't one the game rates — in which case the
+    /// caller speaks a plain "Gives N points" or, for an unscored zone, nothing at all. We treat a
+    /// zone as scored exactly as the game does: its definition's <c>calc_method</c> isn't None. The
+    /// name is the same localized string the HUD banner uses (<c>GJL.L("zone_" + id)</c>).
+    /// </summary>
+    private static string ZoneLabelFor(WorldGameObject w)
+    {
+        try
+        {
+            var zone = w.GetMyWorldZone();
+            if (zone?.definition == null) return null;
+            if (zone.definition.calc_method == WorldZoneDefinition.QualityCalcMethod.None) return null;
+
+            var key = "zone_" + zone.id;
+            var loc = ScreenReader.StripNguiCodes(GJL.L(key) ?? "").Trim();
+            return (string.IsNullOrEmpty(loc) || loc == key) ? null : loc;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // ---- helpers ----------------------------------------------------------
