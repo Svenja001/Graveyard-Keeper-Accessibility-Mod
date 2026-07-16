@@ -274,6 +274,11 @@ internal static class InteractionDetector
     {
         try
         {
+            // An object marked for demolition in build remove-mode runs a "removal craft" — the
+            // work that tears it down. That craft is a live is_crafting craft, so without this the
+            // generic branch below would call it "craft"; say "remove" so the F prompt matches.
+            if (wgo.is_removing) return "remove";
+
             // A broken station/fence carries a repair craft — the action that rebuilds it. Name
             // it "repair" rather than the generic Hammer "build" so the prompt matches the task.
             if (GetRepairCraft(wgo) != null) return "repair";

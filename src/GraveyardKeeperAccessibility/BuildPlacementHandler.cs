@@ -615,6 +615,21 @@ internal static class BuildPlacementHandler
 
     private static void CancelRemove()
     {
+        // Escape is the game's only way out of remove mode (there is no separate "confirm"). The
+        // game's CancelRemoving is misleadingly named: RemoveMarksFromAllWGOs only clears the
+        // highlight from objects we did NOT mark — anything we set is_removing on stays queued for
+        // demolition. So count the surviving marks BEFORE we invoke it, and report the truth
+        // instead of "cancelled" (which wrongly implied our marks were undone).
+        int marked = 0;
+        if (_removables != null)
+        {
+            foreach (var w in _removables)
+            {
+                try { if (w != null && w.is_removing) marked++; }
+                catch { }
+            }
+        }
+
         try
         {
             _cancelRemoving?.Invoke(Logics, null);
@@ -628,7 +643,13 @@ internal static class BuildPlacementHandler
         _wasActive = false;
         _lastMode = null;
         _removables = null;
-        ScreenReader.Say("Removal cancelled", interrupt: true);
+
+        string msg = marked > 0
+            ? (marked == 1
+                ? "Left remove mode. 1 object marked for demolition; work on it to tear it down."
+                : $"Left remove mode. {marked} objects marked for demolition; work on them to tear them down.")
+            : "Left remove mode. Nothing marked.";
+        ScreenReader.Say(msg, interrupt: true);
     }
 
     /// <summary>Localized name of a world object (strips the "_place" ghost suffix). Used both for
