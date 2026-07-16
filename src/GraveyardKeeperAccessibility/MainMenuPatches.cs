@@ -244,6 +244,11 @@ internal static class GUIAccessibility
             var intro = gui is MixedCraftGUI
                 ? "Combine ingredients. Fill the slots, then combine."
                 : "Organ enhancer. Choose an organ, then continue.";
+            // On the alchemy workbench this table is one tab; tell the player how to get back to
+            // the recipe tab(s), which we expose at the end of the list (Up from slot 1 reaches them).
+            if (gui is MixedCraftGUI && GUIElements.me != null && GUIElements.me.craft != null
+                && GUIElements.me.craft.is_shown)
+                intro += " Press up to reach the recipe tabs.";
             var slots = GetActiveElements();
             if (slots.Count > 0)
             {
@@ -1740,6 +1745,17 @@ internal static class GUIAccessibility
             refreshDone: "Combined");
 
         AddStationCloseRow(gui, () => gui.OnClosePressed());
+
+        // The alchemy workbench shows this combine table as a *tab* of a normal CraftGUI (the
+        // other tab(s) hold the ordinary recipes). Selecting the mix tab opens this MixedCraftGUI
+        // as a sub-window on top of the still-shown CraftGUI, but our slot list gave no way back
+        // to the recipe tab, stranding the player here. When that host CraftGUI is present, expose
+        // its tabs so the player can switch back (Up from slot 1 wraps to them). Standalone combine
+        // tables have no host CraftGUI shown, so nothing is added there.
+        var host = GUIElements.me != null ? GUIElements.me.craft : null;
+        if (host != null && host.is_shown)
+            DiscoverCraftTabs(host);
+
         Plugin.Log.LogInfo($"[MIXEDCRAFT] discovered, {Elements.Count} element(s)");
     }
 
@@ -2185,6 +2201,13 @@ internal static class GUIAccessibility
         var idx = active.FindIndex(e => e.Type == ElementType.ItemCell);
         SelectedIndex = idx >= 0 ? idx : 0;
         ScreenReader.Say($"{name}. {active[SelectedIndex].ReadLabel()}");
+
+        // Switching away from the mix tab hides the MixedCraftGUI sub-window and re-shows this
+        // CraftGUI, so it is now the current window. Claim it here so the CheckForNewGUI pass that
+        // runs right after activation sees no change and doesn't announce the same tab a second
+        // time. (For recipe→recipe switches _currentGUI is already this CraftGUI, so this is a
+        // no-op; for recipe→mix the sub-window becomes top and CheckForNewGUI still re-discovers.)
+        _currentGUI = craftGui;
     }
 
     private static string CraftTabLabel(CraftTabGUI tab)
