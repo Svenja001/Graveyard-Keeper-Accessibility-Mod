@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.9 | 18 July 2026
+
+- Fixed the teleport list sometimes collapsing to just Windmill and Farmer
+- Using the hearthstone directly (not the keybind) now respects your discovered-locations and dungeon rules
+
 ## 3.1.8 | 30 May 2026
 
 - Fixed being able to teleport out of a dungeon, which could leave you stuck and corrupt the dungeon layout
