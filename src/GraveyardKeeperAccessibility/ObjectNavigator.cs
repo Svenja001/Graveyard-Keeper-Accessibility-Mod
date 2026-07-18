@@ -28,6 +28,7 @@ internal enum NavCategory
     Graves,
     ExhumableGraves,
     People,
+    Vendors,
     Storage,
     LoadedPallets,
     EmptyPallets,
@@ -66,6 +67,7 @@ internal static class ObjectNavigator
         NavCategory.Graves,
         NavCategory.ExhumableGraves,
         NavCategory.People,
+        NavCategory.Vendors,
         NavCategory.Storage,
         NavCategory.LoadedPallets,
         NavCategory.EmptyPallets,
@@ -254,6 +256,10 @@ internal static class ObjectNavigator
     // general 60-tile cap. Without this, distant deposits never enter the list and so can never be
     // walked toward (chicken-and-egg). ~120 tiles covers the mountain mining area.
     private const float MaxHarvestableNavDistance = 120f * TileSize;
+    // While the player is inside an interior that ISN'T a scored WorldZone (e.g. the home), People/
+    // Vendors can't be filtered by zone, so keep only those within this tight radius — an interior
+    // room is a few tiles across, while the outdoor crowd sits spatially offset behind the walls.
+    private const float InteriorPeopleFallbackRadius = 12f * TileSize;
     private const int UpdateInterval = 30;                 // refresh list every 30 frames
     private const float ApproachOffset = 80f;              // stop ~1 tile short, on walkable ground
 
@@ -575,6 +581,7 @@ internal static class ObjectNavigator
         NavCategory.Graves => "Graves",
         NavCategory.ExhumableGraves => "Exhumable graves",
         NavCategory.People => "People",
+        NavCategory.Vendors => "Vendors",
         NavCategory.Storage => "Storage",
         NavCategory.LoadedPallets => "Loaded pallets",
         NavCategory.EmptyPallets => "Empty pallets",
@@ -2033,6 +2040,13 @@ internal static class ObjectNavigator
             bool interiorSightBlocked =
                 EnvironmentEngine.me?.data?.state == EnvironmentEngine.State.Inside;
 
+            // The scored WorldZone the player is standing in (tavern/church/cellar/... — null in the
+            // open or in an unzoned interior). Resolved once per refresh so the per-object People/
+            // Vendors interior filter below is a cheap reference compare, not a physics query each.
+            WorldZone interiorPlayerZone = interiorSightBlocked
+                ? SafeWorldZone(MainGame.me?.player)
+                : null;
+
             // A dungeon is the ONE enclosed interior where we deliberately reveal everything at
             // once — a blind player can't scout ahead, so they need every enemy, the exit, and the
             // loot located in one pass instead of only whatever happens to be on screen. This is
@@ -2112,11 +2126,18 @@ internal static class ObjectNavigator
                 // "Crafting stations" list. Keep these listed while culled too, under the same interior-
                 // sight guard as harvestables (never x-ray a wall-enclosed interior) and the same normal
                 // 60-tile cap (no reach bump — they're not part of farReach). They stay valid culled.
+                // Vendors join this group for the same reason: a stall like the egg seller ("frische
+                // Eier") is a static world object that the game culls the moment it's off-screen, so
+                // without this it only appears once you're a few steps away — exactly what a blind
+                // player can't do (find it from across the map to walk there). Vendor NPCs stay
+                // active on their own, so this only affects the static stalls. The interior filter
+                // added below still hides culled outdoor vendors when you're inside.
                 bool builtCategory = category == NavCategory.Stations ||
                                      category == NavCategory.Buildables ||
                                      category == NavCategory.Roofs ||
                                      category == NavCategory.LoadedPallets ||
-                                     category == NavCategory.EmptyPallets;
+                                     category == NavCategory.EmptyPallets ||
+                                     category == NavCategory.Vendors;
                 bool keepIfCulled =
                     ((farReach || builtCategory) && !interiorSightBlocked) || isDungeonObj;
                 if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
@@ -2126,6 +2147,30 @@ internal static class ObjectNavigator
                 var maxDist = isDungeonObj ? float.MaxValue
                                            : (farReach ? MaxHarvestableNavDistance : MaxNavDistance);
                 if (distance > maxDist) continue;
+
+                // No x-ray of the town's characters through the walls: NPCs (People) and vendor
+                // NPCs (the traveling merchant) keep simulating while off-screen, so unlike static
+                // objects they stay active in the hierarchy and the cull above never drops them.
+                // (cur_environment is unreliable here — the game never sets it, so it can't tell an
+                // indoor NPC from an outdoor one.) When the player is in an enclosed interior, keep
+                // only people/vendors in the SAME scored WorldZone as the player — the tavern,
+                // church and cellar are all zones, so their occupants survive while the outdoor
+                // crowd (a different zone / no zone) drops out. If the player's interior isn't a
+                // zone (e.g. the home), fall back to a tight radius the spatially-offset outdoor
+                // crowd won't fall inside. GetMyWorldZone is a geometric physics query, run only for
+                // the handful of active People/Vendors while indoors.
+                if (interiorSightBlocked &&
+                    (category == NavCategory.People || category == NavCategory.Vendors))
+                {
+                    if (interiorPlayerZone != null)
+                    {
+                        if (SafeWorldZone(obj) != interiorPlayerZone) continue;
+                    }
+                    else if (distance > InteriorPeopleFallbackRadius)
+                    {
+                        continue;
+                    }
+                }
 
                 var label = GetObjectLabelSafe(obj);
                 if (category == NavCategory.LoadedPallets || category == NavCategory.EmptyPallets)
@@ -2908,6 +2953,20 @@ internal static class ObjectNavigator
             return true;
         }
 
+        // Vendors: anything you can trade with (the traveling merchant, the egg seller's basket,
+        // etc.). The definitive signal is a VendorDefinition keyed by obj_id — the exact lookup
+        // WorldGameObject.vendor / Trading does to build the trade, so it matches the game exactly
+        // and catches every vendor without hard-coding ids. Some vendors are NPCs and some are plain
+        // script objects (the egg stall has no craft, so it used to fall through to Other); checked
+        // BEFORE the People/NPC branch so a vendor NPC files under Vendors rather than being buried
+        // among ordinary townsfolk. O(1) cached dictionary hit, guarded so a bad cache can't break
+        // the pass.
+        if (!string.IsNullOrEmpty(obj.obj_id) && IsVendor(obj.obj_id))
+        {
+            category = NavCategory.Vendors;
+            return true;
+        }
+
         // People: NPCs and mobs.
         try
         {
@@ -3068,6 +3127,39 @@ internal static class ObjectNavigator
                 && GameBalance.me.GetDataOrNull<ReservoirsDefinition>(objId) != null;
         }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// True when an obj_id names something you can trade with — i.e. GameBalance holds a
+    /// VendorDefinition (the vendor's stock/pricing table, keyed by obj_id) for it. This is the same
+    /// lookup <c>WorldGameObject.vendor</c> and <c>Trading</c> use to build the trade, so it matches
+    /// the game exactly and needs no hard-coded id list. O(1) cached dictionary hit once GameBalance's
+    /// cache is built (it is, in-game); wrapped in a try/catch so a missing cache/type can never break
+    /// the whole classification pass.
+    /// </summary>
+    private static bool IsVendor(string objId)
+    {
+        try
+        {
+            return GameBalance.me != null
+                && GameBalance.me.GetDataOrNull<VendorDefinition>(objId) != null;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// The scored WorldZone a world object geometrically sits in (the game's own
+    /// <c>GetMyWorldZone</c>, a physics OverlapPoint on the zone layer), or null when it's in no
+    /// zone or the object is missing/removed. Guarded so a malformed object can't break the refresh.
+    /// </summary>
+    private static WorldZone SafeWorldZone(WorldGameObject obj)
+    {
+        try
+        {
+            if (obj == null || obj.is_removed || obj.gameObject == null) return null;
+            return obj.GetMyWorldZone();
+        }
+        catch { return null; }
     }
 
     /// <summary>
