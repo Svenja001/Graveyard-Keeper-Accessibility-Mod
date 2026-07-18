@@ -112,6 +112,22 @@ internal static class ObjectNavigator
     private static bool _hasLastPlayerPos = false;
     private static int _teleportRescanFramesLeft = 0;
 
+    // Room-switch detection. Walking through a door swaps which objects are culled/active and flips
+    // the interior sight-block state, but it is NOT a position jump, so the teleport path above never
+    // fires and the object list would otherwise stay stale until the next 30-frame refresh boundary
+    // (up to ~0.5s late — bad for timing-sensitive things). We watch the game's interior lighting
+    // state (Inside vs RealTime) and force an immediate refresh the frame it changes.
+    private static EnvironmentEngine.State _lastEnvironmentState = EnvironmentEngine.State.RealTime;
+    private static bool _hasLastEnvironmentState = false;
+    // After a room switch the destination objects don't all exist yet: entering an interior streams
+    // in / activates its objects over several frames, so a single immediate refresh catches an empty
+    // half-built room and the list then stays stale until the next 30-frame boundary. While this
+    // countdown is running we refresh on a much shorter interval so late-activating objects appear
+    // within a couple of frames instead of up to half a second later. Set on any room-state change.
+    private static int _fastRefreshFramesLeft = 0;
+    private const int FastRefreshWindowFrames = 60;   // ~1s of quick refreshes after a room switch
+    private const int FastRefreshInterval = 6;         // refresh every 6 frames during that window
+
     // Long-distance auto-walk: targets too far for the A* player-graph to path to in one go
     // (e.g. the Tavern from home) are walked in short hops. Each tick we aim a chunk-sized
     // step toward the target, snap it to walkable ground, and let native A* route that hop;
@@ -419,8 +435,35 @@ internal static class ObjectNavigator
                 StartWalk(_fallbackDest, _fallbackLabel, MovementComponent.GoToMethod.Direct);
             }
 
+            // Room-switch: force an immediate list refresh the frame the interior state flips
+            // (walking through a door culls/activates a whole different object set but isn't a
+            // position jump, so the teleport rescan path above misses it). Without this the list
+            // lags up to ~0.5s behind the room you're actually in. We also kick the same bounded
+            // navmesh rescan schedule the teleport path uses so pathing into the new room is ready.
+            {
+                var envState = EnvironmentEngine.me?.data?.state;
+                if (envState.HasValue)
+                {
+                    if (_hasLastEnvironmentState && envState.Value != _lastEnvironmentState)
+                    {
+                        _log?.LogInfo($"[NAVIGATOR] Room state changed ({_lastEnvironmentState} -> {envState.Value}), forcing immediate refresh + fast-refresh window");
+                        _updateCounter = UpdateInterval;   // trip the refresh below this same frame
+                        // Keep refreshing quickly for ~1s so objects that stream in / activate a few
+                        // frames after the switch (entering an interior) get picked up promptly — a
+                        // single immediate refresh would catch a half-built room and then go stale.
+                        _fastRefreshFramesLeft = FastRefreshWindowFrames;
+                        if (_teleportRescanFramesLeft <= 0)
+                            _teleportRescanFramesLeft = TeleportRescanTotalFrames;
+                    }
+                    _lastEnvironmentState = envState.Value;
+                    _hasLastEnvironmentState = true;
+                }
+            }
+
             _updateCounter++;
-            if (_updateCounter >= UpdateInterval)
+            int refreshInterval = _fastRefreshFramesLeft > 0 ? FastRefreshInterval : UpdateInterval;
+            if (_fastRefreshFramesLeft > 0) _fastRefreshFramesLeft--;
+            if (_updateCounter >= refreshInterval)
             {
                 _updateCounter = 0;
                 RefreshDestinations();
@@ -1820,6 +1863,8 @@ internal static class ObjectNavigator
         _rescanRetryPending = false;
         _teleportRescanFramesLeft = 0;
         _hasLastPlayerPos = false;
+        _hasLastEnvironmentState = false;
+        _fastRefreshFramesLeft = 0;
     }
 
     /// <summary>
