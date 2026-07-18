@@ -28,6 +28,7 @@ internal enum NavCategory
     Graves,
     ExhumableGraves,
     People,
+    Enemies,
     Vendors,
     Storage,
     LoadedPallets,
@@ -42,6 +43,7 @@ internal enum NavCategory
     Beehives,
     Gatherables,
     Breakables,
+    Destructibles,
     Fences,
     GravesToDecorate,
     Buildables,
@@ -67,6 +69,7 @@ internal static class ObjectNavigator
         NavCategory.Graves,
         NavCategory.ExhumableGraves,
         NavCategory.People,
+        NavCategory.Enemies,
         NavCategory.Vendors,
         NavCategory.Storage,
         NavCategory.LoadedPallets,
@@ -81,6 +84,7 @@ internal static class ObjectNavigator
         NavCategory.Beehives,
         NavCategory.Gatherables,
         NavCategory.Breakables,
+        NavCategory.Destructibles,
         NavCategory.Fences,
         NavCategory.GravesToDecorate,
         NavCategory.Buildables,
@@ -581,6 +585,7 @@ internal static class ObjectNavigator
         NavCategory.Graves => "Graves",
         NavCategory.ExhumableGraves => "Exhumable graves",
         NavCategory.People => "People",
+        NavCategory.Enemies => "Enemies",
         NavCategory.Vendors => "Vendors",
         NavCategory.Storage => "Storage",
         NavCategory.LoadedPallets => "Loaded pallets",
@@ -595,6 +600,7 @@ internal static class ObjectNavigator
         NavCategory.Beehives => "Beehives",
         NavCategory.Gatherables => "Gatherables",
         NavCategory.Breakables => "Breakables",
+        NavCategory.Destructibles => "Destructibles",
         NavCategory.Fences => "Broken fences",
         NavCategory.GravesToDecorate => "Graves to decorate",
         NavCategory.Buildables => "Built objects",
@@ -2148,19 +2154,22 @@ internal static class ObjectNavigator
                                            : (farReach ? MaxHarvestableNavDistance : MaxNavDistance);
                 if (distance > maxDist) continue;
 
-                // No x-ray of the town's characters through the walls: NPCs (People) and vendor
-                // NPCs (the traveling merchant) keep simulating while off-screen, so unlike static
-                // objects they stay active in the hierarchy and the cull above never drops them.
-                // (cur_environment is unreliable here — the game never sets it, so it can't tell an
-                // indoor NPC from an outdoor one.) When the player is in an enclosed interior, keep
-                // only people/vendors in the SAME scored WorldZone as the player — the tavern,
-                // church and cellar are all zones, so their occupants survive while the outdoor
-                // crowd (a different zone / no zone) drops out. If the player's interior isn't a
-                // zone (e.g. the home), fall back to a tight radius the spatially-offset outdoor
-                // crowd won't fall inside. GetMyWorldZone is a geometric physics query, run only for
-                // the handful of active People/Vendors while indoors.
-                if (interiorSightBlocked &&
-                    (category == NavCategory.People || category == NavCategory.Vendors))
+                // No x-ray of the town's characters through the walls: NPCs (People), enemies
+                // (Enemies) and vendor NPCs (the traveling merchant) keep simulating while
+                // off-screen, so unlike static objects they stay active in the hierarchy and the
+                // cull above never drops them. (cur_environment is unreliable here — the game never
+                // sets it, so it can't tell an indoor character from an outdoor one.) When the player
+                // is in an enclosed interior, keep only characters in the SAME scored WorldZone as
+                // the player — the tavern, church and cellar are all zones, so their occupants
+                // survive while the outdoor crowd (a different zone / no zone) drops out. If the
+                // player's interior isn't a zone (e.g. the home), fall back to a tight radius the
+                // spatially-offset outdoor crowd won't fall inside. Dungeon objects are exempt:
+                // there we deliberately reveal the whole self-contained level (isDungeonObj), so
+                // every enemy stays listed no matter how far. GetMyWorldZone is a geometric physics
+                // query, run only for the handful of active characters while indoors.
+                if (interiorSightBlocked && !isDungeonObj &&
+                    (category == NavCategory.People || category == NavCategory.Enemies ||
+                     category == NavCategory.Vendors))
                 {
                     if (interiorPlayerZone != null)
                     {
@@ -2967,12 +2976,25 @@ internal static class ObjectNavigator
             return true;
         }
 
-        // People: NPCs and mobs.
+        // Enemies (mobs) get their own category, split from townsfolk: a blind player in a dungeon
+        // wants to cycle enemies separately from People (and, above ground, keep wolves/monsters out
+        // of the villager list). Checked before the NPC branch because IsMob is the more specific
+        // signal. They still reveal across a whole dungeon level (that's driven by the isDungeonObj
+        // reveal in RefreshDestinations, which is category-agnostic).
         try
         {
-            if (def.type == ObjectDefinition.ObjType.NPC ||
-                def.type == ObjectDefinition.ObjType.Mob ||
-                def.IsNPC())
+            if (def.IsMob() || def.type == ObjectDefinition.ObjType.Mob)
+            {
+                category = NavCategory.Enemies;
+                return true;
+            }
+        }
+        catch { }
+
+        // People: townsfolk / NPCs.
+        try
+        {
+            if (def.type == ObjectDefinition.ObjType.NPC || def.IsNPC())
             {
                 category = NavCategory.People;
                 return true;
@@ -3063,6 +3085,18 @@ internal static class ObjectNavigator
                 if (IsBreakableLootProp(obj))
                 {
                     category = NavCategory.Breakables;
+                    return true;
+                }
+
+                // Tool-worked destructibles you TEAR DOWN with the Work key (F) for loot — dungeon
+                // broken furniture/barrels (chair/bench/barrel *_broken) that keep an Axe/Pickaxe/
+                // Shovel action + real drops (wood, planks). These have a "_broken" id and a loot
+                // keyword, so the spent-scenery skip just below would wrongly hide them. Checked here
+                // (before that skip and before the harvestable sort, which would call a broken chair
+                // a "tree") so a blind player gets a dedicated Destructibles list to walk to.
+                if (IsWorkedDestructible(obj, def))
+                {
+                    category = NavCategory.Destructibles;
                     return true;
                 }
 
@@ -3297,7 +3331,8 @@ internal static class ObjectNavigator
         category == NavCategory.Mushrooms ||
         category == NavCategory.Beehives ||
         category == NavCategory.Gatherables ||
-        category == NavCategory.Breakables;
+        category == NavCategory.Breakables ||
+        category == NavCategory.Destructibles;
 
     /// <summary>
     /// Classify a tool-worked / hand-gathered resource node into Trees, Stones, Ores, Bushes or
@@ -3321,6 +3356,44 @@ internal static class ObjectNavigator
     private static bool IsSpentBrokenProp(WorldGameObject obj) =>
         !string.IsNullOrEmpty(obj?.obj_id) &&
         obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0;
+
+    /// <summary>
+    /// A tool-worked destructible loot prop the player TEARS DOWN with the Work key (F), not a
+    /// combat smash (that's <see cref="IsBreakableLootProp"/> / the Breakables category, C/X).
+    /// These are dungeon broken furniture and barrels — dungeon_obj_chair/bench/table_*_broken,
+    /// barrelNN_broken — that keep an hp formula, a NON-sword tool_action (Axe/Pickaxe/Shovel:
+    /// chop/mine/dig) and real drops (wood, planks...). The generic "_broken → spent scenery" rule
+    /// (<see cref="IsSpentBrokenProp"/>) wrongly hides them because their id ends in "_broken" and
+    /// they carry a loot-prop keyword, so a blind player could never find or clear them. Scoped by
+    /// the loot-prop keyword so forest trees/stones/ore (no such keyword) never fall in here — those
+    /// keep their own Trees/Stones/Ores buckets. The drops>0 + tool requirement also excludes truly
+    /// inert broken scenery (vase01_broken: no tool, 0 drops) and worthless furniture with hp but no
+    /// tool/loot (dungeon_obj_table/rack: can't even be F-worked).
+    /// </summary>
+    private static bool IsWorkedDestructible(WorldGameObject obj, ObjectDefinition def)
+    {
+        try
+        {
+            if (def == null || def.hp == null) return false;
+            if (def.IsMob() || def.IsNPC() ||
+                def.type == ObjectDefinition.ObjType.NPC ||
+                def.type == ObjectDefinition.ObjType.Mob) return false;
+            if (def.drop_items == null || def.drop_items.Count == 0) return false;
+            if (!HasLootPropKeyword(obj)) return false;
+
+            var tools = def.tool_actions;
+            if (tools == null || tools.no_actions ||
+                tools.action_tools == null || tools.action_tools.Count == 0) return false;
+            // Must be a Work-key tool (chop/mine/dig/gather), not a Sword — a sword prop is a
+            // combat smash and belongs in Breakables, handled before this by IsBreakableLootProp.
+            var t = tools.action_tools[0];
+            return t == ItemDefinition.ItemType.Axe ||
+                   t == ItemDefinition.ItemType.Pickaxe ||
+                   t == ItemDefinition.ItemType.Shovel ||
+                   t == ItemDefinition.ItemType.Hand;
+        }
+        catch { return false; }
+    }
 
     /// <summary>
     /// Obj_id keyword for an explicit smashable loot prop — barrels/crates/vases/urns and generic
