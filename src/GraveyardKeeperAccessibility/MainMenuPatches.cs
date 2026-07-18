@@ -276,6 +276,25 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The zombie transport station: read whether a zombie is docked and what it's doing
+        // (so the player hears *why* nothing is moving), how many goods the route carries, and
+        // land on the first good so Enter toggles carrying right away.
+        if (gui is PorterStationGUI porterGui)
+        {
+            var porterRows = GetActiveElements();
+            var intro = PorterStationHandler.IntroFor(porterGui);
+            if (porterRows.Count > 0)
+            {
+                SelectedIndex = 0;
+                ScreenReader.Say($"{intro} {porterRows[0].ReadLabel()}");
+            }
+            else
+            {
+                ScreenReader.Say(intro);
+            }
+            return;
+        }
+
         // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
@@ -564,6 +583,15 @@ internal static class GUIAccessibility
         if (gui is GraveGUI grave)
         {
             DiscoverGraveParts(grave);
+            return;
+        }
+
+        // The zombie transport station: own the per-good check rows (and the take-zombie row)
+        // ourselves. The generic item-cell path would misread the 1/2 check flag as a stack
+        // count, and the generic buttons don't expose the carry toggle. See PorterStationHandler.
+        if (gui is PorterStationGUI porterStation)
+        {
+            PorterStationHandler.Discover(porterStation, Elements);
             return;
         }
 
