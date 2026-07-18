@@ -564,6 +564,22 @@ internal static class Patches
         return !BuildPlacementHandler.Active;
     }
 
+    // Announce a build the moment the game commits it. Our BuildPlacementHandler already says
+    // "X placed" when the PLAYER confirms with Enter, but some builds — the quest-line crate
+    // factory, elevator, etc. — are auto-placed by the game at a fixed spot the instant you pick
+    // them from the catalog, never touching our Enter path. That left a blind player with no cue
+    // the object was built. DoPlace is the single commit point for BOTH routes, so we hook it and
+    // let the handler suppress the duplicate when its own Enter path is what called DoPlace.
+    public static void DoPlace_Prefix()
+    {
+        BuildPlacementHandler.CaptureDoPlace();
+    }
+
+    public static void DoPlace_Postfix()
+    {
+        BuildPlacementHandler.AnnounceDoPlace();
+    }
+
     // The player pathfinder rescans its graph (graph 2) to a thin rectangle sized to
     // the straight player->destination line. That's too tight to route around fences
     // and walls (e.g. reaching a grave inside the cemetery), so A* fails even when the

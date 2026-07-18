@@ -318,6 +318,10 @@ internal static class BuildPlacementHandler
 
         try
         {
+            // Tell the DoPlace postfix to stay quiet: we announce "X placed" ourselves below, so
+            // the shared postfix (which exists for the game's own auto-placements) must not
+            // double-announce for this player-driven placement.
+            _manualPlaceInProgress = true;
             _doPlace?.Invoke(logics, null);
         }
         catch (Exception ex)
@@ -325,6 +329,10 @@ internal static class BuildPlacementHandler
             _log?.LogError($"[BUILD] DoPlace failed: {ex.Message}");
             ScreenReader.Say("Placement failed", interrupt: true);
             return;
+        }
+        finally
+        {
+            _manualPlaceInProgress = false;
         }
 
         ScreenReader.Say(string.IsNullOrEmpty(name) ? "Placed" : $"{name} placed", interrupt: true);
@@ -1133,6 +1141,69 @@ internal static class BuildPlacementHandler
         catch
         {
             return null;
+        }
+    }
+
+    // ---- generic build-commit announcement (DoPlace) ----------------------
+    //
+    // Set while our own Enter-confirm Place() is running so the DoPlace postfix it triggers
+    // doesn't double up on the "X placed" we already say.
+    private static bool _manualPlaceInProgress;
+    // Captured in the DoPlace prefix and consumed by the postfix: whether the commit will really
+    // place (same gate DoPlace itself uses) and the finished object's readable name.
+    private static bool _doPlaceWillPlace;
+    private static string _doPlaceName;
+
+    /// <summary>
+    /// DoPlace prefix hook. DoPlace bails early unless the spot is buildable and the zone has the
+    /// materials, so we evaluate that same gate here (before the floating ghost is consumed) and
+    /// stash the finished object's name for the postfix to announce.
+    /// </summary>
+    internal static void CaptureDoPlace()
+    {
+        _doPlaceWillPlace = false;
+        _doPlaceName = null;
+        try
+        {
+            var logics = Logics;
+            if (logics == null) return;
+            if (!FloatingWorldGameObject.can_be_built) return;
+            var cd = CurrentCraft();
+            if (cd == null || !logics.CanBuild(cd)) return;
+
+            _doPlaceWillPlace = true;
+
+            var objId = cd.out_obj;
+            if (!string.IsNullOrEmpty(objId) && objId.EndsWith("_place"))
+                objId = objId.Substring(0, objId.Length - "_place".Length);
+            _doPlaceName = string.IsNullOrEmpty(objId) ? null : InteractionDetector.LocalizedObjectName(objId);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[BUILD] CaptureDoPlace failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// DoPlace postfix hook. Announces builds the game commits on its own — e.g. a quest building
+    /// auto-placed at a fixed spot the instant it's picked from the catalog. Player-driven Enter
+    /// placements are already announced by <see cref="Place"/>, so those are suppressed here.
+    /// </summary>
+    internal static void AnnounceDoPlace()
+    {
+        try
+        {
+            if (!_doPlaceWillPlace || _manualPlaceInProgress) return;
+            ScreenReader.Say(string.IsNullOrEmpty(_doPlaceName) ? "Built" : $"{_doPlaceName} built", interrupt: true);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[BUILD] AnnounceDoPlace failed: {ex.Message}");
+        }
+        finally
+        {
+            _doPlaceWillPlace = false;
+            _doPlaceName = null;
         }
     }
 }

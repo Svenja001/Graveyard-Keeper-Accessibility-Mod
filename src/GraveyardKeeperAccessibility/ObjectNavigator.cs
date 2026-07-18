@@ -29,6 +29,8 @@ internal enum NavCategory
     ExhumableGraves,
     People,
     Storage,
+    LoadedPallets,
+    EmptyPallets,
     Stations,
     Trees,
     Stones,
@@ -65,6 +67,8 @@ internal static class ObjectNavigator
         NavCategory.ExhumableGraves,
         NavCategory.People,
         NavCategory.Storage,
+        NavCategory.LoadedPallets,
+        NavCategory.EmptyPallets,
         NavCategory.Stations,
         NavCategory.Trees,
         NavCategory.Stones,
@@ -529,6 +533,8 @@ internal static class ObjectNavigator
         NavCategory.ExhumableGraves => "Exhumable graves",
         NavCategory.People => "People",
         NavCategory.Storage => "Storage",
+        NavCategory.LoadedPallets => "Loaded pallets",
+        NavCategory.EmptyPallets => "Empty pallets",
         NavCategory.Stations => "Crafting stations",
         NavCategory.Trees => "Trees",
         NavCategory.Stones => "Stones",
@@ -2063,7 +2069,9 @@ internal static class ObjectNavigator
                 // 60-tile cap (no reach bump — they're not part of farReach). They stay valid culled.
                 bool builtCategory = category == NavCategory.Stations ||
                                      category == NavCategory.Buildables ||
-                                     category == NavCategory.Roofs;
+                                     category == NavCategory.Roofs ||
+                                     category == NavCategory.LoadedPallets ||
+                                     category == NavCategory.EmptyPallets;
                 bool keepIfCulled =
                     ((farReach || builtCategory) && !interiorSightBlocked) || isDungeonObj;
                 if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
@@ -2075,6 +2083,8 @@ internal static class ObjectNavigator
                 if (distance > maxDist) continue;
 
                 var label = GetObjectLabelSafe(obj);
+                if (category == NavCategory.LoadedPallets || category == NavCategory.EmptyPallets)
+                    label = PalletLabel(obj, label);
                 _byCategory[category].Add(new NavigationTarget
                 {
                     Object = obj,
@@ -2784,6 +2794,30 @@ internal static class ObjectNavigator
         catch { return false; }
     }
 
+    // Number of crates currently on a pallet (sums the stack values of its inventory). Reads the
+    // serialized data.inventory, which is valid even while the pallet is culled/inactive.
+    internal static int PalletCrateCount(WorldGameObject obj)
+    {
+        try
+        {
+            var inv = obj?.data?.inventory;
+            if (inv == null) return 0;
+            int n = 0;
+            foreach (var it in inv)
+                if (it != null && !it.IsEmpty()) n += it.value;
+            return n;
+        }
+        catch { return 0; }
+    }
+
+    // Append the crate count to a loaded pallet's list label ("Palette, 2 crates"); empty pallets
+    // keep their plain localized name (the "Empty pallets" category already conveys the state).
+    private static string PalletLabel(WorldGameObject obj, string baseLabel)
+    {
+        int n = PalletCrateCount(obj);
+        return n <= 0 ? baseLabel : $"{baseLabel}, {n} {(n == 1 ? "crate" : "crates")}";
+    }
+
     private static bool TryClassify(WorldGameObject obj, out NavCategory category)
     {
         category = NavCategory.Other;
@@ -2877,6 +2911,17 @@ internal static class ObjectNavigator
             obj.obj_id.IndexOf("roof", StringComparison.OrdinalIgnoreCase) >= 0)
         {
             category = NavCategory.Roofs;
+            return true;
+        }
+
+        // Shipping pallets (box_pallet) split into two navigable buckets by whether they hold
+        // crates: LoadedPallets (has crates to grab with E) vs EmptyPallets (room to leave a crate
+        // you're carrying). Checked before the interaction_type switch because a pallet is a
+        // RunScript object with a removal craft and would otherwise fall into Buildables/Other.
+        if (!string.IsNullOrEmpty(obj.obj_id) &&
+            obj.obj_id.IndexOf("pallet", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            category = PalletCrateCount(obj) > 0 ? NavCategory.LoadedPallets : NavCategory.EmptyPallets;
             return true;
         }
 

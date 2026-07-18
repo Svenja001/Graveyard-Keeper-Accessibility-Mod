@@ -51,7 +51,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target);
+                        var label = WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target), target);
                         ScreenReader.Say(label, interrupt: true);
                         _lastAnnouncedObject = target.name;
                     }
@@ -64,7 +64,7 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var label = WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby);
+                    var label = WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
@@ -1007,6 +1007,84 @@ internal static class InteractionDetector
             return label;
         }
     }
+
+    // A pallet (box_pallet, plus the merchant/sale pallets — any obj whose id contains "pallet")
+    // holds the shipping crates for the merchant-selling / zombie-logistics questline. A sighted
+    // player can see at a glance whether a pallet is empty, holds crates to grab, or is full; a
+    // blind player pressing E just gets a crate silently put on their head (or nothing). Append the
+    // pallet's state so the player knows BEFORE pressing E what will happen:
+    //   - carrying a crate  -> whether there's room to leave it here
+    //   - hands free + crates -> what's on it and that E takes one
+    //   - empty              -> "empty pallet"
+    private static string WithPalletInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(label) || !IsCratePallet(wgo) || wgo.data == null)
+                return label;
+
+            var inv = wgo.data.inventory;
+            int crateCount = 0;
+            string firstCrateId = null;
+            var parts = new List<string>();
+            if (inv != null)
+            {
+                foreach (var it in inv)
+                {
+                    if (it == null || it.IsEmpty() || it.definition == null) continue;
+                    crateCount += it.value;
+                    if (firstCrateId == null) firstCrateId = it.id;
+                    string nm = null;
+                    try { nm = ScreenReader.StripNguiCodes(it.definition.GetItemName() ?? "").Trim(); } catch { }
+                    if (string.IsNullOrEmpty(nm)) nm = it.id;
+                    parts.Add(it.value > 1 ? $"{it.value} {nm}" : nm);
+                }
+            }
+
+            // If the player is already carrying a crate, the useful question is "can I drop it here".
+            var ch = MainGame.me?.player?.components?.character;
+            var carried = (ch != null && ch.has_overhead) ? ch.GetOverheadItem() : null;
+            bool carryingCrate = carried?.definition != null && carried.definition.is_crate;
+
+            if (carryingCrate)
+            {
+                bool room = false;
+                try { room = wgo.data.CanAddCount(carried.id, true) > 0; } catch { }
+                var here = crateCount == 0
+                    ? "empty pallet"
+                    : $"pallet holds {crateCount} {(crateCount == 1 ? "crate" : "crates")}: {string.Join(", ", parts)}";
+                var verdict = room ? "you can leave your crate here" : "no room for your crate here";
+                return $"{label}. {Capitalize(here)}. {verdict}";
+            }
+
+            if (crateCount == 0)
+                return $"{label}. Empty pallet";
+
+            bool full = false;
+            if (firstCrateId != null)
+            {
+                try { full = wgo.data.CanAddCount(firstCrateId, true) <= 0; } catch { }
+            }
+            var fullNote = full ? ", full" : "";
+            return $"{label}. Pallet, {crateCount} {(crateCount == 1 ? "crate" : "crates")}: {string.Join(", ", parts)}{fullNote}. Press E to take a crate";
+        }
+        catch
+        {
+            return label;
+        }
+    }
+
+    // A pallet is any world object whose id contains "pallet" (box_pallet and the merchant sale
+    // pallets). Kept to the id substring on purpose: matching "accepts a crate" would also catch
+    // chests that happen to hold one, and E on a chest opens it rather than taking a crate.
+    private static bool IsCratePallet(WorldGameObject wgo)
+    {
+        if (wgo?.obj_def == null) return false;
+        return (wgo.obj_id ?? "").IndexOf("pallet", System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static string Capitalize(string s)
+        => string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1);
 
     // Stations whose own localized name is too generic to navigate by. mf_alchemy_survey is the
     // study/research table — you study items for tech points, and decompose notes/paper/books for

@@ -50,6 +50,13 @@ public class Plugin : BaseUnityPlugin
         TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.MoveObjectToMouse_Prefix),
             typeof(BuildModeLogics), "MoveObjectToMouse", Type.EmptyTypes);
 
+        // Announce every build the game commits (DoPlace), including quest buildings the game
+        // auto-places instantly (crate factory, elevator) that bypass our Enter-confirm flow.
+        // DoPlace is a private, parameterless method. See Patches.DoPlace_* / BuildPlacementHandler.
+        TryPatchPrefixPostfix(harmony, typeof(Patches),
+            nameof(Patches.DoPlace_Prefix), nameof(Patches.DoPlace_Postfix),
+            typeof(BuildModeLogics), "DoPlace", Type.EmptyTypes);
+
         // After auto-walk, bias the game's E-interaction onto the object the player navigated to so a
         // closer neighbour (chest beside a bed, etc.) doesn't steal it. FindCurrentInteractionNearest
         // is a private, parameterless method. See Patches.InteractionComponent_*_Postfix.
