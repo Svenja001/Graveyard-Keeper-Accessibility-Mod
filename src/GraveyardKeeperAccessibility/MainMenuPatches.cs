@@ -262,6 +262,20 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The resurrection table: announce the full state up-front (corpse present? condition?
+        // materials in reach?) so the player immediately hears why a resurrection can or can't
+        // happen, then land on the Resurrect action so Enter is one press away. Without this the
+        // player only ever heard the bare button "Wiederbeleben" and pressing it did nothing.
+        if (gui is ResurrectionGUI resurrectionGui)
+        {
+            var rows = GetActiveElements();
+            // Focus the Resurrect action (element index 1: after the status row) when present.
+            int resurrectIdx = rows.FindIndex(e => e.Label != null && e.Label.StartsWith("Resurrect"));
+            SelectedIndex = resurrectIdx >= 0 ? resurrectIdx : (rows.Count > 0 ? 0 : -1);
+            ScreenReader.Say($"Resurrection table. {ResurrectStatus(resurrectionGui)}");
+            return;
+        }
+
         // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
@@ -472,6 +486,20 @@ internal static class GUIAccessibility
         if (gui is OrganEnhancerGUI organEnhancerGui)
         {
             DiscoverOrganEnhancer(organEnhancerGui);
+            return;
+        }
+
+        // The resurrection table (ResurrectionGUI, "Auferstehungstisch"): lay a corpse on it, then
+        // press "Wiederbeleben" to turn it into a zombie worker. The resurrect button is a private
+        // UIButton that the generic path DOES find, but it gives no hint WHY it does nothing when
+        // pressed — the game silently ignores the press unless a corpse is present, that corpse is
+        // fresh enough (condition >= 90%), AND the zombie-craft resources are in reach (player
+        // inventory + nearby chests). A blind player can't see the greyed-out button or the "Keine
+        // Leiche"/"no corpse" text. Expose a state row + a resurrect button that reads exactly
+        // what's blocking it, and speaks the reason if pressed while not ready.
+        if (gui is ResurrectionGUI resurrectionGui)
+        {
+            DiscoverResurrection(resurrectionGui);
             return;
         }
 
@@ -1864,6 +1892,151 @@ internal static class GUIAccessibility
 
         AddStationCloseRow(gui, () => gui.OnClosePressed());
         Plugin.Log.LogInfo($"[ORGANENHANCER] discovered, {Elements.Count} element(s)");
+    }
+
+    private static FieldInfo _resurrectBodyField;
+
+    /// <summary>
+    /// The private corpse currently laid on the resurrection table (null when none). Mirrors the
+    /// game's own `_body` field, which is what CanCraftZombie gates on.
+    /// </summary>
+    private static Item GetResurrectBody(ResurrectionGUI gui)
+    {
+        try
+        {
+            _resurrectBodyField ??= AccessTools.Field(typeof(ResurrectionGUI), "_body");
+            return _resurrectBodyField?.GetValue(gui) as Item;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// The zombie-craft's material needs, split into the full list ("2 flesh, 5 wood") and the
+    /// shortfall the player is still missing. Counts come from the same reach-inventory the table
+    /// itself uses (player + nearby chests), so a resource sitting in a chest that's too far away
+    /// correctly reads as missing.
+    /// </summary>
+    private static void ResurrectNeeds(CraftDefinition craft, out List<string> all, out List<string> missing)
+    {
+        all = new List<string>();
+        missing = new List<string>();
+        var needs = craft?.needs;
+        if (needs == null || needs.Count == 0) return;
+
+        MultiInventory inv = null;
+        try { inv = MainGame.me.player.GetMultiInventoryForInteraction(); } catch { }
+
+        foreach (var need in needs)
+        {
+            if (need == null || string.IsNullOrEmpty(need.id)) continue;
+
+            var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
+            if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+            all.Add(need.value > 1 ? $"{need.value} {iname}" : iname);
+
+            int have = 0;
+            try { have = inv != null ? inv.GetTotalCount(need.id) : 0; } catch { }
+            int shortfall = need.value - have;
+            if (shortfall > 0)
+                missing.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
+        }
+    }
+
+    /// <summary>
+    /// True when a press of "Wiederbeleben" would actually resurrect: a corpse is present, fresh
+    /// enough (condition >= 90%), and all materials are in reach. Reproduces the game's private
+    /// CanCraftZombie so we can explain the block instead of pressing a dead button.
+    /// </summary>
+    private static bool ResurrectReady(ResurrectionGUI gui)
+    {
+        var body = GetResurrectBody(gui);
+        if (body == null || body.durability < 0.9f) return false;
+        ResurrectNeeds(GameBalance.me.GetData<CraftDefinition>("zombie_craft"), out _, out var missing);
+        return missing.Count == 0;
+    }
+
+    /// <summary>
+    /// A full spoken status of the resurrection table: corpse presence and condition, the required
+    /// materials, and exactly what's blocking a resurrection right now.
+    /// </summary>
+    private static string ResurrectStatus(ResurrectionGUI gui)
+    {
+        var body = GetResurrectBody(gui);
+        ResurrectNeeds(GameBalance.me.GetData<CraftDefinition>("zombie_craft"), out var all, out var missing);
+        string needsPhrase = all.Count > 0 ? $"Needs {string.Join(", ", all)}." : "";
+
+        if (body == null)
+            return $"No corpse on the table. Lay a corpse here first. {needsPhrase}".Trim();
+
+        int cond = Mathf.RoundToInt(Mathf.Clamp01(body.durability) * 100f);
+        if (body.durability < 0.9f)
+            return $"Corpse condition {cond} percent, too decayed to resurrect. Needs at least 90 percent. {needsPhrase}".Trim();
+
+        if (missing.Count > 0)
+            return $"Corpse ready, condition {cond} percent. {needsPhrase} You still need {string.Join(", ", missing)}, check they're in your inventory or a chest nearby.".Trim();
+
+        return $"Corpse ready, condition {cond} percent. {needsPhrase} Ready to resurrect, press Enter.".Trim();
+    }
+
+    /// <summary>
+    /// The resurrection table (ResurrectionGUI). See the dispatch comment in DiscoverElements for
+    /// why the generic path leaves a blind player stuck: the resurrect button is found but never
+    /// says why nothing happens. Expose a live status row, a resurrect action that reads its own
+    /// block reason (and only presses when it would work), a "take corpse back" row, and Close.
+    /// </summary>
+    private static void DiscoverResurrection(ResurrectionGUI gui)
+    {
+        // Status row — read-only; arrow onto it any time to re-hear corpse/resource state.
+        Elements.Add(new GUIElement
+        {
+            Go = gui.gameObject,
+            Label = ResurrectStatus(gui),
+            ReadDynamic = () => ResurrectStatus(gui),
+            Type = ElementType.Button
+        });
+
+        // The resurrect action. Anchor it to the always-active GUI root, not resurrect_btn's
+        // GameObject: the game sets that button inactive when the corpse is too decayed, which would
+        // filter this row out of navigation exactly when the player needs to hear why. Only press
+        // the game's own OnPressedResurrect when it would actually craft; otherwise speak the block
+        // reason so the player isn't left wondering.
+        Elements.Add(new GUIElement
+        {
+            Go = gui.gameObject,
+            Label = ResurrectReady(gui) ? "Resurrect, ready. Press Enter" : $"Resurrect. {ResurrectStatus(gui)}",
+            ReadDynamic = () => ResurrectReady(gui) ? "Resurrect, ready. Press Enter" : $"Resurrect. {ResurrectStatus(gui)}",
+            Type = ElementType.Button,
+            OnActivate = () =>
+            {
+                if (!ResurrectReady(gui))
+                {
+                    ScreenReader.Say(ResurrectStatus(gui));
+                    return;
+                }
+                try { gui.OnPressedResurrect(); }
+                catch (Exception ex) { Plugin.Log.LogWarning($"[RESURRECT] press failed: {ex.Message}"); }
+            }
+        });
+
+        // Take the corpse back off the table (the game's own "remove body" action). Only useful
+        // when a corpse is present; the window closes and the body returns to the player's hands.
+        if (GetResurrectBody(gui) != null)
+        {
+            Elements.Add(new GUIElement
+            {
+                Go = gui.gameObject,
+                Label = "Take corpse back",
+                Type = ElementType.Button,
+                OnActivate = () =>
+                {
+                    try { gui.DropBody(); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[RESURRECT] drop body failed: {ex.Message}"); }
+                }
+            });
+        }
+
+        AddStationCloseRow(gui, () => gui.OnClosePressed());
+        Plugin.Log.LogInfo($"[RESURRECT] discovered, {Elements.Count} element(s)");
     }
 
     /// <summary>
