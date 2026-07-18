@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "Automatycznie ustawia fokus na przycisk Stwórz przy graniu na padzie.",
   "cfg.force_multi_craft.name": "Wymuś tworzenie wielokrotne",
   "cfg.force_multi_craft.desc": "Sprawia, że niemal każdy przedmiot do stworzenia można kolejkować.",
+  "cfg.allow_multiquality_multicraft.name": "Zezwól na wieloraką wytwórczość jakościową",
+  "cfg.allow_multiquality_multicraft.desc": "Domyślnie wyłączone. Przedmioty jakościowe (stalowe dłuta, rzeźbione popiersia, jedzenie jakościowe itp.) nie mogą zachować wybranego poziomu gwiazdki w kolejce wytwarzania, więc kolejkowanie więcej niż jednego jest zawodne. Pozostawione wyłączone, wytwarzasz je pojedynczo, co zawsze działa. Włącz tylko jeśli akceptujesz, że zakolejkowane wyroby jakościowe mogą wyjść z niewłaściwą gwiazdką lub pokazać fałszywy komunikat 'brak przedmiotów'.",
+  "mqmc.warning.title": "Queue Everything: ryzykowne ustawienie",
+  "mqmc.warning.body": "Wieloraka wytwórczość jakościowa jest teraz włączona.\n\nKolejka wytwarzania w grze nie może zapisać, jaką jakość gwiazdki wybrałeś, więc kolejkując więcej niż jeden wyrób jakościowy (stalowe dłuta, rzeźbione popiersia, jedzenie jakościowe i podobne), dodatkowe mogą wyjść z niewłaściwą gwiazdką lub gra może błędnie powiedzieć, że nie masz przedmiotów.\n\nPojedyncze wyroby nie są dotknięte. Jeśli widzisz dziwne wyniki, wyłącz to ponownie.",
   "cfg.check_for_updates.name": "Sprawdź aktualizacje",
   "cfg.check_for_updates.desc": "Wyświetla powiadomienie w menu głównym, gdy na NexusMods pojawi się nowsza wersja tego moda. Kliknij powiadomienie, aby otworzyć stronę moda."
 }

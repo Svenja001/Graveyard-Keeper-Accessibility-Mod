@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "Move automaticamente o foco para o botão fabricar ao usar controle.",
   "cfg.force_multi_craft.name": "Forçar fabricação múltipla",
   "cfg.force_multi_craft.desc": "Permite enfileirar quase todos os itens fabricáveis.",
+  "cfg.allow_multiquality_multicraft.name": "Permitir fabricação múltipla de qualidade",
+  "cfg.allow_multiquality_multicraft.desc": "Desativado por padrão. Itens de qualidade (formões de aço, bustos esculpidos, comida de qualidade, etc.) não conseguem manter o nível de estrela escolhido na fila de fabricação, então enfileirar mais de um é pouco confiável. Deixado desativado, você os fabrica um de cada vez, o que sempre funciona. Ative apenas se aceitar que fabricações de qualidade na fila podem sair com a estrela errada ou mostrar uma falsa mensagem de 'itens insuficientes'.",
+  "mqmc.warning.title": "Queue Everything: configuração arriscada",
+  "mqmc.warning.body": "A fabricação múltipla de qualidade está agora ativada.\n\nA fila de fabricação do jogo não consegue guardar qual qualidade de estrela você escolheu, então ao enfileirar mais de um item de qualidade (formões de aço, bustos esculpidos, comida de qualidade e similares) os adicionais podem sair com a estrela errada, ou o jogo pode dizer erroneamente que você não tem os itens.\n\nFabricações individuais não são afetadas. Se vir resultados estranhos, desative novamente.",
   "cfg.check_for_updates.name": "Verificar atualizações",
   "cfg.check_for_updates.desc": "Mostra um aviso no menu principal quando há uma nova versão deste mod no NexusMods. Clique no aviso para abrir a página do mod."
 }

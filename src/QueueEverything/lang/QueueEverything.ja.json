@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "コントローラー使用時に作成ボタンへ自動でフォーカスします。",
   "cfg.force_multi_craft.name": "複数クラフトを強制",
   "cfg.force_multi_craft.desc": "ほぼすべてのクラフト可能アイテムをキュー可能にします。",
+  "cfg.allow_multiquality_multicraft.name": "高品質アイテムのまとめ作成を許可",
+  "cfg.allow_multiquality_multicraft.desc": "既定ではオフ。品質のあるアイテム（鋼のノミ、彫像、品質のある料理など）は選んだ星の品質を作成キューに保持できないため、複数をキューに入れると不安定です。オフのままなら1つずつ作成でき、これは常に正常に動作します。キューに入れた品質作成が違う星で出たり、誤って『アイテムが足りない』と表示されることを承知の上でのみオンにしてください。",
+  "mqmc.warning.title": "Queue Everything：リスクのある設定",
+  "mqmc.warning.body": "高品質アイテムのまとめ作成がオンになりました。\n\nゲームの作成キューは選んだ星の品質を保存できないため、品質のある作成（鋼のノミ、彫像、品質のある料理など）を複数キューに入れると、追加分が違う星で出たり、アイテムを持っているのに『足りない』と誤表示されることがあります。\n\n1つずつの作成には影響しません。おかしな結果が出たら、これをオフに戻してください。",
   "cfg.check_for_updates.name": "アップデートを確認",
   "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。"
 }

@@ -430,6 +430,7 @@ public static class CraftComponentPatches
     private static bool TryApplyForcedMultiCraft(CraftDefinition craft, CraftSnapshot snap)
     {
         if (!Plugin.ForceMultiCraft.Value || snap.IsAuto || Plugin.IsUnsafeDefinition(craft)) return false;
+        if (craft.IsMultiqualityOutput() && !Plugin.AllowMultiQualityMultiCraft.Value) return false;
 
         craft.force_multi_craft = true;
         craft.disable_multi_craft = false;
@@ -538,6 +539,15 @@ public static class CraftDefinitionPatches
     public static void CraftDefinition_CanCraftMultiple(CraftDefinition __instance, ref bool __result)
     {
         if (__instance is ObjectCraftDefinition) return;
+
+        // Quality items can't carry their chosen star through the craft queue, so multicraft
+        // is unreliable for them. Block it unless the player opts in (which shows a warning).
+        if (__instance.IsMultiqualityOutput() && !Plugin.AllowMultiQualityMultiCraft.Value)
+        {
+            if (Plugin.DebugEnabled) Plugin.WriteLog($"[CanCraftMultiple] {__instance.id}: multi-quality output, opt-in off → false");
+            __result = false;
+            return;
+        }
 
         if (!Plugin.ForceMultiCraft.Value || Plugin.IsUnsafeDefinition(__instance))
         {

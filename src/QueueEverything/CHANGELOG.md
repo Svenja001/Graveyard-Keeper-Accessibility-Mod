@@ -3,6 +3,8 @@
 ## 2.2.0 | 18 July 2026
 
 - Fixed the +1 / -1 arrows in the expanded craft view changing the amount by two per click
+- Quality items no longer offer unreliable multicraft by default; the game's queue can't keep your chosen star, which caused false "not enough items" errors
+- Added an opt-in Allow Multi-Quality Multicraft setting (shows a warning) for anyone who still wants it
 
 ## 2.1.15 | 19 May 2026
 

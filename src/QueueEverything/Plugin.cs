@@ -21,6 +21,7 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> AutoSelectHighestQualRecipe { get; private set; }
     internal static ConfigEntry<bool> AutoSelectCraftButtonWithController { get; private set; }
     internal static ConfigEntry<bool> ForceMultiCraft { get; private set; }
+    internal static ConfigEntry<bool> AllowMultiQualityMultiCraft { get; private set; }
 
     internal static ConfigEntry<float> FcTimeAdjustment { get; private set; }
     internal static ConfigEntry<bool> Debug { get; private set; }
@@ -131,10 +132,17 @@ public class Plugin : BaseUnityPlugin
 
         ForceMultiCraft = LocalizedConfig.Bind(Config, ConvenienceSection, "Force Multi Craft", true, "force_multi_craft", order: 96);
 
+        AllowMultiQualityMultiCraft = LocalizedConfig.Bind(Config, ConvenienceSection, "Allow Multi-Quality Multicraft", false, "allow_multiquality_multicraft", order: 95);
+
         AutoCraft.SettingChanged      += OnCraftSettingChanged;
         HalfFireRequirements.SettingChanged += OnCraftSettingChanged;
         HalfCraftOutputs.SettingChanged     += OnCraftSettingChanged;
         ForceMultiCraft.SettingChanged      += OnCraftSettingChanged;
+        AllowMultiQualityMultiCraft.SettingChanged += OnCraftSettingChanged;
+        AllowMultiQualityMultiCraft.SettingChanged += (_, _) =>
+        {
+            if (AllowMultiQualityMultiCraft.Value) ShowMultiQualityMulticraftWarning();
+        };
         foreach (var entry in CategoryToggles.Values)
         {
             entry.SettingChanged += OnCraftSettingChanged;
@@ -214,6 +222,12 @@ public class Plugin : BaseUnityPlugin
         }
 
         return false;
+    }
+
+    private static void ShowMultiQualityMulticraftWarning()
+    {
+        if (GUIElements.me?.dialog == null) return;
+        GUIElements.me.dialog.OpenOK(Lang.Get("mqmc.warning.title"), null, Lang.Get("mqmc.warning.body"), true, string.Empty);
     }
 
     internal static void WriteLog(string message, bool error = false)

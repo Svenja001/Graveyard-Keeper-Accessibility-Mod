@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "Coloca automáticamente el foco en el botón de fabricar al usar mando.",
   "cfg.force_multi_craft.name": "Forzar fabricación múltiple",
   "cfg.force_multi_craft.desc": "Permite encolar casi todos los objetos fabricables.",
+  "cfg.allow_multiquality_multicraft.name": "Permitir fabricación múltiple de calidad",
+  "cfg.allow_multiquality_multicraft.desc": "Desactivado por defecto. Los objetos de calidad (cinceles de acero, bustos tallados, comida de calidad, etc.) no pueden conservar el nivel de estrella elegido en la cola de fabricación, así que encolar más de uno no es fiable. Si lo dejas desactivado, los fabricas de uno en uno, lo cual siempre funciona. Actívalo solo si aceptas que los objetos de calidad en cola pueden salir con la estrella equivocada o mostrar un falso mensaje de 'no tienes los objetos'.",
+  "mqmc.warning.title": "Queue Everything: ajuste arriesgado",
+  "mqmc.warning.body": "La fabricación múltiple de calidad está ahora activada.\n\nLa cola de fabricación del juego no puede guardar qué calidad de estrella elegiste, así que al encolar más de un objeto de calidad (cinceles de acero, bustos tallados, comida de calidad y similares) los adicionales pueden salir con la estrella equivocada, o el juego puede decir por error que no tienes los objetos.\n\nLas fabricaciones individuales no se ven afectadas. Si ves resultados extraños, vuelve a desactivarlo.",
   "cfg.check_for_updates.name": "Buscar actualizaciones",
   "cfg.check_for_updates.desc": "Muestra un aviso en el menú principal cuando hay una versión más nueva de este mod en NexusMods. Haz clic en el aviso para abrir la página del mod."
 }

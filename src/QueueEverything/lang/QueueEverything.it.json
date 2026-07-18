@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "Mette automaticamente il focus sul pulsante crea quando si usa un controller.",
   "cfg.force_multi_craft.name": "Forza creazione multipla",
   "cfg.force_multi_craft.desc": "Rende quasi ogni oggetto creabile accodabile.",
+  "cfg.allow_multiquality_multicraft.name": "Consenti fabbricazione multipla di qualità",
+  "cfg.allow_multiquality_multicraft.desc": "Disattivato per impostazione predefinita. Gli oggetti di qualità (scalpelli d'acciaio, busti scolpiti, cibo di qualità, ecc.) non possono conservare il livello di stella scelto nella coda di fabbricazione, quindi accodarne più di uno è inaffidabile. Lasciandolo disattivato, li fabbrichi uno alla volta, cosa che funziona sempre. Attivalo solo se accetti che gli oggetti di qualità in coda possano uscire con la stella sbagliata o mostrare un falso messaggio 'oggetti insufficienti'.",
+  "mqmc.warning.title": "Queue Everything: impostazione rischiosa",
+  "mqmc.warning.body": "La fabbricazione multipla di qualità è ora attiva.\n\nLa coda di fabbricazione del gioco non può memorizzare quale qualità di stella hai scelto, quindi accodando più di un oggetto di qualità (scalpelli d'acciaio, busti scolpiti, cibo di qualità e simili) quelli aggiuntivi possono uscire con la stella sbagliata, o il gioco può dire erroneamente che non hai gli oggetti.\n\nLe fabbricazioni singole non sono influenzate. Se vedi risultati strani, disattivalo di nuovo.",
   "cfg.check_for_updates.name": "Controlla aggiornamenti",
   "cfg.check_for_updates.desc": "Mostra un avviso nel menu principale quando è disponibile una nuova versione di questo mod su NexusMods. Clicca sull'avviso per aprire la pagina del mod."
 }

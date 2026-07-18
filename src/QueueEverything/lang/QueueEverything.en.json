@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "Automatically focus the craft button when using a controller.",
   "cfg.force_multi_craft.name": "Force Multi Craft",
   "cfg.force_multi_craft.desc": "Make almost every craftable item queueable.",
+  "cfg.allow_multiquality_multicraft.name": "Allow Multi-Quality Multicraft",
+  "cfg.allow_multiquality_multicraft.desc": "Off by default. Quality items (steel chisels, carved busts, quality food, and so on) can't carry their chosen star tier through the craft queue, so queuing more than one is unreliable. Left off, you craft them one at a time, which always works. Turn it on only if you accept that queued quality crafts may come out the wrong star or show a false 'not enough items' message.",
+  "mqmc.warning.title": "Queue Everything: risky setting",
+  "mqmc.warning.body": "Multi-Quality Multicraft is now on.\n\nThe game's craft queue can't store which star quality you picked, so when you queue more than one quality craft (steel chisels, carved busts, quality food, and similar) the extras can come out the wrong star, or the game may wrongly say you don't have the items.\n\nSingle crafts are unaffected. If you see odd results, turn this back off.",
   "cfg.check_for_updates.name": "Check for Updates",
   "cfg.check_for_updates.desc": "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page."
 }
