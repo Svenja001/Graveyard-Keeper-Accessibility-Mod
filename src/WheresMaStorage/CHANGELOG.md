@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.1 | 18 July 2026
+
+- Equipped tools show again when choosing an item at the grindstone, research table and similar menus
+- The equipped-tools row in those menus is now labelled "Tools" instead of showing as the player row
+
 ## 2.2.0 | 20 June 2026
 
 - Apiary and cellar build desks now see items stored elsewhere instead of showing nothing

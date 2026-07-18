@@ -177,6 +177,23 @@ public static class Invents
 
     internal static void SetInventorySizeText(BaseInventoryWidget inventoryWidget)
     {
+        // The equipped-tools row is the vanilla "Instruments" inventory backed by the player's
+        // toolbelt. It has no sub_name, so the code below would read it as the player row and
+        // mislabel it. Give it a plain "Tools" header instead.
+        var toolbelt = MainGame.me?.player?.data?.secondary_inventory;
+        if (toolbelt != null && inventoryWidget.inventory_data?.inventory == toolbelt)
+        {
+            var toolsHeader = Lang.Get("Tools");
+            if (Plugin.ShowUsedSpaceInTitles.Value)
+            {
+                toolsHeader += $" - {inventoryWidget.inventory_data.inventory.Count}/{inventoryWidget.inventory_data.inventory_size}";
+            }
+
+            inventoryWidget.header_label.overflowMethod = UILabel.Overflow.ResizeFreely;
+            inventoryWidget.header_label.text = toolsHeader;
+            return;
+        }
+
         if (inventoryWidget.inventory_data.id.Contains(Fields.Writer)) return;
         if (inventoryWidget.header_label.text.Contains(Fields.Gerry)) return;
         if (!Plugin.ShowWorldZoneInTitles.Value && !Plugin.ShowUsedSpaceInTitles.Value) return;
