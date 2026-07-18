@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.0 | 18 July 2026
+
+- Fixed the +1 / -1 arrows in the expanded craft view changing the amount by two per click
+
 ## 2.1.15 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

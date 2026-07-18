@@ -41,6 +41,16 @@ public static class ExpandViewAmountButtons
         btn.name = buttonName;
         btn.transform.localPosition = localPos;
 
+        // The vanilla arrow fires OnAmountPlus/Minus from UIEventTrigger.onPress (down).
+        // That wiring is copied onto the clone, so drop it before adding our own onClick -
+        // otherwise the button counts once on press and again on release.
+        var trigger = btn.GetComponent<UIEventTrigger>();
+        if (trigger != null)
+        {
+            trigger.onPress.Clear();
+            trigger.onClick.Clear();
+        }
+
         var btnUi = btn.GetComponent<UIButton>();
         btnUi.normalSprite2D = sourceUi.normalSprite2D;
         btnUi.hoverSprite2D = sourceUi.hoverSprite2D;
