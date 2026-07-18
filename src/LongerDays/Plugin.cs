@@ -4,6 +4,7 @@ namespace LongerDays;
 public class Plugin : BaseUnityPlugin
 {
     private const string DayLengthSection = "── Day Length ──";
+    private const string AdvancedSection  = "── Advanced ──";
     private const string UpdatesSection   = "── Updates ──";
 
     internal const float MadnessSeconds = 1350f;
@@ -12,7 +13,9 @@ public class Plugin : BaseUnityPlugin
     internal const float DefaultIncreaseSeconds = 675f;
 
     internal static float Seconds;
-    private static TimestampedLogger Log { get; set; }
+    internal static TimestampedLogger Log { get; private set; }
+    internal static ConfigEntry<bool> Debug { get; private set; }
+    internal static bool DebugEnabled;
     private static ConfigEntry<float> DayLength { get; set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
@@ -20,6 +23,10 @@ public class Plugin : BaseUnityPlugin
     {
         Log = new TimestampedLogger(Logger);
         Lang.Init(Assembly.GetExecutingAssembly(), Log);
+
+        Debug = LocalizedConfig.Bind(Config, AdvancedSection, "Debug Logging", false, "debug_logging", order: 100);
+        DebugEnabled = Debug.Value;
+        Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
 
         DayLength = LocalizedConfig.Bind(Config, DayLengthSection, "Day Length", 675f, "day_length",
             new AcceptableValueList<float>(675f, 900f, 1125f, 1350f), order: 1,

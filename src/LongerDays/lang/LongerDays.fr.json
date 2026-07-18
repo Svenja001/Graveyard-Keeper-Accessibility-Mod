@@ -3,6 +3,9 @@
   "cfg.section.updates": "Mises à jour",
   "cfg.day_length.name": "Durée du jour",
   "cfg.day_length.desc": "Définis la durée d'une journée.",
+  "cfg.section.advanced": "Avancé",
+  "cfg.debug_logging.name": "Journalisation de débogage",
+  "cfg.debug_logging.desc": "Écrit des diagnostics du cycle de jour dans la console BepInEx : le numéro du jour et la probabilité de livraison de cadavres chaque jour. Utile pour signaler des problèmes de livraison. Laissez désactivé pour une partie normale.",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",
   "cfg.check_for_updates.desc": "Affiche un avis dans le menu principal lorsqu'une nouvelle version de ce mod est disponible sur NexusMods. Clique sur l'avis pour ouvrir la page du mod."
 }

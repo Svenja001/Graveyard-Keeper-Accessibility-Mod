@@ -3,6 +3,9 @@
   "cfg.section.updates": "Aktualisierungen",
   "cfg.day_length.name": "Tageslänge",
   "cfg.day_length.desc": "Lege die Länge eines Tages fest.",
+  "cfg.section.advanced": "Erweitert",
+  "cfg.debug_logging.name": "Debug-Protokollierung",
+  "cfg.debug_logging.desc": "Schreibt Tageszyklus-Diagnosen in die BepInEx-Konsole: Tagesnummer und die Leichenlieferungs-Chance pro Tag. Nützlich zum Melden von Lieferproblemen. Für normales Spielen deaktiviert lassen.",
   "cfg.check_for_updates.name": "Auf Updates prüfen",
   "cfg.check_for_updates.desc": "Zeigt im Hauptmenü einen Hinweis an, wenn auf NexusMods eine neuere Version dieses Mods verfügbar ist. Klicke auf den Hinweis, um die Modseite zu öffnen."
 }
