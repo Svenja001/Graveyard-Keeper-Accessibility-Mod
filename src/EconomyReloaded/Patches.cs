@@ -113,6 +113,32 @@ public static class Patches
         __result += __instance.vendor_data.GetParam(ProgressCreditKey);
     }
 
+    // With Aggressive Vendor Restock on, a shop rebalances each item's stock all the
+    // way back to its base count at end of day, the way the game does for fixed-price
+    // items, instead of the vanilla ~5%-per-day drift. This is what lets you sell bulk
+    // goods like coal to a vendor day after day. Only the end-of-day bank trade is
+    // touched here, so item pricing is unaffected.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(Vendor), nameof(Vendor.CalcPurchaseAtTheEndOfDay))]
+    public static bool Vendor_CalcPurchaseAtTheEndOfDay(Vendor __instance, ItemDefinition item_def, ref int __result)
+    {
+        if (!Plugin.AggressiveVendorRestock.Value) return true;
+        if (__instance == null || item_def == null) return true;
+
+        var modifiedBaseCount = __instance.GetModifiedBaseCount(item_def);
+        var itemsCount = __instance.GetItemsCount(item_def.id);
+
+        // Leave stock alone when it's already within 5% of the base count, same as vanilla.
+        if (modifiedBaseCount > 0 && Mathf.Abs((itemsCount - modifiedBaseCount) / (float) modifiedBaseCount) < 0.05f)
+        {
+            __result = 0;
+            return false;
+        }
+
+        __result = modifiedBaseCount - itemsCount;
+        return false;
+    }
+
     // Recomputes the trade balance at vanilla prices via the unpatched Vendor.GetSingleItemPrice.
     private static float ComputeVanillaTotalBalance(Trading t)
     {

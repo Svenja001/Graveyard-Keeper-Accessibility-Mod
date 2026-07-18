@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "Si está activado, los precios bajan cuando las tiendas se llenan. Si está desactivado, siempre el precio base.",
   "cfg.sell_price_multiplier.name": "Multiplicador de precio de venta",
   "cfg.sell_price_multiplier.desc": "Multiplicador final. 0,75 coincide con el juego base.",
+  "cfg.aggressive_vendor_restock.name": "Reabastecimiento agresivo de comerciantes",
+  "cfg.aggressive_vendor_restock.desc": "Cuando está activado, las tiendas reequilibran por completo su inventario y su dinero al final de cada día en lugar de recuperarse poco a poco. Esto permite vender las mismas mercancías a granel (como carbón) a un comerciante día tras día.",
   "cfg.check_for_updates.name": "Buscar actualizaciones",
   "cfg.check_for_updates.desc": "Muestra un aviso en el menú principal cuando hay una versión más nueva de este mod en NexusMods. Haz clic en el aviso para abrir la página del mod."
 }

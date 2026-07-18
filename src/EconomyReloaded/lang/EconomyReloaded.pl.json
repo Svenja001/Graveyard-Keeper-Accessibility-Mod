@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "Włączone: ceny spadają, gdy sklepy mają nadmiar. Wyłączone: zawsze cena bazowa.",
   "cfg.sell_price_multiplier.name": "Mnożnik ceny sprzedaży",
   "cfg.sell_price_multiplier.desc": "Końcowy mnożnik. 0,75 odpowiada grze bazowej.",
+  "cfg.aggressive_vendor_restock.name": "Agresywne uzupełnianie zapasów kupców",
+  "cfg.aggressive_vendor_restock.desc": "Gdy włączone, sklepy pod koniec każdego dnia w pełni wyrównują swoje zapasy i pieniądze, zamiast odbudowywać je stopniowo. Dzięki temu można sprzedawać te same towary hurtowe (np. węgiel) kupcowi dzień po dniu.",
   "cfg.check_for_updates.name": "Sprawdź aktualizacje",
   "cfg.check_for_updates.desc": "Wyświetla powiadomienie w menu głównym, gdy na NexusMods pojawi się nowsza wersja tego moda. Kliknij powiadomienie, aby otworzyć stronę moda."
 }

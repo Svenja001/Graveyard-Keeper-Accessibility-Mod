@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "Activé, les prix baissent quand les stocks se remplissent. Désactivé, toujours au prix de base.",
   "cfg.sell_price_multiplier.name": "Multiplicateur du prix de vente",
   "cfg.sell_price_multiplier.desc": "Multiplicateur final. 0,75 correspond au jeu de base.",
+  "cfg.aggressive_vendor_restock.name": "Réapprovisionnement agressif des marchands",
+  "cfg.aggressive_vendor_restock.desc": "Lorsque activé, les boutiques rééquilibrent entièrement leur stock et leur argent à la fin de chaque journée au lieu de se reconstituer progressivement. Cela permet de vendre les mêmes marchandises en gros (comme le charbon) à un marchand jour après jour.",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",
   "cfg.check_for_updates.desc": "Affiche un avis dans le menu principal lorsqu'une nouvelle version de ce mod est disponible sur NexusMods. Clique sur l'avis pour ouvrir la page du mod."
 }
