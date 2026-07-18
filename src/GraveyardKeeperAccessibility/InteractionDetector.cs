@@ -51,7 +51,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target), target);
+                        var label = WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target), target), target);
                         ScreenReader.Say(label, interrupt: true);
                         _lastAnnouncedObject = target.name;
                     }
@@ -64,7 +64,7 @@ internal static class InteractionDetector
             {
                 if (nearby.name != _lastAnnouncedObject)
                 {
-                    var label = WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby), nearby);
+                    var label = WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby), nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
                     _lastAnnouncedObject = nearby.name;
                 }
@@ -951,6 +951,56 @@ internal static class InteractionDetector
     internal static bool IsPrefab(WorldGameObject obj)
     {
         return obj.name.Contains("prefab") || obj.name.Contains("Prefab") || obj.name.Contains("template");
+    }
+
+    /// <summary>
+    /// Append a resurrected zombie worker's work values to its label. A zombie carries the quality of
+    /// the corpse it was raised from, exactly the way a body carries its skulls (see <see cref="SkullInfo"/>):
+    /// the game turns the corpse's usable white skulls into a work-efficiency figure
+    /// (<c>working_k = white_skulls / 40</c>, see <c>Worker.UpdateWorkerLevel</c>) that decides how fast the
+    /// zombie works its station. A sighted player reads this off the worker panel's skull bar / an overhead
+    /// number; a blind player got nothing at all. Voice the efficiency, the white-skull count behind it, and
+    /// which station the zombie is assigned to (or that it's idle). Non-workers pass through unchanged; the
+    /// invisible refugee-camp worker (no body, no station) is skipped.
+    /// </summary>
+    private static string WithZombieInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            if (wgo == null || !wgo.IsWorker() || wgo.IsInvisibleWorker())
+                return label;
+
+            // Compute the efficiency the game's own way: usable white skulls of the corpse behind the
+            // zombie, divided by 40, floored at one white skull (Worker.UpdateWorkerLevel). dont_count_self
+            // matches the game — the body item itself isn't counted, only its skull-bearing parts/organs.
+            int red = 0, white = 0;
+            try { wgo.data.GetBodySkulls(out red, out white, out int _, dont_count_self: true); } catch { }
+            int effWhite = white <= 0 ? 1 : white;
+            int pct = Mathf.RoundToInt(effWhite / 40f * 100f);
+
+            var value = $"{pct} percent work efficiency, {effWhite} white {(effWhite == 1 ? "skull" : "skulls")}";
+            // Red skulls don't slow a worker (only white feed working_k), but they're part of the same
+            // corpse value a player might be comparing against, so mention them when present.
+            if (red > 0)
+                value += $", {red} red {(red == 1 ? "skull" : "skulls")}";
+
+            // What the zombie is doing: its assigned station, or idle.
+            string job = null;
+            try
+            {
+                var bench = wgo.linked_workbench;
+                if (bench != null && !string.IsNullOrEmpty(bench.obj_id))
+                    job = LocalizedObjectName(bench.obj_id);
+            }
+            catch { }
+            var tail = string.IsNullOrEmpty(job) ? "not assigned to a station" : $"working at {job}";
+
+            return $"{label}. {value}. {tail}";
+        }
+        catch
+        {
+            return label;
+        }
     }
 
     /// <summary>
