@@ -3580,6 +3580,78 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
+    /// Distinct, informative label for a part of a zombie mine cluster (base building, production
+    /// bench, or enclosure fence), so the tracker doesn't read as a row of identical "Zombiemine"
+    /// entries. Benches are named by the resource they produce (the iron-vs-stone tell) plus their
+    /// staffing state; the empty bench is the one the player still needs to put a zombie on.
+    /// </summary>
+    private static string MineLabel(WorldGameObject obj)
+    {
+        const string mine = "Zombiemine";
+        string id = obj?.obj_id ?? "";
+        try
+        {
+            // Fences are just the enclosure walls — mark them so they don't masquerade as the
+            // interactable building/benches.
+            if (id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0)
+                return $"{mine} ({MineWord("fence")})";
+
+            // Production benches: name by output resource + whether a zombie is assigned.
+            if (id.IndexOf("bench", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                string product = MineBenchProduct(obj);
+                bool worker = false;
+                try { worker = obj.has_linked_worker; } catch { }
+                string state = worker ? MineWord("working") : MineWord("empty");
+                return string.IsNullOrEmpty(product)
+                    ? $"{mine}, {MineWord("bench")} ({state})"
+                    : $"{mine}: {product} ({state})";
+            }
+        }
+        catch { }
+
+        // The building base (obj_id "mine_zombie") and anything else in the cluster.
+        return mine;
+    }
+
+    /// <summary>Localized name of the resource a mine bench currently produces, or null if idle/unknown.</summary>
+    private static string MineBenchProduct(WorldGameObject obj)
+    {
+        try
+        {
+            var craft = (obj?.obj_def != null && obj.obj_def.has_craft) ? obj.components?.craft : null;
+            if (craft == null) return null;
+            var cd = craft.current_craft;
+            if (cd == null && craft.craft_queue != null && craft.craft_queue.Count > 0)
+                cd = craft.craft_queue[0].craft;
+            if (cd == null) return null;
+            var name = ScreenReader.StripNguiCodes(cd.GetFirstRealOutput()?.definition?.GetItemName() ?? "").Trim();
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Localized descriptor words used in mine labels.</summary>
+    private static string MineWord(string which)
+    {
+        string code = "";
+        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
+        switch (which)
+        {
+            case "fence":
+                return code switch { "de" => "Zaun", "fr" => "clôture", "es" => "valla", "it" => "recinto", "ru" => "забор", _ => "fence" };
+            case "bench":
+                return code switch { "de" => "Arbeitsplatz", "fr" => "poste", "es" => "puesto", "it" => "postazione", "ru" => "рабочее место", _ => "workbench" };
+            case "working":
+                return code switch { "de" => "Zombie arbeitet", "fr" => "zombie au travail", "es" => "zombi trabajando", "it" => "zombie al lavoro", "ru" => "зомби работает", _ => "zombie working" };
+            case "empty":
+                return code switch { "de" => "frei", "fr" => "vide", "es" => "vacío", "it" => "vuoto", "ru" => "пусто", _ => "empty" };
+            default:
+                return which;
+        }
+    }
+
+    /// <summary>
     /// Localized "broken, repair it" note appended to a broken build desk's navigator label so the
     /// player knows it can't be used to build yet. The actual repair materials are read out by the
     /// proximity/E repair readout (InteractionDetector.WithRepairInfo) when the player reaches it.
@@ -3619,6 +3691,22 @@ internal static class ObjectNavigator
                 obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "Broken morgue, can't throw bodies here";
+            }
+
+            // A placed zombie mine is a cluster of objects that ALL localize to the generic
+            // "Zombiemine": the building base (obj_id "mine_zombie"), two production benches
+            // ("mine_zombie_bench"), and the enclosure fences ("zombie_mine_fence*"). In the
+            // tracker that reads as a wall of identical "Zombiemine" entries, so a blind player
+            // can't tell the building from a fence, can't find the empty bench to staff, and —
+            // since two mines (e.g. a stone and an iron one) share the same obj_ids — can't tell
+            // which mine produces what. Give each part a distinct, informative label; benches are
+            // named by the resource they produce (localized, from the running craft) plus whether
+            // a zombie is assigned. That resource name is the reliable iron-vs-stone tell.
+            if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
+                (obj.obj_id.IndexOf("mine_zombie", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 obj.obj_id.IndexOf("zombie_mine", StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                return MineLabel(obj);
             }
 
             // Build desks (the "planning table" Gerry sends you to) localize to their zone
