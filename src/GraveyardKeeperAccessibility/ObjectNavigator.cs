@@ -2184,6 +2184,9 @@ internal static class ObjectNavigator
                 var label = GetObjectLabelSafe(obj);
                 if (category == NavCategory.LoadedPallets || category == NavCategory.EmptyPallets)
                     label = PalletLabel(obj, label);
+                // Worker zombies read out their efficiency + assignment here, since pressing E on
+                // one picks it up rather than inspecting it. No-op for non-workers.
+                label = InteractionDetector.AppendWorkerInfo(label, obj);
                 _byCategory[category].Add(new NavigationTarget
                 {
                     Object = obj,

@@ -963,6 +963,14 @@ internal static class InteractionDetector
     /// which station the zombie is assigned to (or that it's idle). Non-workers pass through unchanged; the
     /// invisible refugee-camp worker (no body, no station) is skipped.
     /// </summary>
+    /// <summary>
+    /// Append a worker zombie's efficiency + assignment to a label, for the object tracker. Pressing
+    /// E on a zombie PICKS IT UP, so the proximity/E readout can't be used to inspect one — the
+    /// player needs this while browsing the navigator instead. Returns the label unchanged for
+    /// anything that isn't a (visible) worker zombie, so it's safe to call on every tracked object.
+    /// </summary>
+    internal static string AppendWorkerInfo(string label, WorldGameObject wgo) => WithZombieInfo(label, wgo);
+
     private static string WithZombieInfo(string label, WorldGameObject wgo)
     {
         try
