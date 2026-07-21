@@ -548,6 +548,8 @@ public class Plugin : BaseUnityPlugin
                 AutoConsume.Toggle();
             else if (Input.GetKeyDown(KeyCode.Y) && !ctrl)
                 ToolbarHandler.ReadHotbar();
+            else if (Input.GetKeyDown(KeyCode.L) && !ctrl)
+                ObjectNavigator.WalkToDungeonExit();
         }
         catch (Exception ex)
         {

@@ -32,6 +32,11 @@ internal class GUIElement
     internal Action OnAdjustLeft;
     internal Action OnAdjustRight;
 
+    // Custom Delete-key handler. When set, DeleteSelected runs this instead of the built-in
+    // save-slot / inventory-destroy paths. Used by craft-queue rows (Delete removes the queued
+    // craft, matching the sighted player's per-row remove button).
+    internal Action OnDelete;
+
     // Computed label, re-evaluated on every read. Used for rows whose text changes in place
     // (e.g. an ingredient whose quality the player cycles with Left/Right). Takes precedence
     // over the static Label/ValueLabel reading below.
@@ -1608,7 +1613,104 @@ internal static class GUIAccessibility
             }
         }
 
+        // A station with a zombie worker builds up a craft queue (the zombie makes each queued
+        // craft in turn, drawing ingredients from nearby storage). List those queued crafts so the
+        // player can change the amount, set one endless ("unendlich"), or remove it.
+        DiscoverCraftQueue(craftGui);
+
         Plugin.Log.LogInfo($"[CRAFT] discovered {added} recipe(s)");
+    }
+
+    private static FieldInfo _queueCiField;
+
+    /// <summary>
+    /// Expose the craft queue (right-hand column of a station window). It only appears once a
+    /// station has a zombie worker and you've queued at least one craft — the zombie then makes
+    /// them one after another, pulling ingredients from nearby storage (there is no "hand it
+    /// materials" step). Sighted players hover a queued row to reveal +/- and an infinity (∞)
+    /// button; none of that is keyboard-reachable, so a blind player could enqueue a craft yet
+    /// never tell it landed, change how many, set it endless, or cancel it. Each queued craft
+    /// becomes its own row: Left/Right change the count, Enter toggles endless, Delete removes it.
+    /// Every mutation can rebuild the whole queue GUI (the game destroys and recreates the rows),
+    /// so each handler re-discovers via RefreshCurrentGUI rather than touching the stale row.
+    /// </summary>
+    private static void DiscoverCraftQueue(CraftGUI craftGui)
+    {
+        CraftQueueGUI queue;
+        try { queue = craftGui.queue; }
+        catch { return; }
+        if (queue == null || !queue.gameObject.activeInHierarchy) return;
+
+        CraftQueueItemGUI[] rows;
+        try { rows = queue.GetComponentsInChildren<CraftQueueItemGUI>(false); }
+        catch { return; }
+        if (rows == null) return;
+
+        foreach (var row in rows)
+        {
+            if (row == null || !row.gameObject.activeInHierarchy) continue;
+            var captured = row;
+            Elements.Add(new GUIElement
+            {
+                Go = row.gameObject,
+                Type = ElementType.Button,
+                ReadDynamic = () => CraftQueueRowLabel(captured),
+                OnActivate = () => { try { captured.OnInfinityButtonPressed(); } catch { } RefreshCurrentGUI(SelectedIndex); },
+                OnAdjustRight = () => { try { captured.OnIncreasePressed(); } catch { } RefreshCurrentGUI(SelectedIndex); },
+                OnAdjustLeft = () => { try { captured.OnDecreasePressed(); } catch { } RefreshCurrentGUI(SelectedIndex); },
+                OnDelete = () => { try { captured.OnDeletePressed(); } catch { } RefreshCurrentGUI(SelectedIndex); },
+            });
+        }
+    }
+
+    /// <summary>Spoken label for one craft-queue row: the craft name, its count (or "endless"),
+    /// and the keys that change it.</summary>
+    private static string CraftQueueRowLabel(CraftQueueItemGUI row)
+    {
+        string name = null;
+        bool infinite = false;
+        try
+        {
+            _queueCiField ??= AccessTools.Field(typeof(CraftQueueItemGUI), "_ci");
+            var ci = _queueCiField?.GetValue(row) as CraftComponent.CraftQueueItem;
+            if (ci != null)
+            {
+                infinite = ci.infinite;
+                var def = ci.craft;
+                if (def != null)
+                    name = ScreenReader.StripNguiCodes(GJL.L(def.GetNameNonLocalized()) ?? "").Trim();
+            }
+        }
+        catch { }
+        if (string.IsNullOrEmpty(name)) name = "item";
+
+        // The visible counter already folds in the currently-running craft (+1) and shows "∞"
+        // when endless, so prefer it for the number the player hears.
+        string countText = null;
+        try
+        {
+            var raw = row.counter?.text ?? "";
+            if (raw.Contains("∞")) infinite = true;
+            else countText = raw.TrimStart('x', 'X').Trim();
+        }
+        catch { }
+
+        string amountPart = infinite
+            ? "endless"
+            : (string.IsNullOrEmpty(countText) ? "queued" : $"{countText} queued");
+        return $"Queue: {name}, {amountPart}. Enter for endless, Left or Right to change amount, Delete to remove";
+    }
+
+    /// <summary>Whether this station accepts a zombie worker — i.e. selecting a recipe adds it to
+    /// the craft queue (which the zombie works through) instead of crafting it on the spot.</summary>
+    private static bool IsZombieQueueStation(CraftGUI craftGui)
+    {
+        try
+        {
+            var wgo = _crafteryWgoField?.GetValue(craftGui) as WorldGameObject;
+            return wgo?.obj_def != null && wgo.obj_def.can_insert_zombie;
+        }
+        catch { return false; }
     }
 
     /// <summary>
@@ -4048,6 +4150,11 @@ internal static class GUIAccessibility
                 // they can still make another (". Ready" -> ". Not enough materials").
                 if (!craftStation.is_shown)
                     ScreenReader.Say(CraftStartedMessage(craftStation, pressedCraftDef, pressedRecipeName, pressedAmount), interrupt: true);
+                else if (IsZombieQueueStation(craftStation))
+                    // A zombie station enqueues the craft instead of making it on the spot. Say so
+                    // (otherwise pressing a recipe seems to do nothing) — the new queue row is now
+                    // discoverable below, where the amount / endless / remove controls live.
+                    RefreshCurrentGUI(prevIndex, $"{pressedRecipeName} added to queue");
                 else
                     RefreshCurrentGUI(prevIndex);
             }
@@ -4120,6 +4227,15 @@ internal static class GUIAccessibility
         if (SelectedIndex < 0 || SelectedIndex >= active.Count) return;
 
         var elem = active[SelectedIndex];
+
+        // Rows that own their delete behaviour (e.g. a craft-queue item removing itself and
+        // re-reading the queue) run it directly and stop.
+        if (elem.OnDelete != null)
+        {
+            elem.OnDelete();
+            return;
+        }
+
         if (elem.SaveSlot != null)
         {
             elem.SaveSlot.OnDeletePressed();

@@ -726,6 +726,66 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
+    /// Emergency "take me to the way out" for dungeons (bound to L). Finds the up-exit
+    /// (obj_id "dungeon_exit", NOT the deeper gated "dungeon_exit2") among the loaded level's
+    /// objects and auto-walks there regardless of the current category or selection, so a blind
+    /// player can never be stranded on a level. We only POSITION at the exit — the player then
+    /// presses E to leave (the game's Save-and-Exit teleports to the mortuary, no need to clear
+    /// the level) or simply turns back to keep fighting. Locked arenas like level 10 spawn two
+    /// identically-generated exits and seal the downward one behind a grille; the way out,
+    /// however, is always the spawn-in point and is never gated, so this guarantees an escape.
+    /// </summary>
+    internal static void WalkToDungeonExit()
+    {
+        var dr = MainGame.me?.dungeon_root;
+        if (dr == null || !dr.dungeon_is_loaded_now)
+        {
+            ScreenReader.Say("Not in a dungeon", interrupt: true);
+            return;
+        }
+
+        var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+
+        // Prefer the non-"2" exit (the way up/out); pick the nearest match. Include inactive
+        // children so a culled/off-screen exit still counts — it re-activates as we approach.
+        WorldGameObject best = null;
+        float bestDist = float.MaxValue;
+        foreach (var wgo in dr.GetComponentsInChildren<WorldGameObject>(true))
+        {
+            if (wgo == null || wgo.is_removed || string.IsNullOrEmpty(wgo.obj_id)) continue;
+            var id = wgo.obj_id.ToLowerInvariant();
+            if (id.IndexOf("dungeon_exit", StringComparison.Ordinal) < 0) continue;
+            if (id.IndexOf("dungeon_exit2", StringComparison.Ordinal) >= 0) continue; // deeper, gated
+            var d = Vector2.Distance(wgo.pos, playerPos);
+            if (d < bestDist) { bestDist = d; best = wgo; }
+        }
+
+        if (best == null)
+        {
+            ScreenReader.Say("No way out found on this level", interrupt: true);
+            return;
+        }
+
+        var target = new NavigationTarget
+        {
+            Object = best,
+            Label = "Dungeon exit, way out",
+            Position = best.pos,
+            Distance = bestDist
+        };
+
+        // Fresh user walk: clear the "A* already failed" guards (mirrors WalkToSelected).
+        _astarFailedForWalk = false;
+        _rescanRetried = false;
+        _rescanRetryPending = false;
+        ClearArrivedTarget();
+
+        _log?.LogInfo($"[NAVIGATOR] Escape-to-exit: walking to {best.obj_id} at {best.pos} ({bestDist:F0}u)");
+        if (bestDist > LongWalkStartDistance) StartLongWalk(target);
+        else WalkToTarget(target);
+    }
+
+    /// <summary>
     /// Auto-walk (native A*) to a target that is within the player graph's reach. Used both
     /// by Ctrl+Home on a near target and as the final approach when a compass beacon brings
     /// the player into range.
@@ -3680,9 +3740,17 @@ internal static class ObjectNavigator
         {
             // The dungeon exit localizes to a raw id / tileset name; give it a clear, recognizable
             // label so the Doors entry reads as the way out (it's classified Doors in TryClassify).
+            // A level has TWO of these and they must NOT read identically: DungeonRoomInterior names
+            // the first-room exit "dungeon_exit" (the portal back UP to the surface / the way you
+            // came in) and the deeper-room exit "dungeon_exit2" (the stairs DOWN to the next level,
+            // gated by clearing the level and — deeper down — Snake's key). When both said just
+            // "Dungeon exit" a blind player could not tell the way out from the way deeper and got
+            // stuck pressing the locked downward one.
             if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
                 obj.obj_id.IndexOf("dungeon_exit", StringComparison.OrdinalIgnoreCase) >= 0)
-                return "Dungeon exit";
+                return obj.obj_id.IndexOf("dungeon_exit2", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? "Dungeon stairs down, leads deeper"
+                    : "Dungeon exit, way out";
 
             // The broken morgue's throw-in (obj_id "morgue_throw_in_broken") localizes to
             // "Leiche hineinwerfen" (Throw body in) — identical to the river-disposal the Yorick

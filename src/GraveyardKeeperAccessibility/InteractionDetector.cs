@@ -1212,7 +1212,11 @@ internal static class InteractionDetector
     {
         var id = (wgo?.obj_id ?? "").ToLowerInvariant();
         string kind =
-            id.Contains("dungeon_exit") ? "Dungeon exit" :
+            // Two distinct exits per level — keep them apart (see ObjectNavigator label note):
+            // "dungeon_exit2" = stairs DOWN (deeper, gated), "dungeon_exit" = the way OUT/up.
+            // Check the "2" variant first since it also contains "dungeon_exit".
+            id.Contains("dungeon_exit2") ? "Dungeon stairs down, leads deeper" :
+            id.Contains("dungeon_exit") ? "Dungeon exit, way out" :
             id.Contains("inside") ? "Door inside" :
             id.Contains("outside") ? "Door outside" :
             id.Contains("hatch") ? "Hatch" :
