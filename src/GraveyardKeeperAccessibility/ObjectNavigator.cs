@@ -2153,9 +2153,20 @@ internal static class ObjectNavigator
                 if (obj == null || obj.is_removed) continue;
                 if (InteractionDetector.IsPlayer(obj) || InteractionDetector.IsPrefab(obj)) continue;
 
+                // Whether this object is part of the loaded dungeon level (a child of dungeon_root).
+                // Computed up here (not just below) because the DLC filter needs it: see the
+                // exemption on the next line. isDungeonObj is only ever true while inDungeon.
+                bool isDungeonObj = dungeonRoot != null && obj.transform != null &&
+                                    obj.transform.IsChildOf(dungeonRoot);
+
                 // Skip DLC "ruins" the player doesn't own (souls zone, Euric's room, etc.) — they
                 // spawn into every save regardless of ownership but are inert without the DLC.
-                if (!IsObjectDlcAvailable(obj)) continue;
+                // EXCEPTION: objects the game generated into the active dungeon level (children of
+                // dungeon_root) are always the player's real content, so never DLC-cull them — this
+                // is what un-hid the pickaxe mining veins (dungeon_source_*), which share an obj_id
+                // with the unowned-Souls overworld ruins diamond source (a world_root child, still
+                // hidden). Without this the veins were dropped here before ever being classified.
+                if (!isDungeonObj && !IsObjectDlcAvailable(obj)) continue;
 
                 if (!TryClassify(obj, out var category)) continue;
 
@@ -2177,10 +2188,9 @@ internal static class ObjectNavigator
                 // In a dungeon, reveal the whole self-contained level: keep every dungeon object
                 // (a child of dungeon_root) listed even while culled, and lift its distance cap so
                 // far rooms of a large level still appear. Scoped to dungeon_root children, so the
-                // outdoor world is never x-rayed. isDungeonObj is only ever true while inDungeon, so
-                // there's zero cost/behaviour change anywhere else.
-                bool isDungeonObj = dungeonRoot != null && obj.transform != null &&
-                                    obj.transform.IsChildOf(dungeonRoot);
+                // outdoor world is never x-rayed. isDungeonObj (computed above, before the DLC
+                // filter) is only ever true while inDungeon, so there's zero cost/behaviour change
+                // anywhere else.
                 bool farReach = IsHarvestableCategory(category) || category == NavCategory.FishingSpots;
 
                 // Built/placed structures — crafting stations, other built objects, roofs — are static
@@ -2996,6 +3006,22 @@ internal static class ObjectNavigator
             return true;
         }
 
+        // Dungeon mining veins (obj_id "dungeon_source_diamond"/_gold/_silver/…): the pickaxe-
+        // mined crystal/metal formations. Their obj_def is script-driven and may carry no
+        // standard tool_action, so the harvestable sort (which is gated on a tool_action) misses
+        // them and they never appear in ANY list — confirmed in testing: Ctrl+M found them but the
+        // Ores/Stones categories were empty. Intercept by obj_id HERE, before the interaction_type
+        // switch — exactly like the dungeon exit above and fishing spots/vendors below — so
+        // classification is independent of tool_actions/interaction_type. File under Ores (valuable
+        // mining targets, a short list); GetObjectLabelSafe → DungeonSourceLabel names each by
+        // resource. Confirmed ids from the Ctrl+M dump: dungeon_source_gold/silver/diamond.
+        if (!string.IsNullOrEmpty(obj.obj_id) &&
+            obj.obj_id.IndexOf("dungeon_source", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            category = NavCategory.Ores;
+            return true;
+        }
+
         // Doors / zone exits are detected by name (the game has no explicit
         // teleport interaction_type). Skip the non-usable arrival anchors
         // (e.g. teleport_point, interaction_type None) — you can't walk through those,
@@ -3574,6 +3600,8 @@ internal static class ObjectNavigator
                 category = NavCategory.Trees;
                 return true;
             }
+            // (Dungeon mining veins "dungeon_source_*" are intercepted earlier in TryClassify by
+            // obj_id, before this tool_action-gated path, so they never reach here.)
             // Ore-bearing rocks (iron_ore, gold_ore, …) and the mountainside mining deposits
             // (steep_iron, steep_coal, …) get their own bucket, checked before the generic Stones
             // bucket, so the player can head straight to a metal/fuel source instead of sifting it
@@ -3715,6 +3743,42 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
+    /// Distinct label for a dungeon mining vein (obj_id "dungeon_source_&lt;resource&gt;", e.g.
+    /// dungeon_source_diamond) — the crystal/metal formation you break with the pickaxe. The game
+    /// localizes these to a generic rock name, so we name the resource (localized where known) plus
+    /// a "vein"/"Ader" descriptor. Resource matched by keyword so id variants (…_2 etc.) still work.
+    /// </summary>
+    private static string DungeonSourceLabel(string objId)
+    {
+        string code = "";
+        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
+
+        string res;
+        if (Has(objId, "diamond")) res = code switch { "de" => "Diamant", "fr" => "diamant", "es" => "diamante", "it" => "diamante", "ru" => "алмаз", _ => "diamond" };
+        else if (Has(objId, "gold")) res = code switch { "de" => "Gold", "fr" => "or", "es" => "oro", "it" => "oro", "ru" => "золото", _ => "gold" };
+        else if (Has(objId, "silver")) res = code switch { "de" => "Silber", "fr" => "argent", "es" => "plata", "it" => "argento", "ru" => "серебро", _ => "silver" };
+        else if (Has(objId, "iron")) res = code switch { "de" => "Eisen", "fr" => "fer", "es" => "hierro", "it" => "ferro", "ru" => "железо", _ => "iron" };
+        else if (Has(objId, "marble")) res = code switch { "de" => "Marmor", "fr" => "marbre", "es" => "mármol", "it" => "marmo", "ru" => "мрамор", _ => "marble" };
+        else if (Has(objId, "granite")) res = code switch { "de" => "Granit", "fr" => "granite", "es" => "granito", "it" => "granito", "ru" => "гранит", _ => "granite" };
+        else if (Has(objId, "stone")) res = code switch { "de" => "Stein", "fr" => "pierre", "es" => "piedra", "it" => "pietra", "ru" => "камень", _ => "stone" };
+        else
+        {
+            // Unknown resource: fall back to the raw suffix after "dungeon_source_", capitalized,
+            // so an unmapped vein still reads distinctly (and the Ctrl+M dump surfaces its id).
+            const string prefix = "dungeon_source_";
+            int p = objId.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+            string suffix = p >= 0 ? objId.Substring(p + prefix.Length) : objId;
+            res = suffix.Length > 0 ? char.ToUpperInvariant(suffix[0]) + suffix.Substring(1) : objId;
+        }
+
+        string vein = code switch { "de" => "Ader", "fr" => "filon", "es" => "veta", "it" => "vena", "ru" => "жила", _ => "vein" };
+        // German compounds naturally ("Diamant-Ader"); other locales read "<resource> vein".
+        return code == "de" ? $"{res}-{vein}" : $"{res} {vein}";
+
+        static bool Has(string s, string kw) => s.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>
     /// Localized "broken, repair it" note appended to a broken build desk's navigator label so the
     /// player knows it can't be used to build yet. The actual repair materials are read out by the
     /// proximity/E repair readout (InteractionDetector.WithRepairInfo) when the player reaches it.
@@ -3751,6 +3815,13 @@ internal static class ObjectNavigator
                 return obj.obj_id.IndexOf("dungeon_exit2", StringComparison.OrdinalIgnoreCase) >= 0
                     ? "Dungeon stairs down, leads deeper"
                     : "Dungeon exit, way out";
+
+            // Dungeon mining veins (obj_id "dungeon_source_diamond"/_gold/…): the crystal/metal
+            // formations broken with the pickaxe. They localize to a generic rock name, so give
+            // each a distinct label naming its resource (see DungeonSourceLabel). Classified Ores.
+            if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
+                obj.obj_id.IndexOf("dungeon_source", StringComparison.OrdinalIgnoreCase) >= 0)
+                return DungeonSourceLabel(obj.obj_id);
 
             // The broken morgue's throw-in (obj_id "morgue_throw_in_broken") localizes to
             // "Leiche hineinwerfen" (Throw body in) — identical to the river-disposal the Yorick
