@@ -49,6 +49,7 @@ internal enum NavCategory
     Buildables,
     Roofs,
     FishingSpots,
+    ZombieMines,
     Other
 }
 
@@ -75,6 +76,7 @@ internal static class ObjectNavigator
         NavCategory.LoadedPallets,
         NavCategory.EmptyPallets,
         NavCategory.Stations,
+        NavCategory.ZombieMines,
         NavCategory.Trees,
         NavCategory.Stones,
         NavCategory.Ores,
@@ -606,6 +608,7 @@ internal static class ObjectNavigator
         NavCategory.Buildables => "Built objects",
         NavCategory.Roofs => "Roofs",
         NavCategory.FishingSpots => "Fishing spots",
+        NavCategory.ZombieMines => "Zombie mines",
         _ => "Other"
     };
 
@@ -2213,7 +2216,11 @@ internal static class ObjectNavigator
                                      category == NavCategory.Roofs ||
                                      category == NavCategory.LoadedPallets ||
                                      category == NavCategory.EmptyPallets ||
-                                     category == NavCategory.Vendors;
+                                     category == NavCategory.Vendors ||
+                                     // Zombie mines are placed outdoor structures the game culls the
+                                     // moment they leave the screen; without this the mine only appears
+                                     // once you're already next to it — the opposite of "find it easily".
+                                     category == NavCategory.ZombieMines;
                 bool keepIfCulled =
                     ((farReach || builtCategory) && !interiorSightBlocked) || isDungeonObj;
                 if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
@@ -3022,6 +3029,20 @@ internal static class ObjectNavigator
             return true;
         }
 
+        // Zombie mines (Best Save Soul DLC): the placed mining operation a zombie works. One mine is
+        // a cluster — a base building, one or two production benches (iron/stone), and for a marble/
+        // granite quarry the FRONT-GATE fence that carries the production craft plus a ring of plain
+        // enclosure-wall fences. They ALL localize to a generic "Zombiemine" and were scattered
+        // across Crafting stations / Other / Built objects, so a blind player couldn't find a given
+        // mine or tell its staffing spot from a wall. Give the acted-on parts a dedicated category
+        // (IsZombieMinePart excludes the bare walls); GetObjectLabelSafe → MineLabel names each by
+        // resource + staffing state. Intercepted here by obj_id, like the dungeon veins above.
+        if (!string.IsNullOrEmpty(obj.obj_id) && IsZombieMinePart(obj))
+        {
+            category = NavCategory.ZombieMines;
+            return true;
+        }
+
         // Doors / zone exits are detected by name (the game has no explicit
         // teleport interaction_type). Skip the non-usable arrival anchors
         // (e.g. teleport_point, interaction_type None) — you can't walk through those,
@@ -3682,22 +3703,30 @@ internal static class ObjectNavigator
         string id = obj?.obj_id ?? "";
         try
         {
-            // Fences are just the enclosure walls — mark them so they don't masquerade as the
-            // interactable building/benches.
-            if (id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0)
-                return $"{mine} ({MineWord("fence")})";
+            bool worker = false;
+            try { worker = obj.has_linked_worker; } catch { }
+            bool hasCraft = false;
+            try { hasCraft = obj?.obj_def != null && obj.obj_def.has_craft; } catch { }
 
-            // Production benches: name by output resource + whether a zombie is assigned.
-            if (id.IndexOf("bench", StringComparison.OrdinalIgnoreCase) >= 0)
+            // Staffing / production node: the spot you press E on to attach a zombie and where the
+            // mining craft runs. Iron/stone mines use a dedicated "..._bench" object; the marble/
+            // granite mine instead uses its FRONT-GATE fence ("zombie_mine_fence_front"), which —
+            // unlike the plain enclosure walls — carries the production craft. Detect either by
+            // has_craft (or an already-linked worker) and name it by the resource it produces plus
+            // whether a zombie is assigned, so the player finds the exact spot to staff and can tell
+            // which mine makes what. Checked BEFORE the fence branch so the gate isn't read as a wall.
+            if (hasCraft || worker || id.IndexOf("bench", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 string product = MineBenchProduct(obj);
-                bool worker = false;
-                try { worker = obj.has_linked_worker; } catch { }
                 string state = worker ? MineWord("working") : MineWord("empty");
                 return string.IsNullOrEmpty(product)
                     ? $"{mine}, {MineWord("bench")} ({state})"
                     : $"{mine}: {product} ({state})";
             }
+
+            // Plain enclosure walls — mark them so they don't masquerade as the staffing gate/bench.
+            if (id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0)
+                return $"{mine} ({MineWord("fence")})";
         }
         catch { }
 
@@ -3712,14 +3741,94 @@ internal static class ObjectNavigator
         {
             var craft = (obj?.obj_def != null && obj.obj_def.has_craft) ? obj.components?.craft : null;
             if (craft == null) return null;
-            var cd = craft.current_craft;
+            CraftDefinition cd = craft.current_craft;
             if (cd == null && craft.craft_queue != null && craft.craft_queue.Count > 0)
                 cd = craft.craft_queue[0].craft;
+            // Idle / unstaffed mine: nothing is actively running, so name it by its DEFINED
+            // production recipe (the "zombie_mine_..._production" in the object's craft list) — that
+            // way an empty gate still reads "Zombiemine: Marmor (frei)" instead of a generic bench.
+            if (cd == null && craft.crafts != null && craft.crafts.Count > 0)
+            {
+                foreach (var c in craft.crafts)
+                {
+                    string cid = c?.id ?? "";
+                    if (cid.IndexOf("production", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        cid.IndexOf("zombie_mine", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        cid.IndexOf("mine_zombie", StringComparison.OrdinalIgnoreCase) >= 0)
+                    { cd = c; break; }
+                }
+                if (cd == null) cd = craft.crafts[0];
+            }
             if (cd == null) return null;
             var name = ScreenReader.StripNguiCodes(cd.GetFirstRealOutput()?.definition?.GetItemName() ?? "").Trim();
             return string.IsNullOrEmpty(name) ? null : name;
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// True if the object is a navigable part of a zombie mine cluster — the base building, a
+    /// production bench, or the marble/granite quarry's front-gate staffing fence. The plain
+    /// enclosure-wall fences (a "fence" id with neither a craft nor a linked worker) are excluded so
+    /// the Zombie mines category stays to the parts the player actually walks to and staffs.
+    /// </summary>
+    private static bool IsZombieMinePart(WorldGameObject obj)
+    {
+        try
+        {
+            string id = obj?.obj_id ?? "";
+            bool isMineId = id.IndexOf("mine_zombie", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            id.IndexOf("zombie_mine", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!isMineId && !IsZombieQuarryMine(obj)) return false;
+
+            // Drop the bare enclosure walls (fence id, no craft, no worker) to keep the list tight.
+            if (id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                bool hasCraft = false;
+                try { hasCraft = obj.obj_def != null && obj.obj_def.has_craft; } catch { }
+                bool worker = false;
+                try { worker = obj.has_linked_worker; } catch { }
+                if (!hasCraft && !worker) return false;
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// True if a cliff-quarry node (obj_id "steep_marble"/"steep_granite"/…, also its worked
+    /// "..._2" stages) has been turned into a zombie-operated mine — i.e. it runs a
+    /// "zombie_mine_..._production" craft or has a zombie linked to it. A plain quarry the player
+    /// mines by hand has neither, so it keeps its normal "Marmorsteinbruch" crafting-station label
+    /// and is NOT relabelled as a zombie mine.
+    /// </summary>
+    private static bool IsZombieQuarryMine(WorldGameObject obj)
+    {
+        try
+        {
+            string id = obj?.obj_id ?? "";
+            if (id.IndexOf("steep_", StringComparison.OrdinalIgnoreCase) < 0) return false;
+            if (MineActiveCraftId(obj).IndexOf("zombie_mine", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            try { if (obj.has_linked_worker) return true; } catch { }
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>Id of the craft currently running / first queued on a mine node, or "" if none.</summary>
+    private static string MineActiveCraftId(WorldGameObject obj)
+    {
+        try
+        {
+            var craft = (obj?.obj_def != null && obj.obj_def.has_craft) ? obj.components?.craft : null;
+            if (craft == null) return "";
+            var cd = craft.current_craft;
+            if (cd == null && craft.craft_queue != null && craft.craft_queue.Count > 0)
+                cd = craft.craft_queue[0].craft;
+            return cd?.id ?? "";
+        }
+        catch { return ""; }
     }
 
     /// <summary>Localized descriptor words used in mine labels.</summary>
@@ -3844,9 +3953,14 @@ internal static class ObjectNavigator
             // which mine produces what. Give each part a distinct, informative label; benches are
             // named by the resource they produce (localized, from the running craft) plus whether
             // a zombie is assigned. That resource name is the reliable iron-vs-stone tell.
+            // Iron/stone mines carry the "mine_zombie"/"zombie_mine" id outright. The marble/granite
+            // zombie mine instead reuses the "steep_..." cliff-quarry node (see IsZombieQuarryMine),
+            // which otherwise reads as a generic "Marmorsteinbruch" crafting station indistinguishable
+            // from a hand-mined quarry — so it never grouped with the other zombie mines.
             if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
                 (obj.obj_id.IndexOf("mine_zombie", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 obj.obj_id.IndexOf("zombie_mine", StringComparison.OrdinalIgnoreCase) >= 0))
+                 obj.obj_id.IndexOf("zombie_mine", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 IsZombieQuarryMine(obj)))
             {
                 return MineLabel(obj);
             }
