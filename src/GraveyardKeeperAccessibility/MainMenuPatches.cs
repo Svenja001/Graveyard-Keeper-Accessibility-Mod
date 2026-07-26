@@ -2474,18 +2474,8 @@ internal static class GUIAccessibility
             var name = ScreenReader.StripNguiCodes(def?.GetItemName() ?? id)?.Trim();
             if (string.IsNullOrWhiteSpace(name)) name = id;
 
-            if (def != null && def.quality_type == ItemDefinition.QualityType.Stars)
-            {
-                int stars = Mathf.FloorToInt(def.quality);
-                string tier = stars switch
-                {
-                    1 => "bronze quality",
-                    2 => "silver quality",
-                    3 => "gold quality",
-                    _ => stars > 3 ? $"{stars} stars" : null
-                };
-                if (!string.IsNullOrEmpty(tier)) name = $"{name}, {tier}";
-            }
+            var tier = InventoryItemHandler.QualityTierName(def);
+            if (!string.IsNullOrEmpty(tier)) name = $"{name}, {tier}";
             return name;
         }
         catch { return id; }
@@ -2811,6 +2801,13 @@ internal static class GUIAccessibility
         {
             if (craft?.needs == null || craft.needs.Count == 0) return null;
 
+            // A star-quality recipe opens the quality picker on Enter, which reads back the tier
+            // chosen per ingredient — so only recipes without that picker need "any quality" spelled
+            // out here (a fixed "gold quality only" need is always worth saying).
+            bool picksQuality = false;
+            try { picksQuality = craft.IsMultiqualityOutput(); }
+            catch { }
+
             var parts = new List<string>();
             foreach (var need in craft.needs)
             {
@@ -2827,6 +2824,7 @@ internal static class GUIAccessibility
                             ?? SpecialNeedName(need.id)
                             ?? need.id;
                 if (string.IsNullOrWhiteSpace(iname)) continue;
+                iname += InventoryItemHandler.NeedQualitySuffix(need, picksQuality);
                 parts.Add(amt > 1 ? $"{amt} {iname}" : iname);
             }
             return parts.Count > 0 ? string.Join(", ", parts) : null;

@@ -597,6 +597,7 @@ internal static class InteractionDetector
 
                 var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
                 if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+                iname += InventoryItemHandler.NeedQualitySuffix(need);
                 all.Add(need.value > 1 ? $"{need.value} {iname}" : iname);
 
                 int have = 0;
@@ -653,6 +654,7 @@ internal static class InteractionDetector
 
                 var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
                 if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+                iname += InventoryItemHandler.NeedQualitySuffix(need);
                 all.Add(need.value > 1 ? $"{need.value} {iname}" : iname);
 
                 int have = 0;

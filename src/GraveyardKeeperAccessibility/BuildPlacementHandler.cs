@@ -1109,6 +1109,7 @@ internal static class BuildPlacementHandler
 
                 var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
                 if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+                iname += InventoryItemHandler.NeedQualitySuffix(need);
                 parts.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
             }
 

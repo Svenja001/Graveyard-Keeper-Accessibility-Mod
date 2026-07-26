@@ -519,7 +519,7 @@ internal static class InventoryItemHandler
     /// silver / gold (see WorldGameObject.DropStory(bronze, silver, gold) and the ITEM_STAR_1..3
     /// tokens). Items without a star rating (quality_type == Default) return null.
     /// </summary>
-    private static string QualityTierName(ItemDefinition def)
+    internal static string QualityTierName(ItemDefinition def)
     {
         if (def == null || def.quality_type != ItemDefinition.QualityType.Stars) return null;
 
@@ -532,6 +532,32 @@ internal static class InventoryItemHandler
             case <= 0: return null;
             default: return $"{stars} stars";
         }
+    }
+
+    /// <summary>
+    /// Spoken quality qualifier for one recipe ingredient — the half of the requirement the game's
+    /// own item name throws away. <c>ItemDefinition.GetItemName()</c> strips the star suffix, so a
+    /// need for "cup_beer:3" reads as a plain "beer": a recipe that only accepts gold-quality beer
+    /// sounded exactly like one that takes any, leaving no way to tell which of your bronze /
+    /// silver / gold stacks it wants. Returns ", gold quality" for such a fixed star requirement,
+    /// and ", any quality" for a multiquality group id (one with no definition of its own, e.g.
+    /// "wheat" standing for wheat:1/2/3 — the craft takes whatever it finds, lowest quality first,
+    /// see Item.RemoveItemNoCheck). Empty for ordinary items, and for a recipe whose window lets
+    /// the player pick the quality themselves (<paramref name="playerPicksQuality"/>), where the
+    /// picker announces the chosen tier instead.
+    /// </summary>
+    internal static string NeedQualitySuffix(Item need, bool playerPicksQuality = false)
+    {
+        if (need == null) return "";
+        try
+        {
+            if (need.is_multiquality)
+                return playerPicksQuality ? "" : ", any quality";
+
+            var tier = QualityTierName(need.definition);
+            return string.IsNullOrEmpty(tier) ? "" : $", {tier}";
+        }
+        catch { return ""; }
     }
 
     /// <summary>
