@@ -138,7 +138,8 @@ internal static class InventoryItemHandler
                     Label = label,
                     Type = ElementType.ItemCell,
                     Cell = cell,
-                    SortRank = rank
+                    SortRank = rank,
+                    Group = panel
                 });
             }
 

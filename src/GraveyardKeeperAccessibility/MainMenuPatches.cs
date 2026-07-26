@@ -14,6 +14,11 @@ internal class GUIElement
     internal BaseItemCellGUI Cell;
     internal int SortRank;
 
+    // Which panel of a multi-panel window this element lives in ("Chest"/"Inventory",
+    // "Buy"/"Sell"/"Your offer"/"Vendor offer"). Left/Right jump between these groups so the
+    // player can switch sides in one press instead of arrowing past every item on this one.
+    internal string Group;
+
     // Set for elements discovered from BaseMenuGUI rows (options/main/in-game menus).
     // These let us drive the game's own widgets directly instead of guessing at
     // dec/inc buttons, which is both cleaner and avoids announcing rows twice.
@@ -118,6 +123,16 @@ internal static class GUIAccessibility
         ScreenReader.ClearMenuContext();
         Elements.Clear();
         SelectedIndex = -1;
+
+        // Was this window merely covered by an overlay (the amount picker) and is now back?
+        // Then it isn't news: the player already heard what it holds when they opened it, so the
+        // "Chest, 51 items. Left and right switch sides" header is repeated at them after every
+        // single stack they move. Coming back reads just the row they're on.
+        // Consume the mark only when it's *this* window returning. Clearing it unconditionally
+        // meant the overlay's own open wiped it, so the window underneath always came back
+        // looking brand new — which is why the header kept being re-read.
+        var reopened = gui == _coveredGui;
+        if (reopened) _coveredGui = null;
 
         DiscoverElements(gui);
 
@@ -304,21 +319,30 @@ internal static class GUIAccessibility
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
         var active = GetActiveElements();
+        SyncGroupCursors(gui, active);
         var cellCount = active.Count(e => e.Type == ElementType.ItemCell);
         var header = cellCount > 0 ? $"{guiName}, {cellCount} items" : guiName;
+        if (reopened) header = null;   // coming back from an overlay: no re-introduction
 
         // Survey/study tables look alike but do different jobs — say which one this is up-front
         // ("Erforschen" research vs alchemy "Untersuchen"/"Zerlegen") so the player isn't left
         // guessing whether they walked up to the right table.
-        var stationPurpose = CraftStationPurpose(gui);
+        var stationPurpose = reopened ? null : CraftStationPurpose(gui);
         if (!string.IsNullOrEmpty(stationPurpose))
-            header = $"{stationPurpose}. {header}";
+            header = Join(stationPurpose, header);
 
         // For multi-panel inventory GUIs (e.g. a chest), call out any side that's empty so the
-        // player knows the chest or their own inventory has nothing in it.
+        // player knows the chest or their own inventory has nothing in it. Worth saying even on a
+        // reopen — moving a stack is exactly what empties a side.
         var emptyDesc = InventoryItemHandler.DescribeEmptyPanels(gui);
         if (!string.IsNullOrEmpty(emptyDesc))
-            header += $". {emptyDesc}";
+            header = Join(header, emptyDesc);
+
+        // Two-sided windows (chest, vendor): tell the player about the one-press side switch, the
+        // keyboard stand-in for a sighted player moving the mouse to the other grid.
+        var openGroups = ActiveGroups(active);
+        if (!reopened && openGroups.Count >= 2)
+            header = Join(header, $"Left and right switch sides, starting at {openGroups[0]}");
 
         // A crafting station (anvil, oven, the buffet, ...) opens its window the instant you press
         // E, which normally cuts off whatever was just spoken — e.g. the object's own approach line
@@ -331,10 +355,10 @@ internal static class GUIAccessibility
         // having to press down once to enter the list.
         if (active.Count > 0)
         {
-            SelectedIndex = 0;
-            ScreenReader.Say($"{header}. {active[0].ReadLabel()}", interrupt: interruptOnOpen);
+            SelectedIndex = RestoreGroupFocus(active);
+            ScreenReader.Say(Join(header, active[SelectedIndex].ReadLabel()), interrupt: interruptOnOpen);
         }
-        else
+        else if (!string.IsNullOrEmpty(header))
         {
             ScreenReader.Say(header, interrupt: interruptOnOpen);
         }
@@ -352,6 +376,23 @@ internal static class GUIAccessibility
         _watchedPrice = null;
         // Drop any not-yet-spoken report line if the window's already gone.
         _pendingReport = null;
+
+        // A window that's still is_shown here wasn't closed — it's been covered by an overlay
+        // (the amount picker) and will come back. Remember it so its return is announced as a
+        // return (just the focused row) rather than as a fresh open, and keep its per-side
+        // cursors so focus lands back where the player was moving items from.
+        bool covered = gui != null && gui.is_shown;
+        if (covered)
+            _coveredGui = gui;
+        else if (gui == _coveredGui)
+            _coveredGui = null;   // it really closed; the next open is a fresh one
+
+        if (!covered && gui == _groupCursorGui)
+        {
+            _groupCursor.Clear();
+            _lastGroup = null;
+            _groupCursorGui = null;
+        }
 
         InventoryItemHandler.OnGUIClosed(gui);
     }
@@ -3822,14 +3863,145 @@ internal static class GUIAccessibility
 
         SelectedIndex = index;
         var elem = active[SelectedIndex];
+        RememberGroupCursor(active, SelectedIndex);
         ScreenReader.Say(elem.ReadLabel());
+    }
+
+    // Where the player last stood inside each panel group, so switching back to a side returns
+    // to that row instead of its first item. Keyed by group name; both these and the window they
+    // belong to are reset when a *different* window opens.
+    private static readonly Dictionary<string, int> _groupCursor = new();
+    private static BaseGUI _groupCursorGui;
+    private static string _lastGroup;
+
+    // The window left open underneath an overlay (chest under the amount picker). When it comes
+    // back it's a return, not a fresh open — see OnGUIOpened's `reopened`.
+    private static BaseGUI _coveredGui;
+
+    /// <summary>Record the focused element's position within its own panel group.</summary>
+    private static void RememberGroupCursor(List<GUIElement> active, int index)
+    {
+        if (index < 0 || index >= active.Count) return;
+        var group = active[index].Group;
+        if (string.IsNullOrEmpty(group)) return;
+
+        int offset = 0;
+        for (int i = 0; i < index; i++)
+            if (active[i].Group == group) offset++;
+        _groupCursor[group] = offset;
+        _lastGroup = group;
+    }
+
+    /// <summary>Position within its own panel group of the element at <paramref name="index"/>.</summary>
+    private static int GroupOffset(List<GUIElement> active, int index)
+    {
+        if (index < 0 || index >= active.Count) return 0;
+        var group = active[index].Group;
+        if (string.IsNullOrEmpty(group)) return 0;
+
+        int offset = 0;
+        for (int i = 0; i < index; i++)
+            if (active[i].Group == group) offset++;
+        return offset;
+    }
+
+    /// <summary>
+    /// Bind the per-side cursors to the window that's opening. A window with no panel sides (a
+    /// dialog, the amount picker) leaves them untouched, so the chest underneath reclaims its
+    /// cursors when it comes back; a different multi-panel window starts fresh.
+    /// </summary>
+    private static void SyncGroupCursors(BaseGUI gui, List<GUIElement> active)
+    {
+        if (ActiveGroups(active).Count == 0) return;
+        if (gui == _groupCursorGui) return;
+
+        _groupCursor.Clear();
+        _lastGroup = null;
+        _groupCursorGui = gui;
+    }
+
+    /// <summary>The distinct panel groups present in the list, in list order.</summary>
+    private static List<string> ActiveGroups(List<GUIElement> active)
+    {
+        var groups = new List<string>();
+        foreach (var e in active)
+            if (!string.IsNullOrEmpty(e.Group) && !groups.Contains(e.Group))
+                groups.Add(e.Group);
+        return groups;
+    }
+
+    /// <summary>
+    /// Jump focus to the next (direction 1) or previous (-1) panel group — chest to your own
+    /// inventory, vendor buy side to sell side. A sighted player switches sides with one flick of
+    /// the mouse; without this, putting something into a chest means arrowing past everything
+    /// already in it first. Returns false (leaving focus alone) when the window has only one panel.
+    /// </summary>
+    internal static bool TryJumpGroup(int direction)
+    {
+        var active = GetActiveElements();
+        if (active.Count == 0) return false;
+
+        var groups = ActiveGroups(active);
+        if (groups.Count < 2) return false;
+
+        var current = (SelectedIndex >= 0 && SelectedIndex < active.Count) ? active[SelectedIndex].Group : null;
+        int at = string.IsNullOrEmpty(current) ? -1 : groups.IndexOf(current);
+        int next = at < 0
+            ? (direction > 0 ? 0 : groups.Count - 1)
+            : (((at + direction) % groups.Count) + groups.Count) % groups.Count;
+        var target = groups[next];
+
+        var indices = new List<int>();
+        for (int i = 0; i < active.Count; i++)
+            if (active[i].Group == target) indices.Add(i);
+        if (indices.Count == 0) return false;
+
+        _groupCursor.TryGetValue(target, out int offset);
+        offset = Mathf.Clamp(offset, 0, indices.Count - 1);
+        _groupCursor[target] = offset;
+        _lastGroup = target;
+        SelectedIndex = indices[offset];
+
+        // Say only the row, exactly like an Up/Down move. The row already begins with "Chest: " /
+        // "Inventory: ", so the side is clear without repeating a header on every switch — the
+        // window's item counts are announced once when it opens, and hearing them again on each
+        // Left/Right is just noise.
+        ScreenReader.Say(active[SelectedIndex].ReadLabel());
+        return true;
+    }
+
+    /// <summary>
+    /// Index to land on when a multi-panel window (re)opens: the row the player was last on, on
+    /// the side they were last on. A chest survives underneath the amount picker, so after putting
+    /// a stack away the window comes back and focus would otherwise snap to the top of the chest
+    /// grid — sending the player back through everything they just skipped. Returns 0 for a
+    /// genuinely new window.
+    /// </summary>
+    private static int RestoreGroupFocus(List<GUIElement> active)
+    {
+        if (string.IsNullOrEmpty(_lastGroup)) return 0;
+
+        var indices = new List<int>();
+        for (int i = 0; i < active.Count; i++)
+            if (active[i].Group == _lastGroup) indices.Add(i);
+        if (indices.Count == 0) return 0;
+
+        _groupCursor.TryGetValue(_lastGroup, out int offset);
+        offset = Mathf.Clamp(offset, 0, indices.Count - 1);
+        _groupCursor[_lastGroup] = offset;
+        return indices[offset];
     }
 
     // Re-discover the current GUI's elements in place (used after a chest move or an inventory
     // use mutates the grids) and keep focus near where it was, re-announcing the now-current row.
     // An optional prefix (e.g. "Used teleport stone") leads the announcement so a single,
     // uninterrupted Say carries both what happened and where focus landed.
-    private static void RefreshCurrentGUI(int focusIndex, string prefix = null)
+    // <paramref name="keepGroup"/> pins focus to a panel side across the refresh: moving an item
+    // out of your inventory into a chest shifts every later row, and a plain index would drift
+    // onto the chest grid — so after putting one thing away the player was no longer where they
+    // were putting things away from. Pass the side (and the row within it) they were on instead.
+    private static void RefreshCurrentGUI(int focusIndex, string prefix = null,
+        string keepGroup = null, int keepOffset = 0)
     {
         if (_currentGUI == null) return;
 
@@ -3848,6 +4020,25 @@ internal static class GUIAccessibility
         }
 
         SelectedIndex = Mathf.Clamp(focusIndex, 0, active.Count - 1);
+
+        if (!string.IsNullOrEmpty(keepGroup))
+        {
+            var sameSide = new List<int>();
+            for (int i = 0; i < active.Count; i++)
+                if (active[i].Group == keepGroup) sameSide.Add(i);
+
+            // The side may have just emptied (last item moved) — then the clamped index above,
+            // which lands on the other side, is the only sensible place to be.
+            if (sameSide.Count > 0)
+            {
+                int offset = Mathf.Clamp(keepOffset, 0, sameSide.Count - 1);
+                SelectedIndex = sameSide[offset];
+                _groupCursor[keepGroup] = offset;
+                _lastGroup = keepGroup;
+            }
+        }
+
+        RememberGroupCursor(active, SelectedIndex);
         var label = active[SelectedIndex].ReadLabel();
         ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? label : $"{emptyDesc}. {label}"));
     }
@@ -4068,6 +4259,10 @@ internal static class GUIAccessibility
         if (elem.Type == ElementType.ItemCell)
         {
             var prevIndex = SelectedIndex;
+            // Which side (and row within it) we're acting from, so a chest move can put focus
+            // back there rather than letting it drift onto the other grid.
+            var prevGroup = elem.Group;
+            var prevOffset = GroupOffset(active, SelectedIndex);
 
             // The player's own inventory: pick the item's primary action (use/equip/open bag)
             // rather than the generic left-click press, which does nothing for usable items like
@@ -4131,7 +4326,7 @@ internal static class GUIAccessibility
             // ghost cells, and keep them on a sensible row. (Stackable items instead open a
             // count picker, a new GUI that the normal flow will announce.)
             if (_currentGUI is ChestGUI)
-                RefreshCurrentGUI(prevIndex);
+                RefreshCurrentGUI(prevIndex, null, prevGroup, prevOffset);
             else if (_currentGUI is VendorGUI vendor)
             {
                 // A stackable item opens a count/price picker (a new GUI the normal flow
@@ -4312,6 +4507,12 @@ internal static class GUIAccessibility
         {
             AdjustSlider(elem, -0.1f);
         }
+        else
+        {
+            // Nothing to adjust here (a plain item cell): use Left as "switch to the other side"
+            // in a two-panel window like a chest. No-ops in single-panel windows.
+            TryJumpGroup(-1);
+        }
     }
 
     internal static void AdjustRight()
@@ -4340,6 +4541,10 @@ internal static class GUIAccessibility
         else if (elem.Type == ElementType.Slider && elem.Slider != null)
         {
             AdjustSlider(elem, 0.1f);
+        }
+        else
+        {
+            TryJumpGroup(1);
         }
     }
 
