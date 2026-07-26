@@ -12,6 +12,12 @@ internal struct NavigationTarget
     // approach offset) to land inside the game's pickup/highlight area.
     internal bool IsDrop;
     internal GameObject DropGo;  // the drop's GameObject (for selection-identity tracking)
+
+    // A bare map position with no object behind it (see GdPointZoneAnchors): walk onto the exact
+    // spot, like a drop, and use the tight arrival radius. Standing "about a tile short" is fine
+    // when the goal is to press E on something, but not when the goal is to be INSIDE a trigger
+    // zone — the game fires those on the player collider entering, and a tile short is outside.
+    internal bool ExactPoint;
 }
 
 /// <summary>
@@ -1050,7 +1056,7 @@ internal static class ObjectNavigator
             // be triggered from the lenient AtTargetDistance. Pick the right "arrived" radius so a
             // close-interaction target that ended a tile-plus short still gets the precise final
             // approach below (onto its synthetic dock) instead of being declared arrived too far out.
-            var arrivedRadius = NeedsCloseInteraction(target.Object)
+            var arrivedRadius = (target.ExactPoint || NeedsCloseInteraction(target.Object))
                 ? InteractionArrivalDistance
                 : AtTargetDistance;
 
@@ -1571,7 +1577,7 @@ internal static class ObjectNavigator
     private static Vector2 InteractionDest(NavigationTarget target, out Vector2? facePos)
     {
         facePos = target.Position;
-        if (target.IsDrop) return target.Position;
+        if (target.IsDrop || target.ExactPoint) return target.Position;
         if (TryDockDestination(target.Object, out var dock, out var face))
         {
             facePos = face;
@@ -2462,6 +2468,46 @@ internal static class ObjectNavigator
     // geometric centre is inside the building and unroutable).
     private static readonly HashSet<string> SkipZoneIds = new() { "home" };
 
+    // Zone landmarks anchored on a named GD point instead of the generic "nearest member object".
+    // Same idea as DoorLandmarks: when the spot that MATTERS in a zone isn't any of the zone's own
+    // objects, name it explicitly. (zone id, GD point gd_tag/name).
+    private static readonly (string zoneId, string gdPoint)[] GdPointZoneAnchors =
+    {
+        // The cliffs are open ground: ZoneAnchorObject picks whatever scenery (grass, trees) sits
+        // nearest the player, which lands ~9 m short of gd_actors_hiding_point and OUTSIDE
+        // actor_hiding_place_gd_zone — the trigger for Vagner's night meeting after the theatre
+        // scene (flow script on_enter_actor_hiding_place: needs the player flag
+        // actor_is_waiting_at_the_sea plus TimeOfDay == Night, and fires on zone ENTRY). Walking
+        // to the GD point puts the player inside the trigger. Harmless once that quest is done —
+        // it just makes "Cliff" mean the cliff-top clearing rather than the nearest shrub.
+        ("cliff", "gd_actors_hiding_point"),
+    };
+
+    /// <summary>
+    /// The GD point a zone landmark should anchor on, or null if the zone has no override (or the
+    /// point isn't in the world right now — GD points can be disabled per quest state, and
+    /// GetGDPointBy* skip disabled ones, so a missing point just falls back to the normal anchor).
+    /// </summary>
+    private static GDPoint ZoneAnchorGdPoint(string zoneId)
+    {
+        try
+        {
+            foreach (var (id, gdPoint) in GdPointZoneAnchors)
+            {
+                if (!string.Equals(id, zoneId, StringComparison.OrdinalIgnoreCase)) continue;
+                // gd_tag is the game's own lookup key, but scene points don't always carry one —
+                // fall back to the GameObject name (both are silent, no error-log spam).
+                return WorldMap.GetGDPointByGDTag(gdPoint, log_if_null: false)
+                       ?? WorldMap.GetGDPointByName(gdPoint, log_if_null: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] ZoneAnchorGdPoint failed for {zoneId}: {ex.Message}");
+        }
+        return null;
+    }
+
     // Friendlier spoken names for known world-zone ids; any zone not listed falls back to its
     // prettified id so every zone in the world is still reachable.
     private static readonly Dictionary<string, string> ZoneLabelOverrides = new()
@@ -2654,12 +2700,24 @@ internal static class ObjectNavigator
                 var pos = anchor != null ? anchor.pos : (Vector2)(zone.center_tf?.position ?? Vector3.zero);
                 if (zone.center_tf == null && anchor == null) continue;
 
+                // A named GD point (see GdPointZoneAnchors) beats both: it's an authored spot, so
+                // walk exactly onto it and drop the object anchor — otherwise InteractionDest would
+                // route to the object's collider and ignore the position we just set.
+                var gdAnchor = ZoneAnchorGdPoint(zone.id);
+                var exact = gdAnchor != null;
+                if (exact)
+                {
+                    anchor = null;
+                    pos = gdAnchor.pos;
+                }
+
                 list.Add(new NavigationTarget
                 {
                     Object = anchor,
                     Label = ZoneLabel(zone.id),
                     Position = pos,
-                    Distance = Vector2.Distance(pos, playerPos)
+                    Distance = Vector2.Distance(pos, playerPos),
+                    ExactPoint = exact
                 });
             }
         }
@@ -3252,6 +3310,29 @@ internal static class ObjectNavigator
                     category = NavCategory.Buildables;
                     return true;
                 }
+
+                // A container the game doesn't flag as a Chest — a rack/shelf that opens its
+                // inventory from a script instead of the chest interaction — is still storage to
+                // the player, so file it there rather than dropping it. Only in this fallthrough:
+                // crafting stations carry an inventory too (their input/output buffer) and are
+                // already classified as Stations well before here.
+                if (def.inventory_size > 0)
+                {
+                    category = NavCategory.Storage;
+                    return true;
+                }
+
+                // Interior furniture the build desk places through a FlowScript (the cupboard, the
+                // improved cooking table…). It is spawned at a fixed room slot and has no
+                // interaction, no tool action and no removal craft — you replace it rather than
+                // demolish it — so every check above misses it and a piece the player had just
+                // built was findable in NO category at all. Recognise it from the build crafts
+                // themselves (see ScriptPlacedBuilds) and list it as a built object.
+                if (IsScriptPlacedBuild(obj.obj_id))
+                {
+                    category = NavCategory.Buildables;
+                    return true;
+                }
                 return false;
         }
     }
@@ -3289,6 +3370,80 @@ internal static class ObjectNavigator
                 && GameBalance.me.GetDataOrNull<VendorDefinition>(objId) != null;
         }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// Furniture the build desk places through a FlowScript instead of a floating ghost — the
+    /// keeper's-room cupboard, the improved cooking table, and every other fixed-slot interior
+    /// piece (BuildModeLogics.Mode.ScriptBuilding). Maps the obj_id that actually gets spawned
+    /// to the id the build catalog names the piece by.
+    ///
+    /// Such a craft carries <c>wait_script_callback</c> and an <c>end_script</c> of the form
+    /// "script:event:obj_id" (e.g. "keeper_cupboard_place:place:cupboard_home" — the exact
+    /// script/event/param split BuildModeLogics does), and the script spawns that obj_id at the
+    /// room slot. The spawned object is a dead end for the tracker: no interaction, no tool
+    /// action, and no removal craft (you replace it rather than demolish it). It usually has no
+    /// translation of its own either — the catalog entry is named after the craft's
+    /// <c>out_obj</c> ("cupboard" → "Schrank") while the placed object is "cupboard_home" — so
+    /// the value here is that out_obj, which <see cref="InteractionDetector.GetObjectLabel"/>
+    /// uses to give the piece its real name.
+    ///
+    /// Built once from GameBalance (static game data) and cached.
+    /// </summary>
+    private static Dictionary<string, string> _scriptPlacedBuilds;
+
+    private static Dictionary<string, string> ScriptPlacedBuilds
+    {
+        get
+        {
+            if (_scriptPlacedBuilds != null)
+                return _scriptPlacedBuilds;
+
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var crafts = GameBalance.me?.craft_obj_data;
+                if (crafts == null)
+                    return map;   // balance not loaded yet — retry on the next call
+
+                foreach (var craft in crafts)
+                {
+                    if (craft == null || !craft.wait_script_callback) continue;
+                    if (string.IsNullOrEmpty(craft.end_script)) continue;
+
+                    var parts = craft.end_script.Split(':');
+                    if (parts.Length < 3) continue;
+
+                    var placedId = parts[2].Trim();
+                    if (placedId.Length == 0 || map.ContainsKey(placedId)) continue;
+
+                    map[placedId] = string.IsNullOrEmpty(craft.out_obj) ? placedId : craft.out_obj;
+                }
+            }
+            catch { return map; }
+
+            _scriptPlacedBuilds = map;
+            return map;
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="objId"/> names a piece of furniture placed by a build-desk
+    /// script (see <see cref="ScriptPlacedBuilds"/>).
+    /// </summary>
+    internal static bool IsScriptPlacedBuild(string objId)
+    {
+        return !string.IsNullOrEmpty(objId) && ScriptPlacedBuilds.ContainsKey(objId);
+    }
+
+    /// <summary>
+    /// The id the build catalog names a script-placed piece by (its craft's <c>out_obj</c>), or
+    /// null when <paramref name="objId"/> isn't such a piece. See <see cref="ScriptPlacedBuilds"/>.
+    /// </summary>
+    internal static string ScriptPlacedBuildNameId(string objId)
+    {
+        if (string.IsNullOrEmpty(objId)) return null;
+        return ScriptPlacedBuilds.TryGetValue(objId, out var nameId) ? nameId : null;
     }
 
     /// <summary>

@@ -226,6 +226,13 @@ public class Plugin : BaseUnityPlugin
             if (QuestAnnouncer.Update())
                 return;
 
+            // Shift+Enter on a vendor or chest item cell trades/moves the WHOLE stack at once,
+            // the keyboard stand-in for the sighted player's shift-click. Checked before the
+            // handlers below because Shift+Enter is also ClickHandler's right-click mapping and
+            // plain Enter (the amount picker) would otherwise fire on the same frame.
+            if (GUIAccessibility.TryHandleMoveAllStack())
+                return;
+
             // Handle click input (Z/X keys)
             ClickHandler.Update();
 

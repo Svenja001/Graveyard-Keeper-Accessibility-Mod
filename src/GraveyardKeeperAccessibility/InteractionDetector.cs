@@ -1184,9 +1184,22 @@ internal static class InteractionDetector
                     StationNameOverrides.TryGetValue(wgo.obj_def.id, out var clearName))
                     return clearName;
 
-                // Try to use the object id, localized to a readable name where possible
+                // Try to use the object id, localized to a readable name where possible.
+                // Furniture a build desk placed by script is spawned under an id the game never
+                // translates ("cupboard_home") while the catalog names it after the craft's
+                // out_obj ("cupboard" → "Schrank"), so fall back to that rather than reading out
+                // a mangled id. See ObjectNavigator.ScriptPlacedBuilds.
                 if (!string.IsNullOrEmpty(wgo.obj_def.id))
-                    return LocalizedObjectName(wgo.obj_def.id);
+                {
+                    var name = LocalizedObjectName(wgo.obj_def.id);
+                    if (!HasTranslation(wgo.obj_def.id))
+                    {
+                        var catalogId = ObjectNavigator.ScriptPlacedBuildNameId(wgo.obj_def.id);
+                        if (!string.IsNullOrEmpty(catalogId) && HasTranslation(catalogId))
+                            return LocalizedObjectName(catalogId);
+                    }
+                    return name;
+                }
 
                 // Fall back to interaction type
                 var typeString = wgo.obj_def.interaction_type.ToString();
@@ -1311,6 +1324,25 @@ internal static class InteractionDetector
     /// </summary>
     internal static string LocalizedObjectName(string objId)
     {
+        return Translate(objId) ?? CleanObjectName(objId);
+    }
+
+    /// <summary>
+    /// True when the game actually has a translation for this id — i.e. naming it would read as
+    /// a real name rather than a prettified id. Lets a caller fall back to a different id (see
+    /// the script-placed furniture case in <see cref="GetObjectLabel"/>) before settling for one.
+    /// </summary>
+    internal static bool HasTranslation(string objId)
+    {
+        return Translate(objId) != null;
+    }
+
+    /// <summary>
+    /// The localized name for an id, or null when the game has no translation for it.
+    /// </summary>
+    private static string Translate(string objId)
+    {
+        if (string.IsNullOrEmpty(objId)) return null;
         try
         {
             var loc = ScreenReader.StripNguiCodes(GJL.L(objId) ?? "").Trim();
@@ -1322,7 +1354,7 @@ internal static class InteractionDetector
                 return loc;
         }
         catch { }
-        return CleanObjectName(objId);
+        return null;
     }
 
     private static string CleanObjectName(string objectName)

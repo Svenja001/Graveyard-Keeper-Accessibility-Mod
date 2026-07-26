@@ -4089,8 +4089,9 @@ internal static class GUIAccessibility
     // After a vendor move the offer/stock grids are redrawn in place, so re-discover the
     // element list (like RefreshCurrentGUI) and keep focus near where it was. Lead the
     // announcement with the new running balance so the player hears the cost/gain of the
-    // deal they're building, then the now-current row.
-    private static void RefreshVendorAfterMove(VendorGUI vendor, int focusIndex)
+    // deal they're building, then the now-current row. An optional prefix goes in front of
+    // both (e.g. "8 bread moved" after a whole-stack move) so it's all one uninterrupted Say.
+    private static void RefreshVendorAfterMove(VendorGUI vendor, int focusIndex, string prefix = null)
     {
         Elements.Clear();
         DiscoverElements(vendor);
@@ -4225,6 +4226,139 @@ internal static class GUIAccessibility
 
         // While a hold is in progress, keep swallowing Enter so it doesn't leak to other handlers.
         return _holdActive;
+    }
+
+    /// <summary>
+    /// Shift+Enter on a vendor or chest item cell moves the WHOLE stack in one press — the
+    /// keyboard equivalent of the sighted player's shift-click. Returns true when it consumed the
+    /// Enter so no other handler also fires; false for anything else, leaving plain Enter (which
+    /// opens the amount picker for a stack) exactly as it was.
+    /// </summary>
+    /// <remarks>
+    /// The game has no key for this: <c>KeyboardController</c> only ever raises
+    /// <c>GameKey.MoveAllStack</c> on a real mouse-button frame with Shift held, and both
+    /// <c>VendorGUI.MoveItem</c> and <c>ChestGUI.OnItemSelect</c> gate their move-everything
+    /// branch on <c>LazyInput.GetKeyDown(GameKey.MoveAllStack)</c>. So rather than re-implement
+    /// the inventory maths (which side moves where, the vendor's per-tier stock slot, the
+    /// vendor_real bookkeeping), we inject that key for the duration of the cell press and let
+    /// the game's own code take its shift-click path.
+    /// </remarks>
+    internal static bool TryHandleMoveAllStack()
+    {
+        if (!(_currentGUI is VendorGUI || _currentGUI is ChestGUI)) return false;
+        if (!(Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))) return false;
+        if (!(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))) return false;
+
+        var active = GetActiveElements();
+        if (SelectedIndex < 0 || SelectedIndex >= active.Count) return false;
+
+        var elem = active[SelectedIndex];
+        if (elem.Type != ElementType.ItemCell || elem.Cell == null) return false;
+
+        var item = elem.Cell.item;
+        if (item == null || item.IsEmpty()) return false;
+
+        // Same guard as the plain-Enter path: a greyed vendor cell (tier-locked, or something the
+        // vendor won't buy) has its press disabled, so pressing it would silently do nothing.
+        if (_currentGUI is VendorGUI && elem.Cell.is_inactive_state)
+        {
+            ScreenReader.Say("Not available to trade");
+            return true;
+        }
+
+        var prevIndex = SelectedIndex;
+        var prevGroup = elem.Group;
+        var prevOffset = GroupOffset(active, prevIndex);
+
+        var itemId = item.id;
+        var itemName = ScreenReader.StripNguiCodes(item.definition?.GetItemName() ?? itemId)?.Trim();
+        // How much of this item the side we're acting from holds right now. The game moves
+        // min(everything on this side, room on the other side), which can be more than the
+        // focused cell (a second stack of the same thing) or less (no room), so the only honest
+        // count is the drop in this side's total once the move is done.
+        int before = GroupItemTotal(active, prevGroup, itemId);
+
+        PressCellWithMoveAllStack(elem.Cell);
+
+        // Both windows redraw their grids in place, so our cell list is stale: re-discover before
+        // measuring what actually moved.
+        Elements.Clear();
+        DiscoverElements(_currentGUI);
+        int after = GroupItemTotal(GetActiveElements(), prevGroup, itemId);
+        int moved = before - after;
+
+        var summary = moved > 0
+            ? $"{moved} {itemName} moved"
+            : "Nothing moved, no room on the other side";
+
+        if (_currentGUI is VendorGUI vendor)
+            RefreshVendorAfterMove(vendor, prevIndex, summary);
+        else
+            RefreshCurrentGUI(prevIndex, summary, prevGroup, prevOffset);
+
+        return true;
+    }
+
+    // Total count of one item id on one side of a two-panel window ("Buy"/"Sell"/"Your offer"/
+    // "Vendor offer", "Chest"/"Inventory"), summed over its discovered cells. Item ids carry the
+    // star suffix ("beer:3"), so different qualities count separately — as they trade separately.
+    private static int GroupItemTotal(List<GUIElement> elements, string group, string itemId)
+    {
+        int total = 0;
+        foreach (var e in elements)
+        {
+            if (e.Type != ElementType.ItemCell || e.Cell == null) continue;
+            if (e.Group != group) continue;
+            var it = e.Cell.item;
+            if (it == null || it.IsEmpty() || it.id != itemId) continue;
+            total += it.value;
+        }
+        return total;
+    }
+
+    // Press an item cell with GameKey.MoveAllStack held, so the GUI's own handler takes its
+    // shift-click "move everything" branch. LazyInput rebuilds its pressed-key list every frame
+    // from the mouse/keyboard controllers, so the injected key is added to that list just for the
+    // press and removed straight after; nothing else sees it.
+    private static System.Reflection.MethodInfo _lazyInputMe;
+    private static FieldInfo _lazyPressedKeys;
+    private static void PressCellWithMoveAllStack(BaseItemCellGUI cell)
+    {
+        List<GameKey> pressed = null;
+        try
+        {
+            // Go through the private "me" property, not the _me field: it creates the singleton
+            // if it doesn't exist yet, exactly as the game's own callers do.
+            _lazyInputMe ??= AccessTools.PropertyGetter(typeof(LazyInput), "me");
+            var me = _lazyInputMe?.Invoke(null, null) as LazyInput;
+            if (me != null)
+            {
+                _lazyPressedKeys ??= AccessTools.Field(typeof(LazyInput), "_pressed_keys");
+                var keys = _lazyPressedKeys?.GetValue(me) as List<GameKey>;
+                if (keys != null && !keys.Contains(GameKey.MoveAllStack))
+                {
+                    keys.Add(GameKey.MoveAllStack);
+                    pressed = keys;
+                }
+            }
+
+            if (pressed == null || !LazyInput.GetKeyDown(GameKey.MoveAllStack))
+                Plugin.Log.LogWarning("[STACK] could not inject MoveAllStack; falling back to the normal press");
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[STACK] MoveAllStack injection failed: {ex.Message}");
+        }
+
+        try
+        {
+            InventoryItemHandler.PressItemCell(cell);
+        }
+        finally
+        {
+            try { pressed?.Remove(GameKey.MoveAllStack); }
+            catch (Exception ex) { Plugin.Log.LogWarning($"[STACK] MoveAllStack cleanup failed: {ex.Message}"); }
+        }
     }
 
     internal static void ActivateSelected()
