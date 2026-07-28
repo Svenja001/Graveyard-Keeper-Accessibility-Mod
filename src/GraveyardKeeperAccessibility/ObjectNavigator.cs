@@ -32,6 +32,7 @@ internal enum NavCategory
     Corpses,
     Doors,
     Graves,
+    EmptyGraves,
     ExhumableGraves,
     People,
     Enemies,
@@ -74,6 +75,7 @@ internal static class ObjectNavigator
         NavCategory.Corpses,
         NavCategory.Doors,
         NavCategory.Graves,
+        NavCategory.EmptyGraves,
         NavCategory.ExhumableGraves,
         NavCategory.People,
         NavCategory.Enemies,
@@ -272,6 +274,16 @@ internal static class ObjectNavigator
     // Vendors can't be filtered by zone, so keep only those within this tight radius — an interior
     // room is a few tiles across, while the outdoor crowd sits spatially offset behind the walls.
     private const float InteriorPeopleFallbackRadius = 12f * TileSize;
+    // How far the "reveal the room I'm standing in" rule reaches while inside (see
+    // IsInPlayerInterior). Big enough to take in a whole interior from the doorway — the church
+    // nave, the cellar workshop — the way a sighted player does on stepping through the door, but
+    // never map-wide: this is a broader local reach, not x-ray vision.
+    private const float InteriorRevealRadius = 22f * TileSize;
+    // The same reveal for objects the zone test can't vouch for: an interior the game doesn't model
+    // as a WorldZone at all (the morgue, the home), or an object inside a zoned interior that sits
+    // outside the zone's own collider. With no zone to match on, a tight radius is the only thing
+    // separating "in here with me" from "through that wall", so keep it to about a room's width.
+    private const float InteriorRevealUnzonedRadius = 10f * TileSize;
     private const int UpdateInterval = 30;                 // refresh list every 30 frames
     private const float ApproachOffset = 80f;              // stop ~1 tile short, on walkable ground
 
@@ -591,6 +603,7 @@ internal static class ObjectNavigator
         NavCategory.Corpses => "Corpses",
         NavCategory.Doors => "Doors",
         NavCategory.Graves => "Graves",
+        NavCategory.EmptyGraves => "Empty graves",
         NavCategory.ExhumableGraves => "Exhumable graves",
         NavCategory.People => "People",
         NavCategory.Enemies => "Enemies",
@@ -1947,6 +1960,10 @@ internal static class ObjectNavigator
         _hasLastPlayerPos = false;
         _hasLastEnvironmentState = false;
         _fastRefreshFramesLeft = 0;
+        // Which doorway variant the game runs is a property of the SAVE (see DedupeDoorVariants),
+        // so what was learned in the last one must not carry into the next.
+        _liveDoorTags.Clear();
+        _liveDoorVariant = null;
     }
 
     /// <summary>
@@ -2227,12 +2244,51 @@ internal static class ObjectNavigator
                                      // moment they leave the screen; without this the mine only appears
                                      // once you're already next to it — the opposite of "find it easily".
                                      category == NavCategory.ZombieMines;
-                bool keepIfCulled =
-                    ((farReach || builtCategory) && !interiorSightBlocked) || isDungeonObj;
-                if (!keepIfCulled && !obj.gameObject.activeInHierarchy) continue;
+                // Graves are the same case as built objects and then some. They are static, the
+                // graveyard holds dozens of them, and the flow that matters most — carrying a fresh
+                // corpse out of the morgue before it rots — needs the nearest EMPTY grave at a
+                // moment when not one of them is on screen. The game culls every grave that isn't on
+                // camera, so without this the Graves list is empty the second you step out of the
+                // morgue door and the only route back to the graveyard is the Landmarks entry (and
+                // the seconds it costs). Grave state (body, cross, fence) lives in the serialized
+                // obj.data, which stays valid while the object is culled, so the mirrored Empty /
+                // Exhumable / Decorate / Fence lists below are correct for culled graves too.
+                bool graveCategory = category == NavCategory.Graves;
 
                 var objPos = obj.pos;
                 var distance = Vector2.Distance(objPos, playerPos);
+
+                bool keepIfCulled =
+                    ((farReach || builtCategory || graveCategory) && !interiorSightBlocked) ||
+                    isDungeonObj;
+                // Last chance for a culled object: it's in the room the player is standing in. A
+                // sighted player entering the church or the cellar takes in the whole room from the
+                // doorway; a blind player would otherwise only get the handful of objects the camera
+                // happens to frame and would have to walk to a second spot to "see" the rest. This
+                // reveals the current interior at once without x-raying the outdoors — see
+                // IsInPlayerInterior. Ordered last (and after the cull test) so its physics query
+                // only runs for objects that would otherwise be dropped.
+                // Doors take one extra test before the reveal. A teleport door is not a static prop:
+                // the scene ships several variants of the same doorway (level3 has
+                // tp_church_a_/2_a_/3_a_ and tp_mortuary_from_church_b_/2_b_/3_b_ — the church exit
+                // and the mortuary hatch each exist three times over) and the game runs exactly ONE
+                // of each, leaving the others switched off. An object switched off by the GAME has a
+                // deactivated ancestor; one merely off-camera is deactivated on itself with a live
+                // parent chain (that's how the chunk culler turns things off). So only camera-culled
+                // doors may be revealed — and DedupeDoorVariants below collapses whatever variants
+                // still make it through into a single entry per doorway.
+                bool revealable = category != NavCategory.Doors || IsCameraCulled(obj);
+                if (!keepIfCulled && !obj.gameObject.activeInHierarchy &&
+                    !(revealable &&
+                      IsInPlayerInterior(obj, distance, interiorSightBlocked, interiorPlayerZone)))
+                    continue;
+
+                // Remember which door variants the game actually runs: a variant seen active once is
+                // the live one for this save, and stays the right answer later when it's off-camera
+                // and its dead siblings are indistinguishable from it. See DedupeDoorVariants.
+                if (category == NavCategory.Doors && obj.gameObject.activeInHierarchy)
+                    NoteLiveDoor(obj);
+
                 var maxDist = isDungeonObj ? float.MaxValue
                                            : (farReach ? MaxHarvestableNavDistance : MaxNavDistance);
                 if (distance > maxDist) continue;
@@ -2277,6 +2333,23 @@ internal static class ObjectNavigator
                     Position = objPos,
                     Distance = distance
                 });
+
+                // An empty grave — a real grave (its own Grave interaction, so E opens the grave
+                // menu) with no body in it — is where the corpse in your hands goes. Mirror those
+                // into their own list: an established graveyard is dozens of graves and the Graves
+                // list is mostly full ones, which is a long cycle while a body rots. Non-interactive
+                // grave scenery (listed under Graves by obj_id) is excluded — there's nothing to
+                // bury in it. They stay under Graves too, so the general browse stays complete.
+                if (category == NavCategory.Graves && IsEmptyGrave(obj))
+                {
+                    _byCategory[NavCategory.EmptyGraves].Add(new NavigationTarget
+                    {
+                        Object = obj,
+                        Label = label,
+                        Position = objPos,
+                        Distance = distance
+                    });
+                }
 
                 // A grave holding a body can be exhumed (needs the exhumation permit). Mirror
                 // those into a dedicated focused list so the player can jump straight to a
@@ -2341,6 +2414,9 @@ internal static class ObjectNavigator
               }
               catch { /* skip this one object, keep building the rest of the list */ }
             }
+
+            // Collapse the scene's duplicate copies of a doorway down to the one that works.
+            DedupeDoorVariants();
 
             // Active quest targets are gathered separately: they are resolved by
             // obj_id from the save's task list (not by walking the scene), and they
@@ -3013,6 +3089,24 @@ internal static class ObjectNavigator
         catch { return false; }
     }
 
+    /// <summary>
+    /// True for a grave that can take the body you're carrying: a REAL grave (it carries the Grave
+    /// interaction, i.e. E opens the grave menu — the obj_id-matched grave scenery that also lists
+    /// under Graves has no menu and nothing to bury in) that currently holds no body. Reads the
+    /// serialized inventory, so it is correct for culled graves too.
+    /// </summary>
+    private static bool IsEmptyGrave(WorldGameObject obj)
+    {
+        try
+        {
+            if (obj.obj_def == null ||
+                obj.obj_def.interaction_type != ObjectDefinition.InteractionType.Grave)
+                return false;
+            return !HoldsBody(obj);
+        }
+        catch { return false; }
+    }
+
     private static bool HasExhumableBody(WorldGameObject obj)
     {
         try
@@ -3451,6 +3545,192 @@ internal static class ObjectNavigator
     /// <c>GetMyWorldZone</c>, a physics OverlapPoint on the zone layer), or null when it's in no
     /// zone or the object is missing/removed. Guarded so a malformed object can't break the refresh.
     /// </summary>
+    // ---- Teleport-door variants ------------------------------------------
+    //
+    // The scene carries several copies of the same doorway (tp_church_a_ / tp_church_2_a_ /
+    // tp_church_3_a_, and the same for the church's mortuary hatch) and the game runs exactly one of
+    // them per save, switching the others off. They share a position, a label and an obj_id, so once
+    // they're off-camera nothing on the object itself says which one teleports — the player just
+    // sees the church door listed three times and two of them do nothing. These two remember what
+    // was observed while a variant WAS on camera and active, which is proof it's the live one.
+    private static readonly HashSet<string> _liveDoorTags = new(StringComparer.OrdinalIgnoreCase);
+    // The variant number the live doorways of the current save carry ("2" in a save where
+    // tp_church_2_a_ is the working church door). Interiors are switched as a set, so a variant seen
+    // live on one doorway is the best guess for a doorway that has never been seen live at all.
+    private static string _liveDoorVariant;
+
+    private static void NoteLiveDoor(WorldGameObject obj)
+    {
+        try
+        {
+            var tag = obj?.custom_tag;
+            if (string.IsNullOrEmpty(tag)) return;
+            _liveDoorTags.Add(tag);
+            var variant = DoorVariantNumber(tag);
+            if (variant != null) _liveDoorVariant = variant;
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// The family a teleport door belongs to: its tag with the variant number taken out, so
+    /// "tp_church_a_", "tp_church_2_a_" and "tp_church_3_a_" all key to "church_a". The a/b end
+    /// marker is KEPT — those are the two opposite ends of one teleport (inside vs outside), i.e.
+    /// genuinely different doorways. Null for a door with no usable tag (dungeon exits), which is
+    /// then left alone.
+    /// </summary>
+    private static string DoorVariantFamily(WorldGameObject obj)
+    {
+        try
+        {
+            var tag = (obj?.custom_tag ?? "").ToLowerInvariant().Trim();
+            if (!tag.StartsWith("tp_")) return null;
+            var parts = new List<string>();
+            foreach (var part in tag.Substring(3).Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (int.TryParse(part, out _)) continue;
+                parts.Add(part);
+            }
+            return parts.Count == 0 ? null : string.Join("_", parts.ToArray());
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The variant number in a door tag ("tp_church_2_a_" → "2"), or null when it has none.</summary>
+    private static string DoorVariantNumber(string tag)
+    {
+        try
+        {
+            foreach (var part in (tag ?? "").ToLowerInvariant().Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries))
+                if (int.TryParse(part, out _)) return part;
+            return null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Keep one entry per doorway. Doors are grouped into variant families (see DoorVariantFamily)
+    /// and each family is reduced to the copy that actually teleports, ranked by how strong the
+    /// evidence is: active right now (the game's own answer) beats seen-active-earlier, which beats
+    /// carrying the same variant number as the doorways that have been seen live, which beats
+    /// nearest. When a family has several ACTIVE members they are all kept — never hide a door that
+    /// is demonstrably working. Doors with no tag (dungeon exits) are passed through untouched.
+    /// </summary>
+    private static void DedupeDoorVariants()
+    {
+        try
+        {
+            var list = _byCategory[NavCategory.Doors];
+            if (list.Count < 2) return;
+
+            var families = new Dictionary<string, List<NavigationTarget>>();
+            var keep = new List<NavigationTarget>();
+            foreach (var t in list)
+            {
+                var family = DoorVariantFamily(t.Object);
+                if (family == null) { keep.Add(t); continue; }
+                if (!families.TryGetValue(family, out var members))
+                    families[family] = members = new List<NavigationTarget>();
+                members.Add(t);
+            }
+
+            foreach (var members in families.Values)
+            {
+                if (members.Count == 1) { keep.Add(members[0]); continue; }
+
+                int best = 0;
+                foreach (var m in members) best = Math.Max(best, DoorLiveScore(m));
+
+                // Every active member survives — never hide a door that demonstrably works.
+                if (best == 4)
+                {
+                    foreach (var m in members)
+                        if (DoorLiveScore(m) == 4) keep.Add(m);
+                    continue;
+                }
+
+                // Otherwise the family is all off-camera: keep the single best-evidenced copy,
+                // nearest first among equals.
+                int pick = -1;
+                for (int i = 0; i < members.Count; i++)
+                {
+                    if (DoorLiveScore(members[i]) != best) continue;
+                    if (pick < 0 || members[i].Distance < members[pick].Distance) pick = i;
+                }
+                if (pick >= 0) keep.Add(members[pick]);
+            }
+
+            keep.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+            list.Clear();
+            list.AddRange(keep);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] Error de-duplicating doors: {ex.Message}");
+        }
+    }
+
+    /// <summary>How strong the evidence is that this door copy is the one the game runs (4 = best).</summary>
+    private static int DoorLiveScore(NavigationTarget t)
+    {
+        try
+        {
+            var obj = t.Object;
+            if (obj == null) return 0;
+            if (obj.gameObject != null && obj.gameObject.activeInHierarchy) return 4;
+            var tag = obj.custom_tag;
+            if (!string.IsNullOrEmpty(tag) && _liveDoorTags.Contains(tag)) return 3;
+            if (_liveDoorVariant != null && DoorVariantNumber(tag) == _liveDoorVariant) return 2;
+            return 1;
+        }
+        catch { return 0; }
+    }
+
+    /// <summary>
+    /// True when an object is deactivated by the CAMERA (the chunk culler switches the object itself
+    /// off and leaves its parents alone) rather than by the game (which switches off a whole group,
+    /// so an ancestor is inactive). Lets an off-screen door in the room still be listed while the
+    /// scene's switched-off spare copies of that doorway stay hidden.
+    /// </summary>
+    private static bool IsCameraCulled(WorldGameObject obj)
+    {
+        try
+        {
+            var tf = obj?.transform?.parent;
+            while (tf != null)
+            {
+                if (!tf.gameObject.activeSelf) return false;
+                tf = tf.parent;
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// True when a culled (off-camera, deactivated) object should still be listed because it is in
+    /// the interior the player is standing in. Inside a building the no-x-ray rule drops every
+    /// culled object, which leaves the tracker holding only what the camera happens to frame — so
+    /// entering the church or the church cellar showed a fraction of the room and the player had to
+    /// walk to a second spot to "see" the rest. This gives back the one thing a sighted player gets
+    /// for free on stepping through a door: the whole room at once.
+    ///
+    /// The outdoors is still not x-rayed, because the object has to pass one of two tests:
+    /// it is in the SAME WorldZone as the player (church, cellar, tavern... — the outdoor world and
+    /// the neighbouring graveyard are different zones or none), or it belongs to no zone at all and
+    /// sits within a room's width. GetMyWorldZone is an OverlapPoint on the zone layer, so it works
+    /// on a deactivated object; it's a physics query, hence the distance gate first and the caller
+    /// only asking about objects it is otherwise about to drop.
+    /// </summary>
+    private static bool IsInPlayerInterior(WorldGameObject obj, float distance,
+                                           bool interiorSightBlocked, WorldZone playerZone)
+    {
+        if (!interiorSightBlocked || distance > InteriorRevealRadius) return false;
+        if (playerZone == null) return distance <= InteriorRevealUnzonedRadius;
+        var zone = SafeWorldZone(obj);
+        return zone == playerZone || (zone == null && distance <= InteriorRevealUnzonedRadius);
+    }
+
     private static WorldZone SafeWorldZone(WorldGameObject obj)
     {
         try
