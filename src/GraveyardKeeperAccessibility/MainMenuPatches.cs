@@ -3248,8 +3248,12 @@ internal static class GUIAccessibility
     }
 
     /// <summary>
-    /// Spoken label for one tech: name, what it unlocks, its cost in tech points, and its state
-    /// (unlocked / available / locked / not enough points / hidden).
+    /// Spoken label for one tech, state first: whether it is already unlocked, buyable or locked,
+    /// then the name, then cost, then what it unlocks. Browsing the tree is mostly a hunt for
+    /// "what do I still have to buy" — putting the state in front means that answer arrives
+    /// immediately instead of after a long unlock description, and the row can be skipped with the
+    /// next arrow press. The four states start on clearly different words ("Already", "Can buy",
+    /// "Locked", "Not yet") so they stay apart at speed.
     /// </summary>
     private static string TechLabel(TechDefinition tech)
     {
@@ -3259,39 +3263,76 @@ internal static class GUIAccessibility
 
         // Hidden techs show only as a question mark in-game — don't leak their contents.
         if (state == TechDefinition.TechState.Hidden)
-            return "Locked technology, not yet revealed";
+            return "Not yet revealed. Locked technology";
 
         var parts = new List<string>();
+
+        parts.Add(TechStateText(state));
 
         var name = ScreenReader.StripNguiCodes(GJL.L(tech.id) ?? tech.id)?.Trim();
         if (string.IsNullOrWhiteSpace(name) || name.Contains("!")) name = tech.id;
         parts.Add(name);
 
+        var cost = TechPriceText(tech);
+        if (state != TechDefinition.TechState.Purchased && !string.IsNullOrEmpty(cost))
+            parts.Add($"costs {cost}");
+
+        if (state == TechDefinition.TechState.Unavailable)
+        {
+            var blocker = TechBlockerText(tech);
+            if (!string.IsNullOrEmpty(blocker)) parts.Add(blocker);
+        }
+
         var unlocks = TechUnlocksText(tech);
         if (!string.IsNullOrEmpty(unlocks)) parts.Add($"Unlocks {unlocks}");
 
-        var cost = TechPriceText(tech);
+        return string.Join(". ", parts);
+    }
 
+    /// <summary>The leading state word of a tech row (see <see cref="TechLabel"/>).</summary>
+    private static string TechStateText(TechDefinition.TechState state)
+    {
         switch (state)
         {
-            case TechDefinition.TechState.Purchased:
-                parts.Add("already unlocked");
-                break;
-            case TechDefinition.TechState.AvailableForPurchase:
-                parts.Add(string.IsNullOrEmpty(cost) ? "available" : $"available, costs {cost}");
-                break;
-            default: // Unavailable
-                bool affordable = false;
-                try { affordable = MainGame.me.player.IsEnough(tech.price); }
-                catch { }
-                if (!affordable && !string.IsNullOrEmpty(cost))
-                    parts.Add($"locked, costs {cost}, not enough points");
-                else
-                    parts.Add("locked, requires earlier technologies");
-                break;
+            case TechDefinition.TechState.Purchased: return "Already unlocked";
+            case TechDefinition.TechState.AvailableForPurchase: return "Can buy now";
+            case TechDefinition.TechState.Hidden: return "Not yet revealed";
+            default: return "Locked";
         }
+    }
 
-        return string.Join(". ", parts);
+    /// <summary>
+    /// Why an Unavailable tech can't be bought: missing prerequisite techs (named, so the player
+    /// knows what to buy first) and/or missing points. Mirrors <c>GameSave.CanBuyTech</c>, which
+    /// fails on either condition — the old label guessed one from affordability alone and so told
+    /// players "requires earlier technologies" for techs whose parents were long since bought.
+    /// </summary>
+    private static string TechBlockerText(TechDefinition tech)
+    {
+        var reasons = new List<string>(2);
+        try
+        {
+            var missing = new List<string>();
+            if (tech.parents != null)
+            {
+                foreach (var parent in tech.parents)
+                {
+                    if (parent == null) continue;
+                    if (MainGame.me.save.unlocked_techs.Contains(parent.id)) continue;
+
+                    var pn = ScreenReader.StripNguiCodes(GJL.L(parent.id) ?? parent.id)?.Trim();
+                    if (string.IsNullOrWhiteSpace(pn) || pn.Contains("!")) pn = parent.id;
+                    missing.Add(pn);
+                }
+            }
+            if (missing.Count > 0) reasons.Add($"needs {string.Join(", ", missing)} first");
+
+            if (!MainGame.me.player.data.IsEnoughParams(tech.price))
+                reasons.Add("not enough points");
+        }
+        catch { }
+
+        return reasons.Count > 0 ? string.Join(", ", reasons) : null;
     }
 
     /// <summary>
@@ -3317,13 +3358,272 @@ internal static class GUIAccessibility
                 var n = ScreenReader.StripNguiCodes(data.name ?? "")?.Trim();
                 if (string.IsNullOrWhiteSpace(n) || n.Contains("!")) continue;
 
-                var desc = ScreenReader.StripNguiCodes(data.description ?? "")?.Trim();
-                if (!string.IsNullOrWhiteSpace(desc) && !desc.Contains("!"))
-                    parts.Add($"{n}: {desc}");
-                else
-                    parts.Add(n);
+                var desc = CleanDescription(data.description) ?? UnlockFallbackText(u);
+                parts.Add(string.IsNullOrEmpty(desc) ? n : $"{n}: {desc}");
             }
             return parts.Count > 0 ? string.Join("; ", parts) : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Trimmed, code-stripped description text, or null when there is nothing to say.</summary>
+    private static string CleanDescription(string raw)
+    {
+        var s = ScreenReader.StripNguiCodes(raw ?? "")?.Trim();
+        if (string.IsNullOrWhiteSpace(s) || s.Contains("!")) return null;
+        return s;
+    }
+
+    /// <summary>
+    /// What an unlock is actually good for, when the game has no description text for it.
+    /// <c>TechUnlock.GetData</c> only looks up one "&lt;name&gt;_d" localization token, and whole
+    /// families of entries have none — every alchemy powder / solution / extract recipe, and a
+    /// number of perks — so those unlocks announced a bare name and nothing else. Rebuild the
+    /// missing half from the balance data the game itself uses elsewhere: for recipes what they
+    /// produce, from which ingredients and at which station; for perks and gathering unlocks their
+    /// own description tokens and effects. Returns null when nothing useful is known.
+    /// </summary>
+    private static string UnlockFallbackText(TechUnlock unlock)
+    {
+        try
+        {
+            switch (unlock.type)
+            {
+                case TechUnlock.TechUnlockType.Craft: return CraftUnlockFallbackText(unlock.id);
+                case TechUnlock.TechUnlockType.Perk: return PerkUnlockFallbackText(unlock.id);
+                case TechUnlock.TechUnlockType.Work: return WorkUnlockFallbackText(unlock.id);
+                default: return null;
+            }
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Description of a recipe unlock with no description token: the produced item's own
+    /// description first (the text the game shows when the item is hovered anywhere else, which
+    /// <c>CraftDefinition.GetDescription</c> also prefers), else a spoken recipe — "makes 2 acid,
+    /// from 1 water, 1 vitriol, at the alchemy workbench" — plus what an alchemy product can be
+    /// used for. Alchemy ingredients are the worst case: their names ("speed-up solution") say
+    /// nothing about where they go, and the recipe is the only hint the balance data has.
+    /// </summary>
+    private static string CraftUnlockFallbackText(string craftId)
+    {
+        if (string.IsNullOrEmpty(craftId)) return null;
+
+        CraftDefinition craft = null;
+        try
+        {
+            craft = GameBalance.me.GetDataOrNull<CraftDefinition>(craftId);
+            if (craft == null && craftId.Contains(":"))
+                craft = GameBalance.me.GetDataOrNull<ObjectCraftDefinition>(craftId);
+        }
+        catch { }
+        if (craft == null) return null;
+
+        // The craft's own description resolves multiquality outputs and object builds; only when it
+        // is empty do we fall back to the item definition (which strips a ":quality" suffix itself).
+        var product = CraftOutputDefinition(craft);
+        var desc = CleanDescription(SafeCraftDescription(craft))
+                   ?? CleanDescription(SafeItemDescription(product));
+        if (!string.IsNullOrEmpty(desc)) return desc;
+
+        var parts = new List<string>(4);
+
+        var needs = CraftDefNeedsText(craft);
+        if (!string.IsNullOrEmpty(needs)) parts.Add($"made from {needs}");
+
+        var station = CraftedAtText(product);
+        if (!string.IsNullOrEmpty(station)) parts.Add(station);
+
+        var alchemy = AlchemyRoleText(product);
+        if (!string.IsNullOrEmpty(alchemy)) parts.Add(alchemy);
+
+        return parts.Count > 0 ? string.Join(", ", parts) : null;
+    }
+
+    /// <summary>The item a craft produces (ignoring tech-point payouts), or null.</summary>
+    private static ItemDefinition CraftOutputDefinition(CraftDefinition craft)
+    {
+        try
+        {
+            var first = craft.GetFirstRealOutput();
+            if (first == null) return null;
+            return first.definition
+                   ?? GameBalance.me.GetDataOrNull<ItemDefinition>(first.id)
+                   ?? GameBalance.me.GetDataOrNull<ItemDefinition>(first.id + ":1");
+        }
+        catch { return null; }
+    }
+
+    // CraftDefinition.GetDescription dereferences output[0].definition unguarded, so a craft whose
+    // output is a group id rather than a concrete item throws instead of returning "".
+    private static string SafeCraftDescription(CraftDefinition craft)
+    {
+        try { return craft.GetDescription(); }
+        catch { return null; }
+    }
+
+    private static string SafeItemDescription(ItemDefinition def)
+    {
+        try { return def?.GetItemDescription(); }
+        catch { return null; }
+    }
+
+    /// <summary>"at the alchemy workbench" — the stations an item is made at, as the tooltip's own
+    /// "crafted at" line lists them (<see cref="ItemDefinition.GetItemDetails"/>), or null.</summary>
+    private static string CraftedAtText(ItemDefinition def)
+    {
+        try
+        {
+            var details = def?.GetItemDetails();
+            if (details?.crafts_in == null || details.crafts_in.Count == 0) return null;
+
+            var names = new List<string>(details.crafts_in.Count);
+            foreach (var obj in details.crafts_in)
+            {
+                if (obj == null) continue;
+                var n = ScreenReader.StripNguiCodes(GJL.L(obj.id) ?? "")?.Trim();
+                if (string.IsNullOrWhiteSpace(n) || n == obj.id || n.Contains("!")) continue;
+                if (!names.Contains(n)) names.Add(n);
+            }
+            return names.Count > 0 ? $"made at {string.Join(", ", names)}" : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// An alchemy item's role: which of the three ingredient kinds it is (powder / solution /
+    /// essence, all mixed into potions at the alchemy mixer), or for an ordinary item which of
+    /// those it can be broken down into. Read from <see cref="ItemDefinition.alch_type"/> and the
+    /// decompose list the game builds for the item tooltip. Null for anything non-alchemical.
+    /// </summary>
+    private static string AlchemyRoleText(ItemDefinition def)
+    {
+        try
+        {
+            if (def == null) return null;
+
+            if (def.alch_type != ItemDefinition.AlchemyType.None)
+            {
+                var kind = AlchemyTypeName(def.alch_type);
+                return kind == null ? null : $"alchemy {kind} for mixing potions";
+            }
+
+            var decomposes = def.GetItemDetails()?.alchemy?.decomposes;
+            if (decomposes == null || decomposes.Count == 0) return null;
+
+            var kinds = new List<string>(decomposes.Count);
+            foreach (var d in decomposes)
+            {
+                var kind = AlchemyTypeName((ItemDefinition.AlchemyType)d);
+                if (kind != null && !kinds.Contains(kind)) kinds.Add(kind);
+            }
+            return kinds.Count > 0 ? $"can be processed into {string.Join(", ", kinds)}" : null;
+        }
+        catch { return null; }
+    }
+
+    private static string AlchemyTypeName(ItemDefinition.AlchemyType type)
+    {
+        switch (type)
+        {
+            case ItemDefinition.AlchemyType.Powder: return "powder";
+            case ItemDefinition.AlchemyType.Fluid: return "solution";
+            case ItemDefinition.AlchemyType.Essence: return "essence";
+            case ItemDefinition.AlchemyType.Universal: return "universal ingredient";
+            default: return null;
+        }
+    }
+
+    /// <summary>
+    /// What a perk unlock does when its tech-tree entry carries no description: the perk's own
+    /// description token (<see cref="PerkDefinition.GetDescriptionIfExists"/> — the same text the
+    /// inventory's perk list shows) and, failing that, the permanent stat bonus it applies on
+    /// unlock (<see cref="PerkDefinition.output_res"/>, added to the player by GameSave.UnlockPerk).
+    /// </summary>
+    private static string PerkUnlockFallbackText(string perkId)
+    {
+        try
+        {
+            var perk = GameBalance.me.GetDataOrNull<PerkDefinition>(perkId);
+            if (perk == null) return null;
+
+            var desc = CleanDescription(perk.GetDescriptionIfExists());
+            if (!string.IsNullOrEmpty(desc)) return desc;
+
+            return GameResBonusText(perk.output_res);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>"gives 20 max energy, 5 health" for a permanent stat grant, or null if empty.</summary>
+    private static string GameResBonusText(GameRes res)
+    {
+        try
+        {
+            if (res == null || res.IsEmpty()) return null;
+
+            var parts = new List<string>();
+            foreach (var type in res.Types)
+            {
+                int v = res.GetInt(type);
+                if (v == 0) continue;
+                parts.Add($"{(v > 0 ? "+" : "-")}{Mathf.Abs(v)} {GameResName(type)}");
+            }
+            if (Mathf.Abs(res.hp) >= 1f)
+                parts.Insert(0, $"{(res.hp > 0 ? "+" : "-")}{Mathf.RoundToInt(Mathf.Abs(res.hp))} health");
+
+            return parts.Count > 0 ? $"gives {string.Join(", ", parts)}" : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Spoken name of a player parameter, localized when the game has a name for it.</summary>
+    private static string GameResName(string type)
+    {
+        switch (type)
+        {
+            case "hp": return "health";
+            case "energy": return "energy";
+            case "sanity": return "sanity";
+            case "faith": return "faith";
+        }
+
+        var special = SpecialNeedName(type);
+        if (special != null) return special;
+
+        try
+        {
+            var loc = ScreenReader.StripNguiCodes(GJL.L(type) ?? "")?.Trim();
+            if (!string.IsNullOrWhiteSpace(loc) && loc != type && !loc.Contains("!")) return loc;
+        }
+        catch { }
+        return type.Replace("_", " ");
+    }
+
+    /// <summary>
+    /// What a gathering ("work") unlock lets you work on, when it has no description: the objects
+    /// belonging to the unlocked group (<see cref="ObjectGroupDefinition.objects"/>), named as the
+    /// world names the player hears elsewhere. Capped at three so a broad group stays listenable.
+    /// </summary>
+    private static string WorkUnlockFallbackText(string groupId)
+    {
+        try
+        {
+            var group = GameBalance.me.GetDataOrNull<ObjectGroupDefinition>(groupId);
+            if (group?.objects == null || group.objects.Count == 0) return null;
+
+            var names = new List<string>(3);
+            foreach (var obj in group.objects)
+            {
+                if (obj == null) continue;
+                var n = ScreenReader.StripNguiCodes(GJL.L(obj.id) ?? "")?.Trim();
+                if (string.IsNullOrWhiteSpace(n) || n == obj.id || n.Contains("!")) continue;
+                if (names.Contains(n)) continue;
+                names.Add(n);
+                if (names.Count == 3) break;
+            }
+            return names.Count > 0 ? $"lets you work on {string.Join(", ", names)}" : null;
         }
         catch { return null; }
     }
