@@ -771,35 +771,58 @@ internal static class BuildPlacementHandler
             step = Mathf.Clamp(Mathf.Sqrt(w * h / 8000f), 8f, Step);
         }
 
-        Vector2? best = null;
-        float bestSqr = float.MaxValue;
-        int tested = 0, valid = 0;
+        int tested = 0;
 
-        foreach (var rect in rects)
+        // Sweep every rotation, not just every position. A rotatable object's variations are
+        // different child sprites with different colliders, so the footprint changes shape with the
+        // rotation — a mirrored decoration can fit against the west wall in the variant that fits
+        // nowhere against the east one. Without this a "no spot" verdict is only true for whichever
+        // variant the game happened to hand us.
+        int startVariation = CurrentVariation();
+        int rotations = 0;
+        const int maxRotations = 8;
+
+        while (true)
         {
-            for (float x = rect.min.x; x <= rect.max.x && tested < maxSamples; x += step)
-            {
-                for (float y = rect.min.y; y <= rect.max.y && tested < maxSamples; y += step)
-                {
-                    tested++;
-                    var cand = new Vector2(x, y);
-                    FloatingWorldGameObject.MoveCurrentFloatingObject(cand, is_global_pos: true);
-                    if (!FloatingWorldGameObject.can_be_built) continue;
+            Vector2? best = null;
+            float bestSqr = float.MaxValue;
 
-                    valid++;
-                    float d = (cand - playerPos).sqrMagnitude;
-                    if (d < bestSqr) { bestSqr = d; best = cand; }
+            foreach (var rect in rects)
+            {
+                for (float x = rect.min.x; x <= rect.max.x && tested < maxSamples; x += step)
+                {
+                    for (float y = rect.min.y; y <= rect.max.y && tested < maxSamples; y += step)
+                    {
+                        tested++;
+                        var cand = new Vector2(x, y);
+                        FloatingWorldGameObject.MoveCurrentFloatingObject(cand, is_global_pos: true);
+                        if (!FloatingWorldGameObject.can_be_built) continue;
+
+                        float d = (cand - playerPos).sqrMagnitude;
+                        if (d < bestSqr) { bestSqr = d; best = cand; }
+                    }
                 }
             }
+
+            if (best.HasValue)
+            {
+                FloatingWorldGameObject.MoveCurrentFloatingObject(best.Value, is_global_pos: true);
+                var word = string.IsNullOrEmpty(subZoneId) ? "free spot" : "wall spot";
+                var turned = rotations > 0 ? " Rotated it to make it fit." : "";
+                _log?.LogInfo($"[BUILD] found spot at {best.Value} after {rotations} rotation(s), variation={CurrentVariation()}");
+                ScreenReader.Say($"Found a {word}.{turned} {DirectionFromPlayer()}. Valid.{PointsSuffix()}", interrupt: true);
+                return;
+            }
+
+            if (!TryRotate() || ++rotations >= maxRotations || CurrentVariation() == startVariation)
+                break;
+            tested = 0; // each variation gets its own sample budget
+            _log?.LogInfo($"[BUILD] no spot in variation {startVariation}+{rotations}; trying next rotation");
         }
 
-        if (best.HasValue)
-        {
-            FloatingWorldGameObject.MoveCurrentFloatingObject(best.Value, is_global_pos: true);
-            var word = string.IsNullOrEmpty(subZoneId) ? "free spot" : "wall spot";
-            ScreenReader.Say($"Found a {word}. {DirectionFromPlayer()}. Valid.{PointsSuffix()}", interrupt: true);
-            return;
-        }
+        // Leave the ghost on the variation the player started with.
+        for (int i = 0; i < maxRotations && CurrentVariation() != startVariation; i++)
+            if (!TryRotate()) break;
 
         // Nothing valid. Log the footprint size + swept area/step so a repeat tells us whether the
         // object simply can't fit the zone (many cells) or the sweep was still too coarse.
@@ -816,8 +839,31 @@ internal static class BuildPlacementHandler
         // Restore the ghost, log the full picture (incl. per-zone details), and speak a diagnosis so
         // we can tell WHY without a log dive.
         FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
-        ReportNoSpotDiagnostic(subZoneId, matching, tested, origin);
+        var closest = string.IsNullOrEmpty(subZoneId) ? AnalyzeBestFit(rects, subZoneId, playerPos) : null;
+        ReportNoSpotDiagnostic(subZoneId, matching, tested, origin, closest);
         FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
+    }
+
+    /// <summary>The ghost's current rotation variant, or -1 when it has none.</summary>
+    private static int CurrentVariation()
+    {
+        try { return FloatingWorldGameObject.cur_floating?.wobj?.variation ?? -1; }
+        catch { return -1; }
+    }
+
+    /// <summary>Turn the ghost to its next rotation variant. False when it doesn't rotate at all.</summary>
+    private static bool TryRotate()
+    {
+        try
+        {
+            if (!FloatingWorldGameObject.IsObjectRotatable()) return false;
+            FloatingWorldGameObject.RotateCurrentFloatingObject(true);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>All WorldSubZone objects (active or not) whose sub_zone_id matches, i.e. the wall
@@ -865,7 +911,160 @@ internal static class BuildPlacementHandler
     /// matching wall strips (active state, collider bounds, and the game's can_be_built when the
     /// ghost is dropped on each zone's centre) — and speak a short diagnosis the user can relay.
     /// </summary>
-    private static void ReportNoSpotDiagnostic(string subZoneId, List<WorldSubZone> matching, int tested, Vector3 origin)
+    /// <summary>
+    /// The object fits nowhere — so find where it comes CLOSEST and say what is in the way there.
+    /// The game accepts a spot only when every one of the ghost's grid cells is both free
+    /// (<see cref="BuildGrid.IsCellBusy"/>) and inside the build zone
+    /// (<see cref="FlowGridCell.IsInsideWorldZone"/>), and those two failures need opposite fixes:
+    /// something movable standing in the way (a worker, a dropped crate, the player) versus the
+    /// object simply being bigger than the room. Sweeps coarsely — this only runs after the fine
+    /// sweep already failed — and names the blockers at the single best position.
+    /// Returns a spoken sentence, or null when nothing could be measured.
+    /// </summary>
+    private static string AnalyzeBestFit(List<Bounds> rects, string subZoneId, Vector2 playerPos)
+    {
+        try
+        {
+            var floating = FloatingWorldGameObject.cur_floating;
+            if (floating == null) return null;
+
+            var cells = floating.gameObject.GetComponentsInChildren<FlowGridCell>();
+            if (cells == null || cells.Length == 0) return null;
+
+            var zoneId = Logics?.cur_build_zone_id;
+            int counted = cells.Count(c => c != null && c.gameObject != null
+                                           && c.gameObject.activeSelf
+                                           && c.cell_type != FlowGridCell.CellType.TotemArea);
+            if (counted == 0) return null;
+
+            Vector2 best = playerPos;
+            int bestBlocked = int.MaxValue, bestOutside = 0, bestBusy = 0;
+
+            foreach (var rect in rects)
+            {
+                for (float x = rect.min.x; x <= rect.max.x; x += Step)
+                {
+                    for (float y = rect.min.y; y <= rect.max.y; y += Step)
+                    {
+                        var cand = new Vector2(x, y);
+                        FloatingWorldGameObject.MoveCurrentFloatingObject(cand, is_global_pos: true);
+                        CountBlockedCells(cells, zoneId, subZoneId, out int outside, out int busy, null, null);
+
+                        int blocked = outside + busy;
+                        if (blocked > bestBlocked) continue;
+                        // Prefer fewer blocked cells; on a tie take the spot nearer the player.
+                        if (blocked == bestBlocked && (cand - playerPos).sqrMagnitude >= (best - playerPos).sqrMagnitude)
+                            continue;
+                        bestBlocked = blocked;
+                        bestOutside = outside;
+                        bestBusy = busy;
+                        best = cand;
+                    }
+                }
+            }
+
+            if (bestBlocked == int.MaxValue) return null;
+
+            // Name what sits on the best spot.
+            var blockers = new HashSet<string>();
+            var characters = new HashSet<string>();
+            FloatingWorldGameObject.MoveCurrentFloatingObject(best, is_global_pos: true);
+            CountBlockedCells(cells, zoneId, subZoneId, out _, out _, blockers, characters);
+
+            _log?.LogInfo($"[BUILD] best fit at {best}: {bestBlocked}/{counted} cells blocked " +
+                          $"(outside={bestOutside} busy={bestBusy}) blockers=[{string.Join(", ", blockers)}] " +
+                          $"characters=[{string.Join(", ", characters)}]");
+
+            var where = DirectionFromPlayer(best);
+            var parts = new List<string> { $"Closest it comes is {where}, with {bestBlocked} of {counted} tiles blocked" };
+            if (bestBusy > 0)
+                parts.Add(blockers.Count > 0
+                    ? $"{bestBusy} taken by {string.Join(", ", blockers.Take(3))}"
+                    : $"{bestBusy} taken by something standing there");
+            if (bestOutside > 0)
+                parts.Add($"{bestOutside} outside the build area");
+
+            var tail = "";
+            // A person standing on the spot is the one blocker that clears itself — worth saying,
+            // because the same build succeeds a minute later with no other change.
+            if (characters.Count > 0 && bestOutside == 0)
+                tail = $" {string.Join(" and ", characters.Take(2))} standing there blocks it; wait for them to move, or leave and come back, then try again.";
+            else if (bestOutside > 0 && bestBusy == 0)
+                tail = " It is not blocked by objects, it simply does not fit inside the build area anywhere.";
+
+            return string.Join(", ", parts) + "." + tail;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] AnalyzeBestFit failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Split the ghost's failing cells at its current position into "outside the build zone" and
+    /// "occupied", mirroring <see cref="FloatingWorldGameObject.RecalculateAvailability"/>. When
+    /// <paramref name="blockers"/> is given, the occupying objects are named into it.
+    /// </summary>
+    private static void CountBlockedCells(FlowGridCell[] cells, string zoneId, string subZoneId,
+        out int outside, out int busy, HashSet<string> blockers, HashSet<string> characters)
+    {
+        outside = 0;
+        busy = 0;
+        const int mask = 8389121; // layers 0, 9, 23 — same as BuildGrid.IsCellBusy
+
+        foreach (var cell in cells)
+        {
+            if (cell == null || cell.gameObject == null || !cell.gameObject.activeSelf) continue;
+            if (cell.cell_type == FlowGridCell.CellType.TotemArea) continue;
+
+            var pos = cell.transform.position;
+            if (BuildGrid.IsCellBusy(pos))
+            {
+                busy++;
+                if (blockers == null) continue;
+                foreach (var hit in Physics2D.OverlapBoxAll(pos, BuildGrid.GRID_CHECK_BOX_SIZE, 0f, mask))
+                {
+                    if (hit == null || BuildGrid.SkipCollider(hit)) continue;
+                    if (hit.GetComponentInParent<FloatingWorldGameObject>() != null) continue;
+                    var wgo = hit.GetComponentInParent<WorldGameObject>();
+                    if (wgo == null) continue;
+                    var name = WgoName(wgo);
+                    if (string.IsNullOrEmpty(name)) continue;
+                    blockers.Add(name);
+                    if (characters != null && IsCharacter(wgo))
+                        characters.Add(wgo.is_player ? "You" : name);
+                }
+                continue;
+            }
+
+            if (!cell.IsInsideWorldZone(zoneId, subZoneId))
+            {
+                outside++;
+                // Naming pass only: record where the offending tiles sit, so a log tells us whether
+                // the object misses the zone on one edge (nudge it) or overhangs everywhere (too big).
+                if (blockers != null) _log?.LogInfo($"[BUILD]   outside-zone cell at {pos}");
+            }
+        }
+    }
+
+    /// <summary>A person (the player, an NPC, a mob, a zombie worker) rather than a fixed object.</summary>
+    private static bool IsCharacter(WorldGameObject w)
+    {
+        try
+        {
+            if (w.is_player) return true;
+            var t = w.obj_def?.type;
+            return t == ObjectDefinition.ObjType.NPC || t == ObjectDefinition.ObjType.Mob;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ReportNoSpotDiagnostic(string subZoneId, List<WorldSubZone> matching, int tested, Vector3 origin,
+        string closest = null)
     {
         string objId = null;
         try { objId = FloatingWorldGameObject.cur_floating?.wobj?.obj_id; } catch { }
@@ -912,7 +1111,11 @@ internal static class BuildPlacementHandler
         }
         else
         {
-            ScreenReader.Say("No buildable spot anywhere in this build area.", interrupt: true);
+            ScreenReader.Say(
+                string.IsNullOrEmpty(closest)
+                    ? "No buildable spot anywhere in this build area."
+                    : $"No buildable spot anywhere in this build area. {closest}",
+                interrupt: true);
         }
     }
 

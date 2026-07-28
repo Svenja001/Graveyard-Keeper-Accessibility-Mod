@@ -19,6 +19,7 @@ public class Plugin : BaseUnityPlugin
         DayTimeAnnouncer.Init(Log);
         QuestAnnouncer.Init(Log);
         ZoneScoreAnnouncer.Init(Log);
+        BuildZoneAudit.Init(Log);
         ZoneAnnouncer.Init(Log);
         TechPointsAnnouncer.Init(Log);
         HealthEnergyAnnouncer.Init(Log);
@@ -541,6 +542,8 @@ public class Plugin : BaseUnityPlugin
                 DayTimeAnnouncer.Announce();
             else if (Input.GetKeyDown(KeyCode.G) && !ctrl)
                 ZoneScoreAnnouncer.Announce();
+            else if (Input.GetKeyDown(KeyCode.G) && ctrl)
+                BuildZoneAudit.Announce();
             else if (Input.GetKeyDown(KeyCode.P) && !ctrl)
                 TechPointsAnnouncer.Announce();
             else if (Input.GetKeyDown(KeyCode.H) && !ctrl)
