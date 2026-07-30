@@ -1050,9 +1050,14 @@ internal static class GUIAccessibility
         // carry a day icon (top_icon_txt = ObjectDefinition.day_icon, e.g. "(d3)") naming the
         // weekday tied to their sin. We translate it to a readable German day via the linked NPC's
         // id, but only when the game ITSELF draws a day icon — everyone else has an empty icon and
-        // gets no day line. NOTE: this is the NPC's *associated* day, NOT a visiting schedule —
-        // the Snake (npc_cultist, "(d3)") is talkable at his spot every day despite showing Tag
-        // des Neids — so we phrase it "Zugehöriger Tag", not "Besuchstag"/"appears on".
+        // gets no day line. This day IS the NPC's visiting schedule: each of the six is spawned and
+        // removed by a logic pair (cultist_spawn/cultist_remove, …) that fires on the 6-day cycle
+        // at fixed "t mod 6" marks — for the Snake 3.9 → 4.65, i.e. in the world from ~21:36 the
+        // evening before Tag des Neids until ~15:36 on it, and absent the other five days. (An
+        // earlier comment here claimed he was talkable at his spot every day; three spawn/remove
+        // cycles in Player.log — 699.9/705.9/711.9 and 700.65/706.65/712.65 — disprove that.)
+        // We still phrase it "Zugehöriger Tag" because that is what the icon labels; the arrival
+        // window itself is not something the game shows.
         bool gameShowsDay = !string.IsNullOrWhiteSpace(card.top_icon_txt?.text);
         var npcId = GetLinkedNpcId(card);
         var visitingDay = DayTimeAnnouncer.VisitingDayForNpc(npcId);

@@ -2559,6 +2559,48 @@ internal static class ObjectNavigator
         ("cliff", "gd_actors_hiding_point"),
     };
 
+    // Landmarks anchored on a named GD point that exist ONLY while an NPC task is running, for
+    // meeting spots that aren't inside a world zone of their own (so GdPointZoneAnchors has no
+    // zone to attach to, and hijacking a neighbouring zone would drag a useful landmark off its
+    // real place). They appear when the task goes Visible and vanish when it completes.
+    // (npc id, task id, GD point gd_tag/name, spoken label).
+    private static readonly (string npcId, string taskId, string gdPoint, string label)[] TaskGdPointLandmarks =
+    {
+        // Snake's trap for the vampire hunter (task snake_trap: "meet me at the Witch Hill, right
+        // above the road"). He is teleported to gd_cultist_near_stone (7272, -1452) and locked
+        // there, ~6 m north of the mountain road and ~35 m south-west of the burning site — open
+        // ground below the hill, i.e. no zone anchors it. Bring one wooden plank; the flow charges
+        // it as the price of the "here's a plank" answer.
+        ("npc_cultist", "snake_trap", "gd_cultist_near_stone", "Snake meeting point"),
+    };
+
+    /// <summary>
+    /// True while <paramref name="taskId"/> is a Visible (active) task on <paramref name="npcId"/> —
+    /// the same state the HUD task tracker shows, read the way QuestAnnouncer reads it.
+    /// </summary>
+    private static bool IsTaskVisible(string npcId, string taskId)
+    {
+        try
+        {
+            var npcs = MainGame.me?.save?.known_npcs?.npcs;
+            if (npcs == null) return false;
+            foreach (var npc in npcs)
+            {
+                if (npc?.tasks == null || !string.Equals(npc.npc_id, npcId, StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (var task in npc.tasks)
+                {
+                    if (task == null || task.state != KnownNPC.TaskState.State.Visible) continue;
+                    if (string.Equals(task.id, taskId, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] IsTaskVisible failed for {npcId}/{taskId}: {ex.Message}");
+        }
+        return false;
+    }
+
     /// <summary>
     /// The GD point a zone landmark should anchor on, or null if the zone has no override (or the
     /// point isn't in the world right now — GD points can be disabled per quest state, and
@@ -2729,6 +2771,26 @@ internal static class ObjectNavigator
                     Label = label,
                     Position = wgo.pos,
                     Distance = Vector2.Distance(wgo.pos, playerPos)
+                });
+            }
+
+            // Quest meeting spots that are bare ground (see TaskGdPointLandmarks). ExactPoint so
+            // auto-walk ends ON the point instead of a tile short — these are trigger/handover
+            // spots, not something you press E on.
+            foreach (var (npcId, taskId, gdPoint, label) in TaskGdPointLandmarks)
+            {
+                if (!IsTaskVisible(npcId, taskId)) continue;
+                // GD points can be disabled per quest state and GetGDPointBy* skip disabled ones,
+                // so a null here just means "not in the world right now" — stay silent.
+                var point = WorldMap.GetGDPointByGDTag(gdPoint, log_if_null: false)
+                            ?? WorldMap.GetGDPointByName(gdPoint, log_if_null: false);
+                if (point == null) continue;
+                list.Add(new NavigationTarget
+                {
+                    Label = label,
+                    Position = point.pos,
+                    Distance = Vector2.Distance(point.pos, playerPos),
+                    ExactPoint = true
                 });
             }
 
