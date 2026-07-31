@@ -195,6 +195,15 @@ internal static class ObjectNavigator
     private static float _bestEndGap;                // smallest route-endpoint-to-goal gap seen so far
     private static int _stalledRecomputes = 0;       // consecutive partial routes with no gap improvement
 
+    // Emergency dungeon escape (L). The exit object of the walk L last started, so a later route
+    // failure can be recognised as "the escape walk failed" no matter what else happened in
+    // between, and the armed one-shot offer to be moved onto the exit outright. Being unable to
+    // leave a dungeon level is unrecoverable for a blind player, so the key must always have an
+    // answer even when the navmesh has none.
+    private static WorldGameObject _escapeExitObject;
+    private static bool _escapeTeleportArmed;
+    private static float _escapeTeleportArmedAt;
+
     // Compass beacon: the manual fallback used only when the auto-walker gets boxed in by
     // geometry it can't route around. We call out bearing + distance and let the player walk.
     private static bool _beaconActive = false;
@@ -331,6 +340,15 @@ internal static class ObjectNavigator
     private const float PullbackStep = 6f * TileSize;
     private const int MaxPullbackTries = 12;
     private const float PullbackMinToPlayer = 12f * TileSize;
+
+    // Un-wedge search (see TryFreeWedgedPlayer): how far around the player we look for a walkable
+    // graph-0 node that is actually connected to where they want to go, and how finely we sample.
+    // Bounded to a room-ish radius so freeing the player is always a short, explicable hop.
+    private const float UnwedgeMaxRadius = 10f * TileSize;
+    private const float UnwedgeStep = 0.5f * TileSize;
+    private const int UnwedgeRayCount = 16;
+    // How long an armed "press L again to be moved onto the exit" offer stays valid.
+    private const float EscapeConfirmSeconds = 20f;
 
     // Beacon (manual fallback) thresholds.
     private const float BeaconHandoffDistance = 15f * TileSize;
@@ -756,6 +774,14 @@ internal static class ObjectNavigator
     /// the level) or simply turns back to keep fighting. Locked arenas like level 10 spawn two
     /// identically-generated exits and seal the downward one behind a grille; the way out,
     /// however, is always the spawn-in point and is never gated, so this guarantees an escape.
+    ///
+    /// Walking is only the FIRST answer, though — it depends on the navmesh, and the navmesh can
+    /// have no answer at all. If the player's own position is on a graph-0 island (wedged in
+    /// scenery, or dropped into a pocket by a glide fallback) nothing on the level is routable and
+    /// the old behaviour was to hand them the compass beacon, which is useless to someone whose
+    /// body cannot move: that is a lost save. So this now escalates — free the player onto
+    /// connected ground first, and if even that fails, offer to put them on the exit outright on a
+    /// second press. See [[dungeon-two-exits-and-escape-key]].
     /// </summary>
     internal static void WalkToDungeonExit()
     {
@@ -796,15 +822,71 @@ internal static class ObjectNavigator
             Distance = bestDist
         };
 
+        // Where we would put the player if walking turns out to be impossible: the exit's own
+        // interaction tile, pulled onto real navmesh so they land standing rather than in a wall.
+        var standPos = InteractionDest(target, out _);
+        if (TryGraph0Node(standPos, out _, out var snappedStand) &&
+            Vector2.Distance(standPos, snappedStand) <= 2f * TileSize)
+            standPos = snappedStand;
+
+        // Second press of an armed offer: skip the navmesh entirely and put them on the exit. Still
+        // POSITIONING only — they press E to leave, or walk off and keep fighting, exactly as when
+        // the walk succeeds.
+        if (_escapeTeleportArmed && Time.realtimeSinceStartup - _escapeTeleportArmedAt <= EscapeConfirmSeconds)
+        {
+            _escapeTeleportArmed = false;
+            _log?.LogWarning($"[NAVIGATOR] Escape-to-exit: confirmed teleport to {best.obj_id} at {standPos}");
+            if (TeleportPlayerTo(standPos, "Moved you to the dungeon exit. Press E to leave.",
+                                 () => SetArrivedTarget(best)))
+                return;
+            ScreenReader.Say("Could not move you to the exit.", interrupt: true);
+            return;
+        }
+        _escapeTeleportArmed = false;
+
         // Fresh user walk: clear the "A* already failed" guards (mirrors WalkToSelected).
         _astarFailedForWalk = false;
         _rescanRetried = false;
         _rescanRetryPending = false;
         ClearArrivedTarget();
+        _escapeExitObject = best;
 
-        _log?.LogInfo($"[NAVIGATOR] Escape-to-exit: walking to {best.obj_id} at {best.pos} ({bestDist:F0}u)");
-        if (bestDist > LongWalkStartDistance) StartLongWalk(target);
+        // Ask up front whether a route can exist at all, rather than discovering it through a dozen
+        // failing async queries. If it can't, the player — not the exit — is usually the problem.
+        if (!CanRouteOnGraph0(playerPos, standPos))
+        {
+            _log?.LogWarning($"[NAVIGATOR] Escape-to-exit: no graph-0 connection from {playerPos} to {standPos}");
+            if (TryFreeWedgedPlayer(standPos, () => StartEscapeWalk(target, best)))
+                return;
+
+            ArmEscapeTeleport();
+            return;
+        }
+
+        StartEscapeWalk(target, best);
+    }
+
+    private static void StartEscapeWalk(NavigationTarget target, WorldGameObject exit)
+    {
+        var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+        target.Distance = Vector2.Distance(playerPos, target.Position);
+        _escapeExitObject = exit;
+        _log?.LogInfo($"[NAVIGATOR] Escape-to-exit: walking to {exit.obj_id} at {exit.pos} ({target.Distance:F0}u)");
+        if (target.Distance > LongWalkStartDistance) StartLongWalk(target);
         else WalkToTarget(target);
+    }
+
+    /// <summary>
+    /// Offer the last-resort move-me-onto-the-exit, taken by pressing L again. Kept behind a
+    /// confirmation because it is a teleport: automatic on every failed escape it would quietly
+    /// paper over navigation bugs, but a stranded player must never be told "no".
+    /// </summary>
+    private static void ArmEscapeTeleport()
+    {
+        _escapeTeleportArmed = true;
+        _escapeTeleportArmedAt = Time.realtimeSinceStartup;
+        ScreenReader.Say("No path to the dungeon exit from here. Press L again to be moved onto it.",
+                         interrupt: true);
     }
 
     /// <summary>
@@ -1207,6 +1289,26 @@ internal static class ObjectNavigator
     private static void DirectGlideTo(NavigationTarget target)
     {
         var dest = InteractionDest(target, out var facePos);
+
+        // Land on a tile the player body actually fits on. The glide is Kinematic, so it passes
+        // straight through geometry and drops the player wherever the raw approach point happens to
+        // be — and for an object tucked into an alcove (a dungeon stairwell, a prop against a wall)
+        // that point is INSIDE the scenery. Control comes back, the body turns Dynamic inside a
+        // collider, and the player is wedged: nothing routes out of that pocket and manual walking
+        // does nothing either. Snapping to the nearest walkable player-graph node costs a fraction
+        // of a tile of precision and makes that outcome impossible.
+        PadPlayerGraph = true;
+        try
+        {
+            var snapped = SnapToWalkable(dest);
+            if (Vector2.Distance(dest, snapped) <= 1.5f * TileSize) dest = snapped;
+            else _log?.LogWarning($"[NAVIGATOR] Glide dest {dest}: nearest walkable node too far, gliding to the raw point");
+        }
+        finally
+        {
+            PadPlayerGraph = false;
+        }
+
         _fallbackPending = false;
         _escalatePending = false;
         _shortWalkTarget = target;   // so on_complete biases vanilla E onto it
@@ -1235,8 +1337,18 @@ internal static class ObjectNavigator
     {
         var target = _longWalkTarget;
         _longWalkActive = false;
-        ScreenReader.Say($"No clear auto-walk path. Switching to manual guidance to {target.Label}.", interrupt: true);
         _log?.LogWarning($"[NAVIGATOR] {reason}; beacon fallback");
+
+        // The walk that just died was the dungeon escape: bearing-and-distance is no answer when the
+        // reason you can't reach the exit may be that you can't move at all. Offer the teleport.
+        if (_escapeExitObject != null && target.Object == _escapeExitObject)
+        {
+            StartBeacon(target);
+            ArmEscapeTeleport();
+            return;
+        }
+
+        ScreenReader.Say($"No clear auto-walk path. Switching to manual guidance to {target.Label}.", interrupt: true);
         StartBeacon(target);
     }
 
@@ -1811,6 +1923,131 @@ internal static class ObjectNavigator
         return false;
     }
 
+    /// <summary>
+    /// The nearest graph-0 node to a world point, plus that node's own position. Graph 0 is the
+    /// whole-map NPC navmesh and is always scanned, so this works anywhere without a rescan.
+    /// </summary>
+    private static bool TryGraph0Node(Vector2 p, out Pathfinding.GraphNode node, out Vector2 nodePos)
+    {
+        node = null;
+        nodePos = p;
+        try
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return false;
+
+            var constraint = Pathfinding.NNConstraint.Default;
+            constraint.graphMask = 1 << 0;
+
+            var nn = astar.GetNearest(new Vector3(p.x, p.y, 0f), constraint);
+            if (nn.node == null) return false;
+            node = nn.node;
+            nodePos = new Vector2(nn.clampedPosition.x, nn.clampedPosition.y);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] TryGraph0Node failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether graph 0 could route between two points AT ALL, decided the same way the pathfinder
+    /// itself decides it: <see cref="Pathfinding.ABPath"/> aborts with "no valid path to the target"
+    /// when the start and end nodes carry different flood-fill Area ids, i.e. they sit on
+    /// disconnected components. Asking up front lets us react to a hopeless route immediately
+    /// instead of watching twelve async pull-back queries fail one after another.
+    /// </summary>
+    private static bool CanRouteOnGraph0(Vector2 from, Vector2 to)
+    {
+        if (!TryGraph0Node(from, out var a, out _)) return false;
+        if (!TryGraph0Node(to, out var b, out _)) return false;
+        try { return Pathfinding.PathUtilities.IsPathPossible(a, b); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Free a player who is standing somewhere the navmesh can't route out of, by hopping them to
+    /// the nearest walkable spot that IS connected to where they are trying to go.
+    ///
+    /// This is the "hard stuck" case: a scripted glide (or the game's own physics) can leave the
+    /// body in a pocket of scenery — inside a stair alcove, wedged behind a prop — that maps to a
+    /// graph-0 node on its own tiny island. From there every route request fails, auto-walk has
+    /// nothing to offer, and walking out manually doesn't work either because the body is jammed.
+    /// We sample rings outward from the player and take the first walkable node that shares an Area
+    /// with the goal, then teleport there. Bounded to <see cref="UnwedgeMaxRadius"/> so this is
+    /// always a short hop out of the pocket, never a shortcut across the level.
+    ///
+    /// Only called from the dungeon escape key, where the player has explicitly asked to be got
+    /// out; ordinary walks must not teleport people through walls (a building interior is also a
+    /// disconnected island, and stepping "out of" it would mean clipping through its wall).
+    /// </summary>
+    private static bool TryFreeWedgedPlayer(Vector2 goal, Action onFreed)
+    {
+        var player = MainGame.me?.player;
+        if (player == null) return false;
+
+        if (!TryGraph0Node(goal, out var goalNode, out _) || !goalNode.Walkable) return false;
+
+        var pp = player.pos;
+        try
+        {
+            for (float r = UnwedgeStep; r <= UnwedgeMaxRadius; r += UnwedgeStep)
+            {
+                for (int i = 0; i < UnwedgeRayCount; i++)
+                {
+                    float a = i * Mathf.PI * 2f / UnwedgeRayCount;
+                    var probe = pp + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
+                    if (!TryGraph0Node(probe, out var node, out var nodePos)) continue;
+                    if (!node.Walkable) continue;
+                    if (!Pathfinding.PathUtilities.IsPathPossible(node, goalNode)) continue;
+
+                    _log?.LogWarning($"[NAVIGATOR] Player wedged at {pp}; freeing to connected node {nodePos} " +
+                                     $"({Vector2.Distance(pp, nodePos):F0}u)");
+                    return TeleportPlayerTo(nodePos,
+                        "You were stuck in the scenery. Moved you to walkable ground.", onFreed);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] TryFreeWedgedPlayer failed: {ex.Message}");
+        }
+
+        _log?.LogWarning($"[NAVIGATOR] Player wedged at {pp}; no connected node within {UnwedgeMaxRadius / TileSize:F0} tiles");
+        return false;
+    }
+
+    /// <summary>
+    /// Move the player to a world position using the game's own faded teleport (which also
+    /// recalculates their chunk and pulls the camera along). Navigation is torn down first so no
+    /// in-flight route/beacon survives the jump; Update's teleport detector schedules the navmesh
+    /// rescans at the landing.
+    /// </summary>
+    private static bool TeleportPlayerTo(Vector2 worldPos, string announcement, Action after = null)
+    {
+        try
+        {
+            var character = MainGame.me?.player?.components?.character;
+            if (character == null) return false;
+
+            AbortForTeleport();
+            ReleaseScriptControl();
+
+            // TeleportWithFade takes a GRID position (it multiplies by the 96-unit tile size).
+            character.TeleportWithFade(worldPos / TileSize, null, () => after?.Invoke());
+            ScreenReader.Say(announcement, interrupt: true);
+            _log?.LogInfo($"[NAVIGATOR] Teleported player to {worldPos}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[NAVIGATOR] TeleportPlayerTo failed: {ex.Message}");
+            return false;
+        }
+    }
+
     private static void StartWalk(Vector2 dest, string label, MovementComponent.GoToMethod method)
     {
         try
@@ -1960,6 +2197,9 @@ internal static class ObjectNavigator
         _hasLastPlayerPos = false;
         _hasLastEnvironmentState = false;
         _fastRefreshFramesLeft = 0;
+        // The escape offer belongs to one dungeon level; never let it survive into the next.
+        _escapeExitObject = null;
+        _escapeTeleportArmed = false;
         // Which doorway variant the game runs is a property of the SAVE (see DedupeDoorVariants),
         // so what was learned in the last one must not carry into the next.
         _liveDoorTags.Clear();
