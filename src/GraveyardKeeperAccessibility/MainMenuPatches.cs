@@ -1490,7 +1490,24 @@ internal static class GUIAccessibility
 
         var needs = CraftNeedsText(cri);
         if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
-        label += CanBuild(cri) ? ". Ready" : ". Not enough materials";
+
+        if (CanBuild(cri))
+        {
+            label += ". Ready";
+        }
+        else
+        {
+            // Say what is actually short. Build costs are paid out of the build zone's stock
+            // (BuildModeLogics.CanBuild -> multi_inventory.IsEnoughItems), and some of them are
+            // pseudo-items kept on camp objects rather than in your bags — a free refugee tent
+            // place, satisfaction points — so "not enough materials" alone leaves you guessing.
+            string missing = null;
+            try { missing = MissingNeedsText(cri.craft_definition, MainGame.me?.build_mode_logics?.multi_inventory); }
+            catch { }
+            label += missing != null ? $". Missing {missing}" : ". Not enough materials";
+            try { Plugin.Log.LogInfo($"[BUILD] {cri.craft_definition?.id} unaffordable: {missing ?? "shortfall unknown"}"); }
+            catch { }
+        }
         return label;
     }
 
@@ -2828,9 +2845,54 @@ internal static class GUIAccessibility
                     if (materialsOk) return "No fuel";
                 }
             }
+
+            // Name the actual shortfall instead of the blanket "not enough materials" — a recipe
+            // whose only missing piece is an odd pseudo-item (a free refugee tent place, a
+            // reputation star) otherwise reads as unaffordable for no visible reason.
+            var missing = MissingNeedsText(cri?.current_craft, MainGame.me?.player?.GetMultiInventoryForInteraction());
+            if (missing != null) return $"Missing {missing}";
         }
         catch { }
         return "Not enough materials";
+    }
+
+    /// <summary>
+    /// Which of a recipe's needs the given stock can't cover, as "name, have X of Y" — or null when
+    /// everything is covered (or we can't tell). Uses the game's own per-need
+    /// <see cref="MultiInventory.IsEnoughItem"/> so multiquality groups aren't reported as missing
+    /// just because their group id isn't a real item, and counts the same way the check does.
+    /// </summary>
+    private static string MissingNeedsText(CraftDefinition craft, MultiInventory stock)
+    {
+        try
+        {
+            if (craft?.needs == null || craft.needs.Count == 0 || stock == null) return null;
+
+            var parts = new List<string>();
+            foreach (var need in craft.needs)
+            {
+                if (need == null || need.IsEmpty()) continue;
+                if (stock.IsEnoughItem(need)) continue;
+
+                // Count over the same ids IsEnoughItem sums: the multiquality variants when the
+                // need is a group, otherwise the need's own id.
+                int have = 0;
+                var ids = (need.multiquality_items != null && need.multiquality_items.Count > 1)
+                    ? need.multiquality_items
+                    : new List<string> { need.id };
+                foreach (var id in ids)
+                {
+                    try { have += stock.GetTotalCount(id); } catch { }
+                }
+
+                var iname = ResolveNeedItemName(need) ?? SpecialNeedName(need.id) ?? need.id;
+                if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
+                parts.Add($"{iname}, have {have} of {need.value}");
+            }
+
+            return parts.Count > 0 ? string.Join("; ", parts) : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>Comma-separated "amount item" list of a recipe's ingredients, or null.</summary>
