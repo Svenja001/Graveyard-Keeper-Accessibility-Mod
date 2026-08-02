@@ -70,9 +70,18 @@ internal static class ScreenReader
         _sapiAvailable = false;
     }
 
+    /// <summary>
+    /// When we last said anything at all (unscaled time). Used to detect stretches of silence —
+    /// see <see cref="CutsceneAnnouncer"/>, which has to distinguish "a cutscene is playing a quiet
+    /// camera pan" from "nothing is happening", something a sighted player reads off the screen.
+    /// </summary>
+    internal static float LastSpokenAt { get; private set; }
+
     internal static bool Say(string text, bool interrupt = true)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
+
+        LastSpokenAt = Time.unscaledTime;
 
         if (_prismAvailable)
             return PrismWrapper.Speak(text, interrupt);

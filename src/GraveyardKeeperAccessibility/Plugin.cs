@@ -19,6 +19,7 @@ public class Plugin : BaseUnityPlugin
         DayTimeAnnouncer.Init(Log);
         QuestAnnouncer.Init(Log);
         ZoneScoreAnnouncer.Init(Log);
+        CutsceneAnnouncer.Init(Log);
         BuildZoneAudit.Init(Log);
         ZoneAnnouncer.Init(Log);
         TechPointsAnnouncer.Init(Log);
@@ -83,6 +84,11 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(DialogueChoiceHandler), nameof(DialogueChoiceHandler.OnAnswersShown),
             typeof(MultiAnswerGUI), "ShowAnswers",
             new[] { typeof(List<AnswerVisualData>), typeof(bool) });
+        // Log the answers the game filtered out before drawing (locked or blacklisted phrases) —
+        // that list is what explains an NPC who only offers "Leave". See DialogueChoiceHandler.
+        TryPatchPrefix(harmony, typeof(DialogueChoiceHandler), nameof(DialogueChoiceHandler.LogOfferedAnswers),
+            typeof(MultiAnswerGUI), "ShowAnswers",
+            new[] { typeof(List<AnswerVisualData>), typeof(bool) });
         TryPatch(harmony, typeof(DialogueChoiceHandler), nameof(DialogueChoiceHandler.OnAnswerChosen),
             typeof(MultiAnswerGUI), "OnChosen", new[] { typeof(string) });
 
@@ -108,6 +114,12 @@ public class Plugin : BaseUnityPlugin
         TryPatchPrefixPostfix(harmony, typeof(Patches),
             nameof(Patches.VendorGUI_FinishOffer_Prefix), nameof(Patches.VendorGUI_FinishOffer_Postfix),
             typeof(VendorGUI), "FinishOffer", Type.EmptyTypes);
+
+        // Notice when an NPC interaction produces no dialogue at all (a quest step whose conditions
+        // aren't met leaves the NPC mute) so the player isn't left waiting on silence.
+        // See Patches.WorldGameObject_Interact_Postfix / InteractionDetector.CheckSilentNpc.
+        TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.WorldGameObject_Interact_Prefix),
+            typeof(WorldGameObject), "Interact", new[] { typeof(WorldGameObject), typeof(bool), typeof(float) });
 
         // Speak "Got 4 wood" whenever an item lands in the player's inventory (ground pickups,
         // finished crafts, fishing, vendor buys). See Patches.WorldGameObject_AddToInventory_Postfix.
@@ -262,6 +274,9 @@ public class Plugin : BaseUnityPlugin
 
                 // Real-time combat assistance (auto-aim, enemy radar, one-key attack).
                 CombatAssist.Update();
+
+                // "Cutscene, please wait" + reminders through its silent camera/walk stretches.
+                CutsceneAnnouncer.Update();
 
                 // Dungeon survival: auto-eat food / drink potions when a bar runs low (U toggles).
                 AutoConsume.Tick();
@@ -560,6 +575,12 @@ public class Plugin : BaseUnityPlugin
                 ToolbarHandler.ReadHotbar();
             else if (Input.GetKeyDown(KeyCode.L) && !ctrl)
                 ObjectNavigator.WalkToDungeonExit();
+            // Enter advances the speech bubble on screen — what a click does for a sighted player.
+            // Only reachable with no GUI open (answer lists handle Enter themselves), and it stays
+            // out of the way when there's no bubble to advance. Escape is deliberately not used:
+            // the game maps it to GameKey.Back, which can abort the scene instead of advancing it.
+            else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+                CutsceneAnnouncer.TrySkipLine();
         }
         catch (Exception ex)
         {

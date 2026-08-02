@@ -18,6 +18,10 @@ internal static class InteractionDetector
     private static ManualLogSource _log;
     private static bool _initialized = false;
     private const float InteractionRange = 300f;
+    // NPC whose interaction fired with no dialogue yet, and when we give up waiting for one.
+    private static WorldGameObject _silentNpc = null;
+    private static float _silentNpcDeadline = 0f;
+    private const float SilentNpcGrace = 1.5f;
 
     internal static void Init(ManualLogSource log)
     {
@@ -85,6 +89,10 @@ internal static class InteractionDetector
             // Work actions (hold F to craft/dig/chop/...) are invisible to a blind player:
             // they get no "Press F" prompt and no progress cue. Announce both.
             AnnounceWorkState(nearby);
+
+            // An NPC whose interaction produced no speech at all — report it rather than leave
+            // the player waiting on silence.
+            CheckSilentNpc();
         }
         catch (Exception ex)
         {
@@ -877,6 +885,84 @@ internal static class InteractionDetector
         }
         catch { }
         return null;
+    }
+
+    /// <summary>
+    /// Record that an NPC interaction just fired (Harmony postfix on
+    /// <see cref="WorldGameObject.Interact"/>). A talk is driven by the NPC's attached flowscript
+    /// picking an available phrase; when every branch's condition fails — a quest step waiting on
+    /// another trigger, all phrases blacklisted — the script simply ends and the NPC stays mute.
+    /// A sighted player sees no bubble appear and moves on; a blind player waits for speech that
+    /// never comes and can't tell it apart from a missed keypress. So we arm a short timer and, if
+    /// nothing has spoken by then, say so.
+    /// </summary>
+    /// <summary>
+    /// When the player last interacted with anything (unscaled time). A cutscene that starts right
+    /// after an interaction is one the player asked for, so <see cref="CutsceneAnnouncer"/> stays
+    /// quiet about it instead of stating the obvious.
+    /// </summary>
+    internal static float LastInteractionAt { get; private set; }
+
+    /// <summary>Stamp any interaction, then run the NPC-specific silence watchdog.</summary>
+    internal static void NoteInteraction(WorldGameObject wgo)
+    {
+        LastInteractionAt = Time.unscaledTime;
+        NoteNpcInteraction(wgo);
+    }
+
+    internal static void NoteNpcInteraction(WorldGameObject npc)
+    {
+        try
+        {
+            if (npc == null || npc.is_removed || npc.obj_def == null || !npc.obj_def.IsNPC()) return;
+            _silentNpc = npc;
+            _silentNpcDeadline = Time.unscaledTime + SilentNpcGrace;
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Anything that counts as the interaction having "landed": a speech bubble, an answer list, a
+    /// GUI opening. Called from the dialogue and GUI hooks; cancels the pending silence report.
+    /// </summary>
+    internal static void NoteDialogueActivity()
+    {
+        _silentNpc = null;
+    }
+
+    // Speak up when an NPC interaction produced nothing at all, and log the NPC's task states so a
+    // stuck quest step can be diagnosed from the log.
+    private static void CheckSilentNpc()
+    {
+        if (_silentNpc == null || Time.unscaledTime < _silentNpcDeadline) return;
+
+        var npc = _silentNpc;
+        _silentNpc = null;
+
+        try
+        {
+            if (npc == null || npc.is_removed) return;
+
+            var label = GetObjectLabel(npc);
+            ScreenReader.Say($"{label} has nothing to say right now", interrupt: false);
+            _log?.LogInfo($"[INTERACTION] silent NPC: {npc.obj_id} ({label}). {DescribeNpcTasks(npc.obj_id)}");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[INTERACTION] silent-NPC check failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Every known task of an NPC with its state, for the log ("s_ev_8_alarich=Visible").</summary>
+    private static string DescribeNpcTasks(string npcId)
+    {
+        try
+        {
+            var npc = MainGame.me?.save?.known_npcs?.GetNPC(npcId);
+            if (npc?.tasks == null || npc.tasks.Count == 0) return "no known tasks";
+            return "tasks: " + string.Join(", ", npc.tasks.Select(t => $"{t.id}={t.state}").ToArray());
+        }
+        catch (Exception ex) { return $"tasks unavailable ({ex.Message})"; }
     }
 
     // The object the game considers "in reach" for an E press (its highlighted interaction

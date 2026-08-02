@@ -140,6 +140,10 @@ internal static class GUIAccessibility
         var activeCount = Elements.Count(e => e.Go.activeInHierarchy);
         Plugin.Log.LogInfo($"[GUI OPENED] {guiName}, {activeCount} elements");
 
+        // An interaction that opens a window (vendor, craft station, chest) clearly landed — don't
+        // let the silent-NPC watchdog announce "nothing to say" over it.
+        InteractionDetector.NoteDialogueActivity();
+
         // Announce inventory items if this is an inventory/chest GUI
         InventoryItemHandler.OnGUIOpened(gui);
 

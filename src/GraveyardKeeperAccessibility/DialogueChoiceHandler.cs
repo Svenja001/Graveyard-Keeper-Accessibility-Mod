@@ -34,6 +34,44 @@ internal static class DialogueChoiceHandler
 
     // Harmony postfix on the instance MultiAnswerGUI.ShowAnswers(List<AnswerVisualData>, bool),
     // which runs after the option GUIs have been created and stored in _answers.
+    /// <summary>
+    /// Harmony prefix on MultiAnswerGUI.ShowAnswers: log every answer the script offered together
+    /// with why it will or won't be drawn. The game filters each one by
+    /// <c>id[0] != '@' || save.unlocked_phrases.Contains(id)</c> and
+    /// <c>!save.black_list_of_phrases.Contains(id)</c>, so an NPC that offers twenty answers and
+    /// draws only "Leave" is telling us its quest phrases aren't unlocked yet — invisible to the
+    /// player and the single most useful clue when a questline looks stuck.
+    /// </summary>
+    internal static void LogOfferedAnswers(List<AnswerVisualData> __0)
+    {
+        try
+        {
+            if (__0 == null || __0.Count == 0) return;
+
+            var unlocked = MainGame.me?.save?.unlocked_phrases;
+            var blacklist = MainGame.me?.save?.black_list_of_phrases;
+
+            var parts = new List<string>();
+            foreach (var a in __0)
+            {
+                var id = a?.id;
+                if (string.IsNullOrEmpty(id)) { parts.Add("<empty>"); continue; }
+
+                string state;
+                if (blacklist != null && blacklist.Contains(id)) state = "blacklisted";
+                else if (id[0] == '@' && (unlocked == null || !unlocked.Contains(id))) state = "locked";
+                else state = "shown";
+                parts.Add($"{id}={state}");
+            }
+
+            _log?.LogInfo($"[DIALOGUE_CHOICE] answers offered ({__0.Count}): {string.Join(", ", parts.ToArray())}");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[DIALOGUE_CHOICE] offered-answer log failed: {ex.Message}");
+        }
+    }
+
     internal static void OnAnswersShown(MultiAnswerGUI __instance)
     {
         try
@@ -44,6 +82,9 @@ internal static class DialogueChoiceHandler
             _activeGui = __instance;
             _options = new List<MultiAnswerOptionGUI>(answers);
             _selectedIndex = 0;
+
+            // The interaction landed (answer list shown) — no "nothing to say" report needed.
+            InteractionDetector.NoteDialogueActivity();
 
             var optTexts = string.Join(" | ", _options.Select(o => LabelOf(o)));
             _log?.LogInfo($"[DIALOGUE_CHOICE] {_options.Count} answer option(s) shown: {optTexts}");
@@ -331,6 +372,13 @@ internal static class DialogueChoiceHandler
     private static void AnnounceList()
     {
         var sb = new System.Text.StringBuilder();
+
+        // An NPC whose quest phrases are all still locked opens a dialogue with nothing in it but
+        // "Leave" (the game filters the rest out silently). Hearing a lone "Gehen." doesn't convey
+        // that — say outright that there's nothing to discuss.
+        if (_options.Count == 1 && IsLeaveOption(_options[0]))
+            sb.Append("Nichts zu besprechen. ");
+
         sb.Append(_options.Count == 1
             ? "Eine Antwortmöglichkeit. "
             : $"{_options.Count} Antwortmöglichkeiten. ");
@@ -341,6 +389,17 @@ internal static class DialogueChoiceHandler
             sb.Append($"{i + 1}. {label}. ");
         }
         ScreenReader.Say(sb.ToString().Trim(), interrupt: false);
+    }
+
+    /// <summary>True for the game's "walk away" answer ("Leave"/"cancel"), whatever its wording.</summary>
+    private static bool IsLeaveOption(MultiAnswerOptionGUI opt)
+    {
+        try
+        {
+            var id = _answerDataField(opt)?.id;
+            return id == "Leave" || id == "cancel";
+        }
+        catch { return false; }
     }
 
     private static void AnnounceSelected()

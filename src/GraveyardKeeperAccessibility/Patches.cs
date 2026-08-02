@@ -53,11 +53,33 @@ internal static class Patches
         }
     }
 
+    /// <summary>
+    /// Watch every interaction so a mute NPC can be reported. The game logs "Fire interaction
+    /// event" here and lets the NPC's flowscript decide whether to talk; when no branch matches,
+    /// nothing at all happens. See <see cref="InteractionDetector.NoteNpcInteraction"/>.
+    ///
+    /// This must be a PREFIX: Interact runs the NPC's script synchronously, so a dialogue that does
+    /// appear is already shown by the time Interact returns. Arming afterwards would overwrite the
+    /// cancellation that dialogue just made and report a talking NPC as silent.
+    /// </summary>
+    public static void WorldGameObject_Interact_Prefix(WorldGameObject __instance, bool __1)
+    {
+        try
+        {
+            // interaction_start only: Interact is also called every frame while holding the key.
+            if (__1) InteractionDetector.NoteInteraction(__instance);
+        }
+        catch { }
+    }
+
     public static void SpeechBubbleGUI_SpeechText_Postfix(string __0, ref string __result)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(__result)) return;
+
+            // An NPC did speak — cancel any pending "nothing to say" report.
+            InteractionDetector.NoteDialogueActivity();
 
             var cleanedText = ScreenReader.StripNguiCodes(__result).Trim();
             if (!string.IsNullOrEmpty(cleanedText) && cleanedText.Length > 2)
@@ -205,6 +227,9 @@ internal static class Patches
         {
             Plugin.Log.LogWarning($"[NAVIGATOR] SetPlayerEnable postfix: {ex.Message}");
         }
+
+        // Same bracket tells the player a cutscene is running — see CutsceneAnnouncer.
+        CutsceneAnnouncer.OnPlayerEnableChanged(__0);
     }
 
     // The game shows a silent on-screen disk indicator whenever it writes a save. Every save
