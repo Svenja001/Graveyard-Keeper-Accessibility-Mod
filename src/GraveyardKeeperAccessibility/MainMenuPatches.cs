@@ -300,6 +300,18 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The soul healer: read the whole state up-front (soul in? which sins does it carry? how
+        // well are they covered? what would the healed soul come out at?) and land on the next slot
+        // that actually needs filling, so the player is one Enter away from the useful action.
+        if (gui is SoulHealerGUI soulHealerGui)
+        {
+            var rows = GetActiveElements();
+            SelectedIndex = rows.Count > 0 ? SoulHealerFocusIndex(soulHealerGui, rows) : -1;
+            var intro = $"Soul healer. {SoulHealerStatus(soulHealerGui)}";
+            ScreenReader.Say(SelectedIndex >= 0 ? $"{intro} {rows[SelectedIndex].ReadLabel()}" : intro);
+            return;
+        }
+
         // The zombie transport station: read whether a zombie is docked and what it's doing
         // (so the player hears *why* nothing is moving), how many goods the route carries, and
         // land on the first good so Enter toggles carrying right away.
@@ -579,6 +591,20 @@ internal static class GUIAccessibility
         if (gui is ResurrectionGUI resurrectionGui)
         {
             DiscoverResurrection(resurrectionGui);
+            return;
+        }
+
+        // The soul healer (SoulHealerGUI, "Seelenheiler" — Better Save Soul DLC): put a soul in,
+        // then feed each of the soul's sins the matching organ to keep the healed soul's quality
+        // up. Same empty-slot blocker as the combine stations, only worse: EVERY slot here starts
+        // empty (the soul slot and all seven sin slots are BaseItemCellGUI cells driven by
+        // SetCallbacks, not UIButtons), so the generic path found nothing but the close button and
+        // two identical "Seele heilen" buttons — and pressing those did nothing, silently, because
+        // the game only gates them via UIButton.isEnabled. Expose every slot plus a heal action
+        // that says exactly what's still missing.
+        if (gui is SoulHealerGUI soulHealerGui)
+        {
+            DiscoverSoulHealer(soulHealerGui);
             return;
         }
 
@@ -2244,6 +2270,386 @@ internal static class GUIAccessibility
 
         AddStationCloseRow(gui, () => gui.OnClosePressed());
         Plugin.Log.LogInfo($"[RESURRECT] discovered, {Elements.Count} element(s)");
+    }
+
+    private static FieldInfo _sinItemsField;
+    private static FieldInfo _soulHealerWgoField;
+    private static FieldInfo _soulHealRateField;
+    private static FieldInfo _soulItemCellField;
+    private static FieldInfo _sinSkullBarField;
+
+    /// <summary>The seven sin rows of the soul healer (locked ones have an inactive GameObject).</summary>
+    private static List<SinItem> GetSinItems(SoulHealerGUI gui)
+    {
+        try
+        {
+            _sinItemsField ??= AccessTools.Field(typeof(SoulHealerGUI), "_sin_items");
+            return _sinItemsField?.GetValue(gui) as List<SinItem> ?? new List<SinItem>();
+        }
+        catch { return new List<SinItem>(); }
+    }
+
+    /// <summary>The soul-healer station itself; its obj_id keys the per-soul heal craft.</summary>
+    private static WorldGameObject GetSoulHealerWgo(SoulHealerGUI gui)
+    {
+        try
+        {
+            _soulHealerWgoField ??= AccessTools.Field(typeof(SoulHealerGUI), "_wgo");
+            return _soulHealerWgoField?.GetValue(gui) as WorldGameObject;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The cell holding the soul being worked on (SoulHealingWidget._soul_item_gui).</summary>
+    private static BaseItemCellGUI GetSoulSlot(SoulHealerGUI gui)
+    {
+        try
+        {
+            var widget = gui.soul_healing_widget;
+            if (widget == null) return null;
+            _soulItemCellField ??= AccessTools.Field(typeof(SoulHealingWidget), "_soul_item_gui");
+            return _soulItemCellField?.GetValue(widget) as BaseItemCellGUI;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The soul currently in the slot, or null.</summary>
+    private static Item GetInsertedSoul(SoulHealerGUI gui)
+    {
+        try
+        {
+            var soul = gui.soul_healing_widget?.inserted_item;
+            return (soul == null || soul.IsEmpty()) ? null : soul;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// How well the inserted organs cover the soul's sins, 0..1 (the game's own averaged
+    /// sins_heal_rate). -1 means "not applicable"; the game treats that as no quality loss.
+    /// </summary>
+    private static float GetSoulHealRate(SoulHealerGUI gui)
+    {
+        try
+        {
+            _soulHealRateField ??= AccessTools.Field(typeof(SoulHealerGUI), "sins_heal_rate");
+            var v = _soulHealRateField?.GetValue(gui);
+            return v is float f ? f : 0f;
+        }
+        catch { return 0f; }
+    }
+
+    /// <summary>The skull bar behind a sin row — its public fields hold the required (sin) and
+    /// supplied (organ) red/white skull counts the sighted player reads off the bar.</summary>
+    private static SoulPanelSkullBarGUI GetSinSkullBar(SinItem sin)
+    {
+        try
+        {
+            _sinSkullBarField ??= AccessTools.Field(typeof(SinItem), "_skull_bar");
+            return _sinSkullBarField?.GetValue(sin) as SoulPanelSkullBarGUI;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The item id of a sin ("sin_greed", ...), mirroring SinItem.GetSinItemByTypeFromItem.</summary>
+    private static string SinItemId(SinItem.ItemType type) => type switch
+    {
+        SinItem.ItemType.Envy => "sin_envy",
+        SinItem.ItemType.Gluttony => "sin_gluttony",
+        SinItem.ItemType.Greed => "sin_greed",
+        SinItem.ItemType.Lust => "sin_lust",
+        SinItem.ItemType.Pride => "sin_pride",
+        SinItem.ItemType.Sloth => "sin_sloth",
+        SinItem.ItemType.Wrath => "sin_wrath",
+        _ => null
+    };
+
+    /// <summary>The sin's localized name, falling back to the English enum name.</summary>
+    private static string SinDisplayName(SinItem sin)
+    {
+        var id = SinItemId(sin.item_type);
+        var name = DescribeItemId(id);
+        // DescribeItemId echoes the raw id back when there's no definition for it — not speech.
+        if (string.IsNullOrWhiteSpace(name) || name == id) return sin.item_type.ToString();
+        return name;
+    }
+
+    /// <summary>Does this soul actually carry this sin? Only those need an organ.</summary>
+    private static bool SinIsInSoul(SinItem sin, Item soul)
+    {
+        if (soul == null) return false;
+        try { return SinItem.GetSinItemByTypeFromItem(sin.item_type, soul) != null; }
+        catch { return false; }
+    }
+
+    private static bool SinSlotFilled(SinItem sin)
+    {
+        var item = sin?.item_cell_gui?.item;
+        return item != null && !item.IsEmpty();
+    }
+
+    /// <summary>"Soul slot, empty. Enter to insert a soul" / the soul in it and its quality.</summary>
+    private static string SoulSlotLabel(SoulHealerGUI gui)
+    {
+        var cell = GetSoulSlot(gui);
+        if (cell == null) return "Soul slot";
+        var soul = GetInsertedSoul(gui);
+        if (soul == null)
+            return "Soul slot, empty. Enter to insert a soul";
+
+        var desc = InventoryItemHandler.DescribeItemCell(cell);
+        if (string.IsNullOrEmpty(desc)) desc = DescribeItemId(soul.id);
+        int quality = Mathf.RoundToInt(Mathf.Clamp01(soul.durability) * 100f);
+        return $"Soul slot, {desc}, quality {quality} percent. Enter to take it back";
+    }
+
+    /// <summary>
+    /// One sin row: which sin it is, whether this soul carries it, how many red/white skulls it
+    /// demands, and what the organ in the slot supplies. This is the whole puzzle of the station,
+    /// and none of it is text on screen — it's drawn as skull icons on a bar.
+    /// </summary>
+    private static string SoulHealerSinLabel(SoulHealerGUI gui, SinItem sin)
+    {
+        var parts = new List<string> { SinDisplayName(sin) };
+        var soul = GetInsertedSoul(gui);
+        bool needed = SinIsInSoul(sin, soul);
+
+        if (soul == null)
+            parts.Add("insert a soul first to see whether this sin needs treating");
+        else if (!needed)
+            parts.Add("not in this soul, no organ needed");
+        else
+        {
+            var bar = GetSinSkullBar(sin);
+            if (bar != null)
+                parts.Add($"needs {bar.red_skulls_sin} red and {bar.green_skulls_sin} white skulls");
+        }
+
+        var organName = DescribeItemId(SinItem.GetOrganIdBySin(sin));
+        if (!SinSlotFilled(sin))
+        {
+            parts.Add(string.IsNullOrEmpty(organName)
+                ? "slot empty. Enter to choose an organ"
+                : $"slot empty, takes {organName}. Enter to choose one");
+        }
+        else
+        {
+            var desc = InventoryItemHandler.DescribeItemCell(sin.item_cell_gui);
+            parts.Add(string.IsNullOrEmpty(desc) ? "organ inserted" : desc);
+            var bar = GetSinSkullBar(sin);
+            if (bar != null)
+                parts.Add($"supplies {bar.red_skulls_organ} red and {bar.green_skulls_organ} white");
+            if (needed)
+                parts.Add($"match {Mathf.RoundToInt(Mathf.Clamp01(sin.GetHealRate()) * 100f)} percent");
+            parts.Add("Enter to take it back");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// True when pressing "Seele heilen" would actually heal. Reproduces the game's
+    /// SoulHealingWidget.UpdateHealButtonInteraction (soul present, and every sin this soul carries
+    /// has its organ in place) plus the silent early-out in OnStartHealButtonPressed (no heal craft
+    /// defined for this station + soul combination). <paramref name="blocker"/> says what's missing.
+    /// </summary>
+    private static bool SoulHealReady(SoulHealerGUI gui, out string blocker)
+    {
+        var soul = GetInsertedSoul(gui);
+        if (soul == null)
+        {
+            blocker = "No soul in the slot yet";
+            return false;
+        }
+
+        var missing = new List<string>();
+        foreach (var sin in GetSinItems(gui))
+        {
+            if (sin == null || sin.item_cell_gui == null) continue;
+            if (!sin.item_cell_gui.gameObject.activeInHierarchy) continue;   // sin not unlocked here
+            if (!SinIsInSoul(sin, soul)) continue;
+            if (SinSlotFilled(sin)) continue;
+
+            var organ = DescribeItemId(SinItem.GetOrganIdBySin(sin));
+            missing.Add(string.IsNullOrEmpty(organ)
+                ? SinDisplayName(sin)
+                : $"{SinDisplayName(sin)} needs {organ}");
+        }
+
+        if (missing.Count > 0)
+        {
+            blocker = $"Still missing: {string.Join("; ", missing)}";
+            return false;
+        }
+
+        var wgo = GetSoulHealerWgo(gui);
+        if (wgo != null)
+        {
+            CraftDefinition craft = null;
+            try { craft = GameBalance.me.GetDataOrNull<CraftDefinition>(wgo.obj_id + ":" + soul.id); }
+            catch { }
+            if (craft == null)
+            {
+                blocker = "This soul can't be healed at this station";
+                return false;
+            }
+        }
+
+        blocker = null;
+        return true;
+    }
+
+    /// <summary>
+    /// The whole state of the station in one sentence: the soul's quality, how well the sins are
+    /// covered, what quality the healed soul would come out at, and what's still blocking.
+    /// </summary>
+    private static string SoulHealerStatus(SoulHealerGUI gui)
+    {
+        var soul = GetInsertedSoul(gui);
+        if (soul == null)
+            return "No soul inserted. Put a soul in the soul slot, then fill each sin slot with the organ it asks for.";
+
+        int quality = Mathf.RoundToInt(Mathf.Clamp01(soul.durability) * 100f);
+        float rate = GetSoulHealRate(gui);
+        // The game passes -1 through as "no rate", which costs the soul nothing.
+        float loss = rate < 0f ? 0f : 0.5f * (1f - rate);
+        int matched = Mathf.RoundToInt(Mathf.Clamp01(rate < 0f ? 1f : rate) * 100f);
+        int end = Mathf.Clamp(Mathf.RoundToInt((Mathf.Clamp01(soul.durability) - loss) * 100f), 0, 100);
+
+        var text = $"Soul quality {quality} percent, sins covered {matched} percent, "
+                 + $"healed soul would come out at {end} percent.";
+
+        return SoulHealReady(gui, out var blocker) ? $"{text} Ready to heal." : $"{text} {blocker}.";
+    }
+
+    /// <summary>
+    /// The soul healer (SoulHealerGUI). See the dispatch comment in DiscoverElements for why the
+    /// generic path leaves nothing usable. Rows: a live status line, the soul slot, one row per
+    /// unlocked sin, the heal action (which explains its own blockers instead of no-opping), Close.
+    /// </summary>
+    private static void DiscoverSoulHealer(SoulHealerGUI gui)
+    {
+        // Status row — read-only; arrow onto it any time to re-hear the whole picture.
+        Elements.Add(new GUIElement
+        {
+            Go = gui.gameObject,
+            Label = SoulHealerStatus(gui),
+            ReadDynamic = () => SoulHealerStatus(gui),
+            Type = ElementType.Button
+        });
+
+        // The soul slot. Pressing it either opens the shared resource picker (already accessible)
+        // or, when a soul is in it, takes that soul back — in which case the station stays open and
+        // every sin row's numbers change, so re-read.
+        var soulCell = GetSoulSlot(gui);
+        if (soulCell != null)
+        {
+            Elements.Add(new GUIElement
+            {
+                Go = soulCell.gameObject,
+                Label = SoulSlotLabel(gui),
+                ReadDynamic = () => SoulSlotLabel(gui),
+                Type = ElementType.ItemCell,
+                Cell = soulCell,
+                OnActivate = () => PressSoulHealerCell(gui, soulCell, "Soul taken back")
+            });
+        }
+
+        // One row per sin the station has unlocked. Locked sins are SetActive(false)d by
+        // SoulHealerGUI.Open, so their rows drop out of navigation on their own.
+        foreach (var sin in GetSinItems(gui))
+        {
+            if (sin == null || sin.item_cell_gui == null) continue;
+            var captured = sin;
+            Elements.Add(new GUIElement
+            {
+                Go = captured.item_cell_gui.gameObject,
+                Label = SoulHealerSinLabel(gui, captured),
+                ReadDynamic = () => SoulHealerSinLabel(gui, captured),
+                Type = ElementType.ItemCell,
+                Cell = captured.item_cell_gui,
+                OnActivate = () => PressSoulHealerCell(gui, captured.item_cell_gui, "Organ taken back")
+            });
+        }
+
+        // The heal action. Anchored to the GUI root rather than the heal button, whose enabled
+        // state is the only thing the game changes — a disabled press is a silent no-op, so gate it
+        // ourselves and speak the reason instead.
+        string HealLabel()
+        {
+            return SoulHealReady(gui, out var why)
+                ? "Heal soul, ready. Press Enter"
+                : $"Heal soul. {why}";
+        }
+
+        Elements.Add(new GUIElement
+        {
+            Go = gui.gameObject,
+            Label = HealLabel(),
+            ReadDynamic = HealLabel,
+            Type = ElementType.Button,
+            OnActivate = () =>
+            {
+                if (!SoulHealReady(gui, out var why))
+                {
+                    ScreenReader.Say(why);
+                    return;
+                }
+                try
+                {
+                    // Starts the craft and hides the window; the pickup announcer voices the result.
+                    gui.soul_healing_widget.OnStartHealButtonPressed();
+                    ScreenReader.Say("Healing the soul");
+                }
+                catch (Exception ex) { Plugin.Log.LogWarning($"[SOULHEALER] heal failed: {ex.Message}"); }
+            }
+        });
+
+        AddStationCloseRow(gui, () => gui.OnClosePressed());
+        Plugin.Log.LogInfo($"[SOULHEALER] discovered, {Elements.Count} element(s)");
+    }
+
+    /// <summary>
+    /// Where to land when the soul healer opens: the soul slot while it's empty (nothing else can
+    /// be judged until a soul is in), then the first sin this soul carries that's still without its
+    /// organ, and once everything is in place the heal action itself.
+    /// </summary>
+    private static int SoulHealerFocusIndex(SoulHealerGUI gui, List<GUIElement> rows)
+    {
+        var soul = GetInsertedSoul(gui);
+        if (soul == null)
+        {
+            var soulCell = GetSoulSlot(gui);
+            int slot = soulCell != null ? rows.FindIndex(e => e.Go == soulCell.gameObject) : -1;
+            return slot >= 0 ? slot : 0;
+        }
+
+        foreach (var sin in GetSinItems(gui))
+        {
+            if (sin == null || sin.item_cell_gui == null) continue;
+            if (!SinIsInSoul(sin, soul) || SinSlotFilled(sin)) continue;
+            int i = rows.FindIndex(e => e.Go == sin.item_cell_gui.gameObject);
+            if (i >= 0) return i;
+        }
+
+        int heal = rows.FindIndex(e => e.Label != null && e.Label.StartsWith("Heal soul"));
+        return heal >= 0 ? heal : 0;
+    }
+
+    /// <summary>
+    /// Press a soul-healer slot. A filled slot hands the item back and the station stays open with
+    /// every row's numbers changed, so re-discover and re-read; an empty slot opens the resource
+    /// picker instead, and that new window announces itself (refreshing here would talk over it).
+    /// </summary>
+    private static void PressSoulHealerCell(SoulHealerGUI gui, BaseItemCellGUI cell, string takenBack)
+    {
+        var item = cell?.item;
+        bool hadItem = item != null && !item.IsEmpty();
+
+        InventoryItemHandler.PressItemCell(cell);
+
+        if (hadItem && _currentGUI == gui)
+            RefreshCurrentGUI(SelectedIndex, takenBack);
     }
 
     /// <summary>
