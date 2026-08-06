@@ -342,6 +342,16 @@ internal static class GUIAccessibility
         if (!string.IsNullOrEmpty(emptyDesc))
             header = Join(header, emptyDesc);
 
+        // Carrying a bag (Universalbeutel and the rest): say so, because a bag does nothing until
+        // it's opened and nothing on screen says that out loud. Once one is open, name it and say
+        // how full it is instead.
+        if (!reopened)
+        {
+            var bagInfo = BagHandler.HeaderFor(gui);
+            if (!string.IsNullOrEmpty(bagInfo))
+                header = Join(header, bagInfo);
+        }
+
         // Two-sided windows (chest, vendor): tell the player about the one-press side switch, the
         // keyboard stand-in for a sighted player moving the mouse to the other grid.
         var openGroups = ActiveGroups(active);
@@ -4371,8 +4381,11 @@ internal static class GUIAccessibility
     // out of your inventory into a chest shifts every later row, and a plain index would drift
     // onto the chest grid — so after putting one thing away the player was no longer where they
     // were putting things away from. Pass the side (and the row within it) they were on instead.
+    // <paramref name="keepFocusOn"/> outranks both: when the very element that was activated
+    // survives the refresh (a bag row, which stays put while its side panel appears above it),
+    // land back on it by identity rather than guessing at an index that just moved.
     private static void RefreshCurrentGUI(int focusIndex, string prefix = null,
-        string keepGroup = null, int keepOffset = 0)
+        string keepGroup = null, int keepOffset = 0, GameObject keepFocusOn = null)
     {
         if (_currentGUI == null) return;
 
@@ -4407,6 +4420,12 @@ internal static class GUIAccessibility
                 _groupCursor[keepGroup] = offset;
                 _lastGroup = keepGroup;
             }
+        }
+
+        if (keepFocusOn != null)
+        {
+            int sameElement = active.FindIndex(e => e.Go == keepFocusOn);
+            if (sameElement >= 0) SelectedIndex = sameElement;
         }
 
         RememberGroupCursor(active, SelectedIndex);
@@ -4616,7 +4635,11 @@ internal static class GUIAccessibility
     /// </remarks>
     internal static bool TryHandleMoveAllStack()
     {
-        if (!(_currentGUI is VendorGUI || _currentGUI is ChestGUI)) return false;
+        // An open bag is a two-sided window too — the game takes the same shift-click branch when
+        // moving items in and out of it, so whole-stack packing works there for free.
+        var bagGui = _currentGUI as InventoryGUI;
+        bool bagOpen = bagGui != null && BagHandler.OpenBagIn(bagGui) != null;
+        if (!(_currentGUI is VendorGUI || _currentGUI is ChestGUI || bagOpen)) return false;
         if (!(Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))) return false;
         if (!(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))) return false;
 
@@ -4629,12 +4652,28 @@ internal static class GUIAccessibility
         var item = elem.Cell.item;
         if (item == null || item.IsEmpty()) return false;
 
+        // A bag has no stack to move — Shift+Enter on one falls through to the plain-Enter path,
+        // which opens or closes it.
+        if (bagOpen && item.is_bag) return false;
+
         // Same guard as the plain-Enter path: a greyed vendor cell (tier-locked, or something the
         // vendor won't buy) has its press disabled, so pressing it would silently do nothing.
         if (_currentGUI is VendorGUI && elem.Cell.is_inactive_state)
         {
             ScreenReader.Say("Not available to trade");
             return true;
+        }
+
+        // Likewise for a bag: say why the item can't go in (or out) rather than pressing a dead
+        // cell and then reporting "nothing moved" without a reason.
+        if (bagOpen)
+        {
+            var blocked = BagHandler.MoveBlockedReason(bagGui, elem.Cell);
+            if (!string.IsNullOrEmpty(blocked))
+            {
+                ScreenReader.Say(blocked);
+                return true;
+            }
         }
 
         var prevIndex = SelectedIndex;
@@ -4773,20 +4812,29 @@ internal static class GUIAccessibility
             // rather than the generic left-click press, which does nothing for usable items like
             // the teleport stone. Re-announce and refresh afterwards (using consumes a stack), but
             // skip the refresh when the item closed the inventory (e.g. teleport opens the map).
-            if (_currentGUI is InventoryGUI)
+            if (_currentGUI is InventoryGUI inventoryGui)
             {
-                var (summary, closed) = InventoryItemHandler.ActivateInventoryItem(elem.Cell);
+                // Opening or closing a bag adds/removes a whole side panel above the grid, so the
+                // row index (and even the panel groups) shift under the player. The bag's own row
+                // survives the redraw, so pin focus to it by identity and let them press Enter
+                // again to close what they just opened.
+                var bagRow = elem.Cell?.item?.is_bag == true ? elem.Cell.gameObject : null;
+
+                var (summary, closed) = InventoryItemHandler.ActivateInventoryItem(elem.Cell, inventoryGui);
                 if (closed || !(_currentGUI is InventoryGUI))
                 {
-                    // The item closed the inventory (e.g. teleport opens the map). Just speak the
-                    // summary; CheckForNewGUI will announce whatever GUI opens next.
+                    // The item closed the inventory (e.g. teleport opens the map), or a bag move
+                    // handed the screen to the amount picker. Just speak the summary; CheckForNewGUI
+                    // announces whatever window is up next.
                     if (!string.IsNullOrEmpty(summary)) ScreenReader.Say(summary);
                 }
                 else
                 {
                     // Re-discover the (possibly mutated) grid and lead the announcement with the
-                    // summary so it isn't interrupted by the refreshed row.
-                    RefreshCurrentGUI(prevIndex, summary);
+                    // summary so it isn't interrupted by the refreshed row. Pin focus to the side
+                    // we acted from: putting things into a bag shifts every row after it, and a bare
+                    // index would drift onto the bag's own grid after each item packed.
+                    RefreshCurrentGUI(prevIndex, summary, prevGroup, prevOffset, bagRow);
                 }
                 return;
             }

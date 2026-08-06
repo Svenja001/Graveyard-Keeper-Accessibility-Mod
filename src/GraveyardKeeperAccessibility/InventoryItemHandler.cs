@@ -82,16 +82,28 @@ internal static class InventoryItemHandler
                     ? BodyPartView.Insert
                     : BodyPartView.Value;
 
-            foreach (var cell in gui.GetComponentsInChildren<BaseItemCellGUI>(true))
+            // An opened bag's contents live in InventoryGUI.bag_panel. Include its cells even if
+            // that panel isn't parented under the window itself, or the bag would look empty.
+            var cells = gui.GetComponentsInChildren<BaseItemCellGUI>(true).ToList();
+            cells.AddRange(BagHandler.ExtraBagPanelCells(gui));
+
+            // While a bag is open, only its side panel represents it; the same bag's inline row in
+            // the main grid is greyed out and inert, so listing it too would be a dead duplicate.
+            var invGui = gui as InventoryGUI;
+            var openBag = invGui != null ? BagHandler.OpenBagIn(invGui) : null;
+
+            foreach (var cell in cells)
             {
                 if (cell == null || !cell.gameObject.activeInHierarchy) continue;
                 // Only list cells that actually belong to this GUI. A just-closed chest's cells
                 // can linger a frame (Unity defers Destroy) or get caught by a stale current-GUI;
                 // without this guard they'd surface in the player's plain inventory as phantoms.
-                if (cell.GetComponentInParent<BaseGUI>() != gui) continue;
+                if (cell.GetComponentInParent<BaseGUI>() != gui && !BagHandler.IsBagPanelCell(cell, gui)) continue;
                 if (cell.id_empty) continue;
                 if (elements.Any(e => e.Go == cell.gameObject)) continue;
                 if (discovered.Any(e => e.Go == cell.gameObject)) continue;
+                if (openBag != null && !BagHandler.IsBagPanelCell(cell, gui)
+                    && BagHandler.BagOfInlineCell(cell) == openBag) continue;
 
                 var label = DescribeItemCell(cell, partView);
                 if (string.IsNullOrEmpty(label)) continue;
@@ -131,6 +143,13 @@ internal static class InventoryItemHandler
                         ? $"{label}, not available"
                         : $"{label}, not available, {reason}";
                 }
+
+                // With a bag open, every main-grid row is a candidate to put in — except the ones
+                // the bag refuses (a Fishing bag takes only tackle, and so on). The game just greys
+                // those cells, which says nothing out loud, so mark them as the player arrows past.
+                if (openBag != null && !BagHandler.IsBagPanelCell(cell, gui)
+                    && cell.item != null && !cell.item.CanBeInsertedInBag(openBag))
+                    label = $"{label}, does not fit in the bag";
 
                 discovered.Add(new GUIElement
                 {
@@ -203,6 +222,25 @@ internal static class InventoryItemHandler
                 if (vendorPanel == vendor.player_panel) return ("Sell", 1);
             }
 
+            // The player's own inventory becomes a two-sided window only while a bag is actually
+            // OPEN — that's when there's a side to switch to and moving things means knowing which
+            // side you're on. Merely carrying a bag doesn't earn every loose row an "Inventory: "
+            // prefix; the bag's own contents still say which bag they're in, since that's the part
+            // you can't otherwise tell apart from the loose items.
+            if (gui is InventoryGUI inv && BagHandler.HasAnyBag(inv))
+            {
+                if (BagHandler.IsBagPanelCell(cell, inv)) return ("Bag", 0);
+
+                // Toolbelt / hotbar cells sit outside any inventory panel — leave them ungrouped
+                // so the side switch only ever flips between the real item grids.
+                if (cell.GetComponentInParent<InventoryPanelGUI>() == null) return (null, 3);
+
+                var inlineBag = BagHandler.BagOfInlineCell(cell);
+                if (inlineBag != null) return ($"In {BagHandler.BagName(inlineBag)}", 2);
+
+                return (BagHandler.OpenBagIn(inv) != null ? "Inventory" : null, 1);
+            }
+
             var panel = cell.GetComponentInParent<InventoryPanelGUI>();
             if (panel == null) return (null, 2);
 
@@ -228,6 +266,7 @@ internal static class InventoryItemHandler
             if (panel == vendor.vendor_panel) return "Buy";
             if (panel == vendor.player_panel) return "Sell";
         }
+        if (gui is InventoryGUI inv && panel == inv.bag_panel) return "Bag";
         var title = ScreenReader.StripNguiCodes(panel.panel_title?.text)?.Trim();
         return string.IsNullOrWhiteSpace(title) ? null : title;
     }
@@ -242,13 +281,29 @@ internal static class InventoryItemHandler
         try
         {
             var empties = new List<string>();
-            foreach (var panel in gui.GetComponentsInChildren<InventoryPanelGUI>(true))
+            var panels = gui.GetComponentsInChildren<InventoryPanelGUI>(true).ToList();
+            var detachedBagPanel = BagHandler.DetachedBagPanel(gui);
+            if (detachedBagPanel != null) panels.Add(detachedBagPanel);
+
+            foreach (var panel in panels)
             {
                 if (panel == null || !panel.gameObject.activeInHierarchy) continue;
 
                 bool hasItems = panel.GetComponentsInChildren<BaseItemCellGUI>(true)
                     .Any(c => c != null && c.gameObject.activeInHierarchy && !c.id_empty);
                 if (hasItems) continue;
+
+                // An open-but-empty bag is the one case where "empty" alone isn't enough: name it
+                // and say how much room it has, so the player knows what they just opened.
+                if (gui is InventoryGUI inv && panel == inv.bag_panel)
+                {
+                    var bag = BagHandler.OpenBagIn(inv);
+                    var capacity = BagHandler.DescribeCapacity(bag);
+                    empties.Add(string.IsNullOrEmpty(capacity)
+                        ? $"{BagHandler.BagName(bag)} empty"
+                        : $"{BagHandler.BagName(bag)} {capacity}");
+                    continue;
+                }
 
                 empties.Add($"{PanelLabel(panel, gui) ?? "Inventory"} empty");
             }
@@ -733,15 +788,27 @@ internal static class InventoryItemHandler
     /// equipment is equipped or unequipped.
     /// </summary>
     /// <returns>
-    /// A spoken summary (null if the item had no sensible action) and whether the inventory was
-    /// closed as a result (a close-on-use item like the teleport stone hides the inventory, so
-    /// the caller must not try to re-discover its now-gone cells).
+    /// A spoken summary (null if the item had no sensible action) and whether the caller should
+    /// skip its refresh — either because the inventory closed (a close-on-use item like the
+    /// teleport stone hides it, so its cells are gone) or because another window took over (a
+    /// bag move of a stack opens the game's amount picker, which announces itself).
     /// </returns>
-    internal static (string summary, bool closedInventory) ActivateInventoryItem(BaseItemCellGUI cell)
+    internal static (string summary, bool closedInventory) ActivateInventoryItem(BaseItemCellGUI cell, InventoryGUI gui = null)
     {
         if (cell == null) return (null, false);
         var item = cell.item;
         if (item == null || item.IsEmpty()) return (null, false);
+
+        // Bags first: opening/closing one, and — while one is open — putting items in and taking
+        // them out. That's a different action from the use/equip handling below, and it's the only
+        // way to fill a bag, so it has to win before "can_be_used" eats the press (a bag full of
+        // food would otherwise just get eaten instead of packed).
+        gui ??= cell.GetComponentInParent<InventoryGUI>();
+        if (gui != null)
+        {
+            var (bagSummary, skipRefresh, handled) = BagHandler.Activate(gui, cell);
+            if (handled) return (bagSummary, skipRefresh);
+        }
 
         // Register the cell as the panel's current selection, mirroring a real mouse hovering
         // before it acts. The game's inventory logic reads panel.selected_item, so this keeps
