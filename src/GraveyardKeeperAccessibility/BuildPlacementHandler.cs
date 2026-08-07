@@ -60,7 +60,10 @@ internal static class BuildPlacementHandler
     // GameObjects we temporarily switched on so the game's physics-based validity check can see
     // them (they ship inactive with zero-size colliders). Restored when placement ends.
     private static List<WorldSubZone> _wallZones;
-    private static readonly List<GameObject> _tempActivated = new List<GameObject>();
+    // GameObjects EnsureSubZonesActive toggled, with the activeSelf they had before, so the scene
+    // is put back exactly as it was on cancel / on leaving placement.
+    private static readonly List<KeyValuePair<GameObject, bool>> _tempToggled =
+        new List<KeyValuePair<GameObject, bool>>();
 
     /// <summary>True only while we are driving the placement ghost or remove cursor (read by the Harmony prefix).</summary>
     internal static bool Active => _wasActive;
@@ -204,6 +207,19 @@ internal static class BuildPlacementHandler
     private static void EnsureSubZonesActive(List<WorldSubZone> matching)
     {
         if (matching == null) return;
+
+        // Every transform on a root→zone path. Switching an ancestor on would otherwise light up ALL
+        // of its children, and those ancestors are whole church-interior variants: turning on
+        // 'church_inside_2' to reach one mount strip also turned on that variant's Walls/ colliders,
+        // which then sat inside the live interior and occupied the very tiles we were trying to
+        // build on. So anything off-path gets pruned before its parent goes live.
+        var onPath = new HashSet<Transform>();
+        foreach (var z in matching)
+        {
+            if (z == null) continue;
+            for (var t = z.transform; t != null; t = t.parent) onPath.Add(t);
+        }
+
         foreach (var z in matching)
         {
             if (z == null) continue;
@@ -214,13 +230,22 @@ internal static class BuildPlacementHandler
                 for (var t = z.transform; t != null; t = t.parent) chain.Add(t);
                 for (int k = chain.Count - 1; k >= 0; k--)
                 {
-                    var go = chain[k].gameObject;
-                    if (!go.activeSelf)
+                    var node = chain[k];
+                    var go = node.gameObject;
+                    if (go.activeSelf) continue;   // already live — leave its branch untouched
+
+                    // Prune first, activate second: only the on-path child should come with it.
+                    foreach (Transform child in node)
                     {
-                        go.SetActive(true);
-                        _tempActivated.Add(go);
-                        _log?.LogInfo($"[BUILD] activated sub-zone chain GO '{go.name}'");
+                        if (onPath.Contains(child) || !child.gameObject.activeSelf) continue;
+                        _tempToggled.Add(new KeyValuePair<GameObject, bool>(child.gameObject, true));
+                        child.gameObject.SetActive(false);
                     }
+
+                    _tempToggled.Add(new KeyValuePair<GameObject, bool>(go, false));
+                    go.SetActive(true);
+                    _log?.LogInfo($"[BUILD] activated sub-zone chain GO '{go.name}' " +
+                                  $"(pruned {node.childCount - 1} off-path child branch(es))");
                 }
             }
             catch (Exception ex)
@@ -233,15 +258,16 @@ internal static class BuildPlacementHandler
     /// <summary>Undo every temporary activation done by <see cref="EnsureSubZonesActive"/>.</summary>
     private static void RestoreSubZones()
     {
-        for (int k = _tempActivated.Count - 1; k >= 0; k--)
+        // Reverse order, so a branch we pruned is restored before the parent we switched on goes off.
+        for (int k = _tempToggled.Count - 1; k >= 0; k--)
         {
-            var go = _tempActivated[k];
+            var go = _tempToggled[k].Key;
             if (go != null)
             {
-                try { go.SetActive(false); } catch { }
+                try { go.SetActive(_tempToggled[k].Value); } catch { }
             }
         }
-        _tempActivated.Clear();
+        _tempToggled.Clear();
         _wallZones = null;
     }
 
@@ -680,6 +706,60 @@ internal static class BuildPlacementHandler
     }
 
     /// <summary>
+    /// Where the ghost's occupied tiles sit relative to its transform, in world units. The game
+    /// keeps this as <see cref="FloatingWorldGameObject.center_offsest"/> (in tiles) because an
+    /// object's anchor is not its footprint: a wall decoration hangs well above its anchor, so its
+    /// FlowGridCells — the cells the validity check actually tests — are metres away from
+    /// transform.position. Sweeping raw transform positions therefore aims the wrong point at the
+    /// wall strip and can miss a free mount entirely.
+    /// </summary>
+    private static Vector2 FootprintOffset()
+    {
+        try
+        {
+            var f = FloatingWorldGameObject.cur_floating;
+            return f == null ? Vector2.zero : f.center_offsest * 96f;
+        }
+        catch { return Vector2.zero; }
+    }
+
+    /// <summary>Put the ghost's <em>footprint centre</em> (not its anchor) on <paramref name="center"/>.</summary>
+    private static void MoveFootprintTo(Vector2 center)
+        => FloatingWorldGameObject.MoveCurrentFloatingObject(center - FootprintOffset(), is_global_pos: true);
+
+    /// <summary>
+    /// The ghost's tile layout as "WxH span=(dx,dy)", measured from the live FlowGridCells. A cell
+    /// count alone can't tell a 2-wide-by-3-tall decoration (which fits a narrow wall strip) from a
+    /// 3-by-2 one (which never can), and that is exactly the question a "no spot" verdict turns on.
+    /// </summary>
+    private static string FootprintShape()
+    {
+        try
+        {
+            var cells = FloatingWorldGameObject.cur_floating?.gameObject.GetComponentsInChildren<FlowGridCell>();
+            if (cells == null || cells.Length == 0) return "none";
+
+            var centre = (Vector2)FloatingWorldGameObject.cur_floating.transform.position + FootprintOffset();
+            var xs = new HashSet<int>();
+            var ys = new HashSet<int>();
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            foreach (var c in cells)
+            {
+                if (c == null || c.gameObject == null || !c.gameObject.activeSelf) continue;
+                if (c.cell_type == FlowGridCell.CellType.TotemArea) continue;
+                Vector2 d = (Vector2)c.transform.position - centre;
+                xs.Add(Mathf.RoundToInt(d.x / Step));
+                ys.Add(Mathf.RoundToInt(d.y / Step));
+                minX = Mathf.Min(minX, d.x); maxX = Mathf.Max(maxX, d.x);
+                minY = Mathf.Min(minY, d.y); maxY = Mathf.Max(maxY, d.y);
+            }
+            if (xs.Count == 0) return "none";
+            return $"{xs.Count}x{ys.Count} span=({minX:0}..{maxX:0}, {minY:0}..{maxY:0})";
+        }
+        catch { return "err"; }
+    }
+
+    /// <summary>
     /// Scan outward from the ghost's current spot in expanding 32-unit rings and stop the
     /// ghost on the first position the game reports as buildable. Mirrors the mod's
     /// "auto-walk, then nudge" philosophy: lands the player on a legal spot they can either
@@ -727,7 +807,11 @@ internal static class BuildPlacementHandler
                     if (col == null) continue;
                     var b = col.bounds;
                     if (b.size.sqrMagnitude < 1f) continue;
-                    b.Expand(new Vector3(TileSize, TileSize, 0f)); // half-tile margin each side
+                    // Bounds.Expand adds HALF of what you pass to each side. A mount strip can be
+                    // narrower than the decoration's own footprint, so the footprint centre may have
+                    // to sit a fair way off the strip for the tiles to land on it — give a full tile
+                    // of slack on each side.
+                    b.Expand(new Vector3(2 * TileSize, 2 * TileSize, 0f));
                     rects.Add(b);
                     any = true;
                 }
@@ -757,11 +841,11 @@ internal static class BuildPlacementHandler
         // straight past it (this is why the pyre in the cramped cremation room reported "no spot"). Step
         // finely: 16u over thin wall strips; for open floor, adapt the step to the zone so a small room
         // is swept densely while a huge zone stays under the sample cap.
-        const int maxSamples = 12000;   // safety cap
+        const int maxSamples = 30000;   // safety cap
         float step;
         if (wallSweep)
         {
-            step = 16f;
+            step = 8f;
         }
         else
         {
@@ -795,7 +879,10 @@ internal static class BuildPlacementHandler
                     {
                         tested++;
                         var cand = new Vector2(x, y);
-                        FloatingWorldGameObject.MoveCurrentFloatingObject(cand, is_global_pos: true);
+                        // cand is where the FOOTPRINT should land, not where the anchor goes — see
+                        // FootprintOffset. Rotating changes the footprint, so the offset is re-read
+                        // every move rather than cached.
+                        MoveFootprintTo(cand);
                         if (!FloatingWorldGameObject.can_be_built) continue;
 
                         float d = (cand - playerPos).sqrMagnitude;
@@ -806,7 +893,7 @@ internal static class BuildPlacementHandler
 
             if (best.HasValue)
             {
-                FloatingWorldGameObject.MoveCurrentFloatingObject(best.Value, is_global_pos: true);
+                MoveFootprintTo(best.Value);
                 var word = string.IsNullOrEmpty(subZoneId) ? "free spot" : "wall spot";
                 var turned = rotations > 0 ? " Rotated it to make it fit." : "";
                 _log?.LogInfo($"[BUILD] found spot at {best.Value} after {rotations} rotation(s), variation={CurrentVariation()}");
@@ -832,14 +919,17 @@ internal static class BuildPlacementHandler
                 .gameObject.GetComponentsInChildren<FlowGridCell>()?.Length ?? -1;
             var sb = rects.Count > 0 ? rects[0] : new Bounds();
             _log?.LogInfo($"[BUILD] no-spot detail: footprintCells={cellCount} step={step} " +
-                $"sweptBounds=center{sb.center}size{sb.size} rects={rects.Count}");
+                $"sweptBounds=center{sb.center}size{sb.size} rects={rects.Count} " +
+                $"shape={FootprintShape()}");
         }
         catch { }
 
         // Restore the ghost, log the full picture (incl. per-zone details), and speak a diagnosis so
-        // we can tell WHY without a log dive.
+        // we can tell WHY without a log dive. The closest-fit pass runs for wall mounts too: "4 of 6
+        // tiles taken by <thing>" is the difference between "this mount is occupied" and "this
+        // decoration is too big for any mount", and the player can act on the first.
         FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
-        var closest = string.IsNullOrEmpty(subZoneId) ? AnalyzeBestFit(rects, subZoneId, playerPos) : null;
+        var closest = AnalyzeBestFit(rects, subZoneId, playerPos, step);
         ReportNoSpotDiagnostic(subZoneId, matching, tested, origin, closest);
         FloatingWorldGameObject.MoveCurrentFloatingObject(origin, is_global_pos: true);
     }
@@ -921,7 +1011,7 @@ internal static class BuildPlacementHandler
     /// sweep already failed — and names the blockers at the single best position.
     /// Returns a spoken sentence, or null when nothing could be measured.
     /// </summary>
-    private static string AnalyzeBestFit(List<Bounds> rects, string subZoneId, Vector2 playerPos)
+    private static string AnalyzeBestFit(List<Bounds> rects, string subZoneId, Vector2 playerPos, float step)
     {
         try
         {
@@ -940,14 +1030,18 @@ internal static class BuildPlacementHandler
             Vector2 best = playerPos;
             int bestBlocked = int.MaxValue, bestOutside = 0, bestBusy = 0;
 
+            // Wall strips are small enough to re-measure at the sweep's own resolution; an open floor
+            // zone is not, so there we stay on the coarse cell grid.
+            float probe = string.IsNullOrEmpty(subZoneId) ? Step : Mathf.Max(step, 4f);
+
             foreach (var rect in rects)
             {
-                for (float x = rect.min.x; x <= rect.max.x; x += Step)
+                for (float x = rect.min.x; x <= rect.max.x; x += probe)
                 {
-                    for (float y = rect.min.y; y <= rect.max.y; y += Step)
+                    for (float y = rect.min.y; y <= rect.max.y; y += probe)
                     {
                         var cand = new Vector2(x, y);
-                        FloatingWorldGameObject.MoveCurrentFloatingObject(cand, is_global_pos: true);
+                        MoveFootprintTo(cand);
                         CountBlockedCells(cells, zoneId, subZoneId, out int outside, out int busy, null, null);
 
                         int blocked = outside + busy;
@@ -968,12 +1062,26 @@ internal static class BuildPlacementHandler
             // Name what sits on the best spot.
             var blockers = new HashSet<string>();
             var characters = new HashSet<string>();
-            FloatingWorldGameObject.MoveCurrentFloatingObject(best, is_global_pos: true);
+            MoveFootprintTo(best);
             CountBlockedCells(cells, zoneId, subZoneId, out _, out _, blockers, characters);
 
             _log?.LogInfo($"[BUILD] best fit at {best}: {bestBlocked}/{counted} cells blocked " +
                           $"(outside={bestOutside} busy={bestBusy}) blockers=[{string.Join(", ", blockers)}] " +
                           $"characters=[{string.Join(", ", characters)}]");
+
+            // Tile-by-tile at that spot: which corner of the footprint fails tells us whether the
+            // decoration overhangs the mount in one direction (nudgeable) or is boxed in.
+            foreach (var c in cells)
+            {
+                if (c == null || c.gameObject == null || !c.gameObject.activeSelf) continue;
+                if (c.cell_type == FlowGridCell.CellType.TotemArea) continue;
+                Vector2 p = c.transform.position;
+                _log?.LogInfo($"[BUILD]   tile rel=({p.x - best.x:0},{p.y - best.y:0}) " +
+                              $"busy={BuildGrid.IsCellBusy(p)} inZone={c.IsInsideWorldZone(zoneId, subZoneId)}");
+            }
+
+            bool wall = !string.IsNullOrEmpty(subZoneId);
+            var area = wall ? "the wall mount" : "the build area";
 
             var where = DirectionFromPlayer(best);
             var parts = new List<string> { $"Closest it comes is {where}, with {bestBlocked} of {counted} tiles blocked" };
@@ -982,7 +1090,7 @@ internal static class BuildPlacementHandler
                     ? $"{bestBusy} taken by {string.Join(", ", blockers.Take(3))}"
                     : $"{bestBusy} taken by something standing there");
             if (bestOutside > 0)
-                parts.Add($"{bestOutside} outside the build area");
+                parts.Add($"{bestOutside} outside {area}");
 
             var tail = "";
             // A person standing on the spot is the one blocker that clears itself — worth saying,
@@ -990,7 +1098,13 @@ internal static class BuildPlacementHandler
             if (characters.Count > 0 && bestOutside == 0)
                 tail = $" {string.Join(" and ", characters.Take(2))} standing there blocks it; wait for them to move, or leave and come back, then try again.";
             else if (bestOutside > 0 && bestBusy == 0)
-                tail = " It is not blocked by objects, it simply does not fit inside the build area anywhere.";
+                tail = wall
+                    ? " Nothing is in the way; the decoration is simply wider than any mount here."
+                    : " It is not blocked by objects, it simply does not fit inside the build area anywhere.";
+            else if (bestBusy > 0 && bestOutside == 0 && blockers.Count == 1 && blockers.Contains("the building itself"))
+                tail = " Nothing removable is in the way — the wall structure itself covers those tiles, so this spot cannot be cleared.";
+            else if (wall && bestBusy > 0 && bestOutside == 0)
+                tail = " The mount it fits on is already occupied; remove what is on it first.";
 
             return string.Join(", ", parts) + "." + tail;
         }
@@ -1028,7 +1142,20 @@ internal static class BuildPlacementHandler
                     if (hit == null || BuildGrid.SkipCollider(hit)) continue;
                     if (hit.GetComponentInParent<FloatingWorldGameObject>() != null) continue;
                     var wgo = hit.GetComponentInParent<WorldGameObject>();
-                    if (wgo == null) continue;
+                    if (wgo == null)
+                    {
+                        // A collider with no WorldGameObject still blocks: BuildGrid.SkipCollider
+                        // bails out with "don't skip" when it can't attribute a collider to an
+                        // object, so bare level geometry (wall pieces, door frames, stair rails)
+                        // counts as occupied while having nothing to name. Log the hierarchy so it
+                        // can be identified, and tell the player it's the building — not something
+                        // they can move out of the way.
+                        _log?.LogInfo($"[BUILD]   busy cell at {pos} blocked by unowned collider " +
+                                      $"'{HierarchyPath(hit.transform)}' layer={hit.gameObject.layer} " +
+                                      $"kind={hit.GetType().Name} bounds={hit.bounds.center}/{hit.bounds.size}");
+                        blockers.Add("the building itself");
+                        continue;
+                    }
                     var name = WgoName(wgo);
                     if (string.IsNullOrEmpty(name)) continue;
                     blockers.Add(name);
@@ -1046,6 +1173,15 @@ internal static class BuildPlacementHandler
                 if (blockers != null) _log?.LogInfo($"[BUILD]   outside-zone cell at {pos}");
             }
         }
+    }
+
+    /// <summary>Full scene path of a transform, for identifying colliders that own no game object.</summary>
+    private static string HierarchyPath(Transform t)
+    {
+        var parts = new List<string>();
+        for (var cur = t; cur != null && parts.Count < 8; cur = cur.parent) parts.Add(cur.name);
+        parts.Reverse();
+        return string.Join("/", parts);
     }
 
     /// <summary>A person (the player, an NPC, a mob, a zombie worker) rather than a fixed object.</summary>
@@ -1073,9 +1209,15 @@ internal static class BuildPlacementHandler
         _log?.LogInfo(
             $"[BUILD] No valid spot. obj='{objId}' craftSubZone='{CurrentCraft()?.sub_zone_id}' " +
             $"gridSubZone='{SafeGridSubZone()}' buildZone='{Logics?.cur_build_zone_id}' " +
-            $"tested={tested} subZonesMatch={matchCount}");
+            $"tested={tested} subZonesMatch={matchCount} footprintOffset={FootprintOffset()}");
 
-        int activeAtCenter = 0;
+        // Per-strip split of WHY it failed, measured with the footprint centred on the strip:
+        // busy>0 = mount already occupied, outside>0 = the object's tiles hang off the strip.
+        FlowGridCell[] ghostCells = null;
+        try { ghostCells = FloatingWorldGameObject.cur_floating?.gameObject.GetComponentsInChildren<FlowGridCell>(); }
+        catch { }
+        var zoneIdForCount = Logics?.cur_build_zone_id;
+
         if (matching != null)
         {
             int i = 0;
@@ -1083,18 +1225,31 @@ internal static class BuildPlacementHandler
             {
                 if (z == null || i >= 12) { i++; continue; }
                 bool active = false; string colInfo = "none"; bool cbb = false; Vector3 pos = Vector3.zero;
+                string fit = "";
                 try
                 {
                     active = z.gameObject.activeInHierarchy;
                     pos = z.transform.position;
+                    // Probe the COLLIDER's centre, not the zone transform's — they need not coincide,
+                    // and it's the collider the game's overlap test actually sees.
+                    var probeAt = (Vector2)z.transform.position;
                     var cols = z.GetComponentsInChildren<Collider2D>(includeInactive: true);
-                    if (cols.Length > 0) colInfo = $"{cols.Length}col enabled={cols[0].enabled} bounds={cols[0].bounds.size}";
-                    FloatingWorldGameObject.MoveCurrentFloatingObject(z.transform.position, is_global_pos: true);
+                    if (cols.Length > 0)
+                    {
+                        colInfo = $"{cols.Length}col enabled={cols[0].enabled} " +
+                                  $"colCenter={(Vector2)cols[0].bounds.center} bounds={cols[0].bounds.size}";
+                        probeAt = cols[0].bounds.center;
+                    }
+                    MoveFootprintTo(probeAt);
                     cbb = FloatingWorldGameObject.can_be_built;
-                    if (cbb) activeAtCenter++;
+                    if (ghostCells != null && ghostCells.Length > 0)
+                    {
+                        CountBlockedCells(ghostCells, zoneIdForCount, subZoneId, out int outside, out int busy, null, null);
+                        fit = $" outside={outside} busy={busy}";
+                    }
                 }
                 catch { }
-                _log?.LogInfo($"[BUILD]  wallzone#{i} active={active} pos={pos} {colInfo} can_be_built@center={cbb}");
+                _log?.LogInfo($"[BUILD]  wallzone#{i} active={active} pos={pos} {colInfo} can_be_built@center={cbb}{fit}");
                 i++;
             }
         }
@@ -1106,7 +1261,9 @@ internal static class BuildPlacementHandler
             ScreenReader.Say(
                 matchCount == 0
                     ? "This is a wall object, but no matching wall zone exists here. The wall it needs may not be built."
-                    : "No free wall mount for this decoration. The wall spots here are already taken or too full for another one, so the church may only hold a limited number.",
+                    : string.IsNullOrEmpty(closest)
+                        ? "No free wall mount for this decoration."
+                        : $"No free wall mount for this decoration. {closest}",
                 interrupt: true);
         }
         else
