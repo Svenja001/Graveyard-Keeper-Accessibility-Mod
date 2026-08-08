@@ -67,6 +67,11 @@ internal static class ObjectNavigator
 
     // One ordered list of targets per category.
     private static readonly Dictionary<NavCategory, List<NavigationTarget>> _byCategory = new();
+
+    // Objects the scene scan found carrying a quest script's one-shot interaction event, held aside
+    // so GatherQuestTargets can mirror them into Quests after the arrow-driven entries. Refilled
+    // from scratch on every refresh.
+    private static readonly List<NavigationTarget> _pendingInteractionTargets = new();
     private static readonly NavCategory[] _categoryOrder =
     {
         NavCategory.Quests,
@@ -2438,6 +2443,7 @@ internal static class ObjectNavigator
 
             foreach (var cat in _categoryOrder)
                 _byCategory[cat].Clear();
+            _pendingInteractionTargets.Clear();
 
             foreach (var obj in allObjects)
             {
@@ -2598,6 +2604,20 @@ internal static class ObjectNavigator
                 // Worker zombies read out their efficiency + assignment here, since pressing E on
                 // one picks it up rather than inspecting it. No-op for non-workers.
                 label = InteractionDetector.AppendWorkerInfo(label, obj);
+                // The game's "talk to ME next" bubble: a quest script armed this one copy with a
+                // one-shot interaction event. Say so in the list, and remember it for the Quests
+                // mirror below. No-op for everything else.
+                if (InteractionDetector.HasPendingScriptedInteraction(obj))
+                {
+                    label = InteractionDetector.WithPendingInteraction(label, obj);
+                    _pendingInteractionTargets.Add(new NavigationTarget
+                    {
+                        Object = obj,
+                        Label = label,
+                        Position = objPos,
+                        Distance = distance
+                    });
+                }
                 _byCategory[category].Add(new NavigationTarget
                 {
                     Object = obj,
@@ -2825,6 +2845,18 @@ internal static class ObjectNavigator
                     ExactPoint = true
                 });
             }
+
+            // Objects a quest script armed with a one-shot interaction event (collected by the scene
+            // scan, see InteractionDetector.HasPendingScriptedInteraction). This is the game telling
+            // the player "interact HERE next" — the same thing a quest arrow says — so mirror them
+            // into Quests. They stay in their own category too, so the general browse is unchanged.
+            // Without this, a ritual that arms one of five identically named NPCs (Clotho's memories)
+            // could only be solved by pressing E on each copy until one of them answered.
+            foreach (var pending in _pendingInteractionTargets)
+            {
+                if (pending.Object != null && !seen.Add(pending.Object)) continue;
+                questList.Add(pending);
+            }
         }
         catch (Exception ex)
         {
@@ -2905,6 +2937,14 @@ internal static class ObjectNavigator
         // on zone ENTRY and additionally wants floor 8 cleared plus the amulet in the inventory, so
         // ExactPoint matters here exactly as it does for the cliff meeting: a tile short is outside.
         ("player", "s_ev_22_goto_8lvl", "gd_zone_refugees_exit_8", "Amulet delivery spot"),
+
+        // "Bring the leg to the ghost on the eighth dungeon floor" (task s_ev_28_leg_return, after
+        // the golem fight). Same trigger object as the amulet above — on_enter_gd_zone_s23 has a
+        // SECOND branch wired after the amulet one: player flag gd_zone_s29_2_is_active >= 1 plus
+        // skeleton_leg in the inventory runs refugee_ev_s29_2, which is what sets this task to
+        // Complete. No dungeon-cleared condition on this branch, so the leg can be handed over on a
+        // revisit; only the two tasks differ, hence a row of its own rather than a shared one.
+        ("npc_ghost_priest", "s_ev_28_leg_return", "gd_zone_refugees_exit_8", "Ghost, leg delivery spot"),
     };
 
     /// <summary>

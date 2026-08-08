@@ -48,16 +48,16 @@ internal static class InteractionDetector
                 {
                     var label = GetObjectLabel(gameNearest);
                     ScreenReader.Say($"{label}. Not available during the intro.", interrupt: true);
-                    _lastAnnouncedObject = gameNearest.name;
+                    _lastAnnouncedObject = AnnounceKey(gameNearest);
                 }
                 else
                 {
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target), target), target);
+                        var label = WithPendingInteraction(WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target), target), target), target);
                         ScreenReader.Say(label, interrupt: true);
-                        _lastAnnouncedObject = target.name;
+                        _lastAnnouncedObject = AnnounceKey(target);
                     }
                 }
             }
@@ -66,11 +66,12 @@ internal static class InteractionDetector
             var nearby = FindClosestInteractable();
             if (nearby != null)
             {
-                if (nearby.name != _lastAnnouncedObject)
+                var key = AnnounceKey(nearby);
+                if (key != _lastAnnouncedObject)
                 {
-                    var label = WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby), nearby), nearby);
+                    var label = WithPendingInteraction(WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby), nearby), nearby), nearby);
                     ScreenReader.Say(label, interrupt: false);
-                    _lastAnnouncedObject = nearby.name;
+                    _lastAnnouncedObject = key;
                 }
             }
             else if (_lastAnnouncedObject != null)
@@ -1031,6 +1032,19 @@ internal static class InteractionDetector
         }
     }
 
+    /// <summary>
+    /// Key the proximity readout dedupes on. Deliberately the object's NAME, not its identity:
+    /// walking a row of identical trees or fence posts should say "Tree" once, not once per trunk.
+    /// The scripted-interaction marker is folded in so the one copy the quest armed still announces
+    /// itself when you reach it — see <see cref="HasPendingScriptedInteraction"/>, where a whole
+    /// circle of identically named NPCs is exactly the case that matters.
+    /// </summary>
+    private static string AnnounceKey(WorldGameObject obj)
+    {
+        if (obj == null) return null;
+        return HasPendingScriptedInteraction(obj) ? obj.name + "|pending" : obj.name;
+    }
+
     internal static bool IsPlayer(WorldGameObject obj)
     {
         return obj.name.Contains("Player");
@@ -1092,6 +1106,59 @@ internal static class InteractionDetector
             var tail = string.IsNullOrEmpty(job) ? "not assigned to a station" : $"working at {job}";
 
             return $"{label}. {value}. {tail}";
+        }
+        catch
+        {
+            return label;
+        }
+    }
+
+    /// <summary>
+    /// True when a quest script has armed this object with a one-shot interaction event — the game's
+    /// "talk to ME next" marker. A FlowScript queues the event with <c>Flow_AddInteractionEvent</c>
+    /// onto <c>WorldGameObject.custom_interaction_events</c>; the next E on that object fires the
+    /// queued event instead of the object's plain "interaction" (WorldGameObject.Interact), and every
+    /// other copy of the same NPC/object just plays its idle line. A sighted player is told which one
+    /// by the bubble icon the game floats over it (ComponentsManager: the object's
+    /// custom_interaction_icon, else "(speak)"/"(view)") — a blind player got nothing, and had to
+    /// press E on each identical copy until one of them advanced the quest.
+    ///
+    /// The condition mirrors the game's own bubble test exactly, including <c>!IsMoving()</c>: a
+    /// walking NPC neither shows the icon nor consumes the queued event.
+    ///
+    /// Worked example — Clotho's memory ritual in the refugee camp (flow refugee_ev_s37): the script
+    /// spawns FIVE identical <c>npc_clotho_refugees</c> around the circle (custom tags
+    /// ev_s37_clotho_1…5), then arms one at random with "get_task_event" for each memory. The other
+    /// four answer "My lips are sealed."
+    /// </summary>
+    internal static bool HasPendingScriptedInteraction(WorldGameObject wgo)
+    {
+        try
+        {
+            return wgo != null && wgo.custom_interaction_events != null &&
+                   wgo.custom_interaction_events.Count > 0 && !wgo.IsMoving();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Voice the "talk to me next" marker described on <see cref="HasPendingScriptedInteraction"/>.
+    /// Characters get "wants to talk" (the game's "(speak)" icon), everything else "has something
+    /// new" (its "(view)" icon). Unmarked objects pass through unchanged.
+    /// </summary>
+    internal static string WithPendingInteraction(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(label) || !HasPendingScriptedInteraction(wgo))
+                return label;
+
+            return wgo.obj_def != null && wgo.obj_def.IsNPC()
+                ? $"{label}, wants to talk"
+                : $"{label}, has something new";
         }
         catch
         {
@@ -1283,6 +1350,15 @@ internal static class InteractionDetector
                         var catalogId = ObjectNavigator.ScriptPlacedBuildNameId(wgo.obj_def.id);
                         if (!string.IsNullOrEmpty(catalogId) && HasTranslation(catalogId))
                             return LocalizedObjectName(catalogId);
+
+                        // A quest-specific copy of an NPC gets its own untranslated obj id
+                        // ("npc_clotho_refugees" — the ritual apparitions in the refugee camp), which
+                        // would read out as a mangled id. The game keys such copies back to the real
+                        // character through npc_alias (that's how known_npcs finds their tasks — see
+                        // WithNpcQuestInfo), and the alias is the id that has a name, so use it.
+                        if (wgo.obj_def.IsNPC() && !string.IsNullOrEmpty(wgo.obj_def.npc_alias) &&
+                            HasTranslation(wgo.obj_def.npc_alias))
+                            return LocalizedObjectName(wgo.obj_def.npc_alias);
                     }
                     return name;
                 }
