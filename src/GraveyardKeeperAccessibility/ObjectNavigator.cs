@@ -1068,6 +1068,7 @@ internal static class ObjectNavigator
             // path exactly like an NPC. This is the key to scripted long-distance walking.
             character.control_enabled = false;
             _weDisabledControl = true;
+            AllowTriggersWhileScripted(character);
 
             // GoTo(Direct, from_script) sets up the movement state, script control and callbacks
             // and leaves path_waypoint = 1; we then swap in the full route for the follower to walk.
@@ -2048,6 +2049,36 @@ internal static class ObjectNavigator
         }
     }
 
+    /// <summary>
+    /// Let the player's body keep firing trigger events while auto-walk holds it Kinematic.
+    ///
+    /// Turning off control makes UpdateBodyPhysics switch the player Rigidbody2D to Kinematic, and
+    /// Unity gives a kinematic body NO trigger callbacks against static colliders unless
+    /// useFullKinematicContacts is set (default false; the game never sets it — it only ever puts
+    /// the player kinematic during its own cutscenes, which don't need to trip anything). GDZone
+    /// trigger volumes are static colliders, so every auto-walk was silently gliding straight
+    /// through the story zones that a walking player would set off: that is how the pagan-amulet
+    /// delivery on dungeon floor 8 could be walked over with all its conditions met and nothing
+    /// happening (Player.log had no GDZone.OnTriggerEnter2D line for it at all). Setting this makes
+    /// auto-walk trip zones exactly like manual walking.
+    ///
+    /// Safe to leave on: nothing pushes a kinematic body, so movement is unchanged, and the only
+    /// other 2D trigger consumers on the player are drop pickup and grass rustle — both of which
+    /// SHOULD fire while walking anyway.
+    /// </summary>
+    private static void AllowTriggersWhileScripted(BaseCharacterComponent character)
+    {
+        try
+        {
+            var body = character?.body;
+            if (body != null && !body.useFullKinematicContacts) body.useFullKinematicContacts = true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Could not enable kinematic trigger contacts: {ex.Message}");
+        }
+    }
+
     private static void StartWalk(Vector2 dest, string label, MovementComponent.GoToMethod method)
     {
         try
@@ -2068,6 +2099,7 @@ internal static class ObjectNavigator
             // ReleaseScriptControl. Idempotent if a retry re-enters here with control already off.
             character.control_enabled = false;
             _weDisabledControl = true;
+            AllowTriggersWhileScripted(character);
 
             // from_script:true suspends player input so the movement state machine
             // drives the character cleanly. AStar routes around obstacles; Direct is
@@ -2717,6 +2749,9 @@ internal static class ObjectNavigator
     /// per quest and expose it as a direct navigation target — the screen-reader
     /// equivalent of the quest arrow. Unlike the scene-scanned categories, quest targets
     /// ignore the distance cap so a far objective (e.g. "find Gerry") still appears.
+    ///
+    /// Then the two hand-authored task tables (<see cref="TaskGdPointLandmarks"/>,
+    /// <see cref="TaskObjectLandmarks"/>) for objectives the vanilla arrow simply doesn't cover.
     /// </summary>
     private static void GatherQuestTargets(Vector2 playerPos)
     {
@@ -2750,6 +2785,44 @@ internal static class ObjectNavigator
                     Label = label,
                     Position = objPos,
                     Distance = Vector2.Distance(objPos, playerPos)
+                });
+            }
+
+            // Hand-authored objectives the vanilla arrow can't express. The loop above can only
+            // point at quests whose definition names an arrow_wgo (see [[quest-arrow-limitation]]),
+            // and meeting/trigger spots are exactly the kind that don't: they are bare ground or an
+            // invisible zone volume. Both tables below are gated on the task being Visible, so they
+            // show up with the objective and vanish when it completes — same lifetime as an arrow.
+            // ExactPoint on both: these fire on the player collider ENTERING them, and the normal
+            // approach offset stops about a tile short, i.e. outside.
+            foreach (var (npcId, taskId, gdPoint, label) in TaskGdPointLandmarks)
+            {
+                if (!IsTaskVisible(npcId, taskId)) continue;
+                // GD points can be disabled per quest state and GetGDPointBy* skip disabled ones,
+                // so a null here just means "not in the world right now" — stay silent.
+                var point = WorldMap.GetGDPointByGDTag(gdPoint, log_if_null: false)
+                            ?? WorldMap.GetGDPointByName(gdPoint, log_if_null: false);
+                if (point == null) continue;
+                questList.Add(new NavigationTarget
+                {
+                    Label = label,
+                    Position = point.pos,
+                    Distance = Vector2.Distance(point.pos, playerPos),
+                    ExactPoint = true
+                });
+            }
+
+            foreach (var (npcId, taskId, objectName, label) in TaskObjectLandmarks)
+            {
+                if (!IsTaskVisible(npcId, taskId)) continue;
+                var objPos = TaskObjectPosition(objectName);
+                if (objPos == null) continue;
+                questList.Add(new NavigationTarget
+                {
+                    Label = label,
+                    Position = objPos.Value,
+                    Distance = Vector2.Distance(objPos.Value, playerPos),
+                    ExactPoint = true
                 });
             }
         }
@@ -2799,10 +2872,12 @@ internal static class ObjectNavigator
         ("cliff", "gd_actors_hiding_point"),
     };
 
-    // Landmarks anchored on a named GD point that exist ONLY while an NPC task is running, for
+    // QUEST targets anchored on a named GD point that exist ONLY while an NPC task is running, for
     // meeting spots that aren't inside a world zone of their own (so GdPointZoneAnchors has no
     // zone to attach to, and hijacking a neighbouring zone would drag a useful landmark off its
-    // real place). They appear when the task goes Visible and vanish when it completes.
+    // real place). They appear when the task goes Visible and vanish when it completes — which is
+    // why they belong in Quests, not Landmarks: a Landmark is a permanent feature of the map, and
+    // someone hunting an objective looks under Quests. Gathered in GatherQuestTargets.
     // (npc id, task id, GD point gd_tag/name, spoken label).
     private static readonly (string npcId, string taskId, string gdPoint, string label)[] TaskGdPointLandmarks =
     {
@@ -2812,6 +2887,24 @@ internal static class ObjectNavigator
         // ground below the hill, i.e. no zone anchors it. Bring one wooden plank; the flow charges
         // it as the price of the "here's a plank" answer.
         ("npc_cultist", "snake_trap", "gd_cultist_near_stone", "Snake meeting point"),
+    };
+
+    // Task-gated quest targets anchored on a named scene OBJECT rather than a GD point. Same
+    // appear-with-the-task/vanish-on-completion rule and same Quests category as
+    // TaskGdPointLandmarks; the difference is what the game built the spot out of. Dungeon story
+    // triggers are WorldSimpleObjects baked into a room
+    // interior preset, so there is no GD point to aim at AND no WorldGameObject for the normal
+    // object scan to pick up — without an entry here they are unreachable by any category.
+    // (npc id, task id, object/prefab name, spoken label).
+    private static readonly (string npcId, string taskId, string objectName, string label)[] TaskObjectLandmarks =
+    {
+        // "Bring the pagan amulet to the last room of the eighth dungeon floor" (Game of Crone).
+        // The trigger is the WSO gd_zone_refugees_exit_8, baked into the Exit_8 exit-room preset at
+        // room tile (5,5) — ~3 tiles north of the stairs down at (4.5,8), i.e. the middle of the
+        // room, with a collider only about a tile wide. Its flow script on_enter_gd_zone_s23 fires
+        // on zone ENTRY and additionally wants floor 8 cleared plus the amulet in the inventory, so
+        // ExactPoint matters here exactly as it does for the cliff meeting: a tile short is outside.
+        ("player", "s_ev_22_goto_8lvl", "gd_zone_refugees_exit_8", "Amulet delivery spot"),
     };
 
     /// <summary>
@@ -2839,6 +2932,47 @@ internal static class ObjectNavigator
             _log?.LogWarning($"[NAVIGATOR] IsTaskVisible failed for {npcId}/{taskId}: {ex.Message}");
         }
         return false;
+    }
+
+    /// <summary>
+    /// World position of a named scene object for <see cref="TaskObjectLandmarks"/>, or null when
+    /// it isn't in the world right now (wrong dungeon level, quest state, whatever) — a miss is
+    /// normal and stays silent, exactly like a disabled GD point.
+    /// </summary>
+    private static Vector2? TaskObjectPosition(string objectName)
+    {
+        try
+        {
+            // Dungeon room interiors Instantiate() their WSOs, so the live GameObject is named
+            // "<prefab>(Clone)" — match on the prefix. Inactive children count: the dungeon culls
+            // objects that are off-screen and re-activates them as the player approaches, and the
+            // whole point of this entry is to be findable from across the level.
+            var dr = MainGame.me?.dungeon_root;
+            if (dr != null && dr.dungeon_is_loaded_now)
+            {
+                foreach (var tf in dr.GetComponentsInChildren<Transform>(true))
+                {
+                    if (tf == null) continue;
+                    if (!tf.name.StartsWith(objectName, StringComparison.OrdinalIgnoreCase)) continue;
+                    return tf.position;
+                }
+            }
+
+            // Same table can name an overworld trigger zone, which lives in the scene rather than
+            // under dungeon_root. GDZone is the component that makes such an object matter, so
+            // searching by it keeps this cheap instead of walking every Transform in the world.
+            foreach (var zone in UnityEngine.Object.FindObjectsOfType<GDZone>(true))
+            {
+                if (zone == null) continue;
+                if (!zone.name.StartsWith(objectName, StringComparison.OrdinalIgnoreCase)) continue;
+                return zone.transform.position;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] TaskObjectPosition failed for {objectName}: {ex.Message}");
+        }
+        return null;
     }
 
     /// <summary>
@@ -3011,26 +3145,6 @@ internal static class ObjectNavigator
                     Label = label,
                     Position = wgo.pos,
                     Distance = Vector2.Distance(wgo.pos, playerPos)
-                });
-            }
-
-            // Quest meeting spots that are bare ground (see TaskGdPointLandmarks). ExactPoint so
-            // auto-walk ends ON the point instead of a tile short — these are trigger/handover
-            // spots, not something you press E on.
-            foreach (var (npcId, taskId, gdPoint, label) in TaskGdPointLandmarks)
-            {
-                if (!IsTaskVisible(npcId, taskId)) continue;
-                // GD points can be disabled per quest state and GetGDPointBy* skip disabled ones,
-                // so a null here just means "not in the world right now" — stay silent.
-                var point = WorldMap.GetGDPointByGDTag(gdPoint, log_if_null: false)
-                            ?? WorldMap.GetGDPointByName(gdPoint, log_if_null: false);
-                if (point == null) continue;
-                list.Add(new NavigationTarget
-                {
-                    Label = label,
-                    Position = point.pos,
-                    Distance = Vector2.Distance(point.pos, playerPos),
-                    ExactPoint = true
                 });
             }
 
