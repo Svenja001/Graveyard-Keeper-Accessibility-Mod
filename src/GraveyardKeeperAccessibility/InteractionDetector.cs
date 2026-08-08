@@ -1310,6 +1310,25 @@ internal static class InteractionDetector
             ["mf_alchemy_survey"] = "Forschungstisch",
         };
 
+    /// <summary>
+    /// Quest-spawned copies of an existing character that the game never gave a name of their own:
+    /// their obj id has no translation, and (unlike most copies) no <c>npc_alias</c> either, so the
+    /// label fell back to the raw id — "Npc clotho refugees". Map such an id to the LOCALIZATION KEY
+    /// of the character it depicts, never to a literal string, so the name stays in the player's
+    /// language. Only for ids the game genuinely leaves unnamed; anything with a real translation
+    /// keeps it.
+    /// </summary>
+    private static readonly Dictionary<string, string> NpcNameKeyOverrides =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // The five memory apparitions of the swamp witch in the refugee camp, and her DLC copy.
+            // "npc_witch" is Clotho's own id everywhere else in the game — it carries her task
+            // (npc_clotho_task_1, "Hilf der Hexe dabei, ihr Gedächtnis wiederzuerlangen") and it is
+            // what the quest log and relations screen name her by.
+            ["npc_clotho_refugees"] = "npc_witch",
+            ["npc_clotho_dlc"] = "npc_witch",
+        };
+
     internal static string GetObjectLabel(WorldGameObject wgo)
     {
         if (wgo == null)
@@ -1351,14 +1370,20 @@ internal static class InteractionDetector
                         if (!string.IsNullOrEmpty(catalogId) && HasTranslation(catalogId))
                             return LocalizedObjectName(catalogId);
 
-                        // A quest-specific copy of an NPC gets its own untranslated obj id
-                        // ("npc_clotho_refugees" — the ritual apparitions in the refugee camp), which
-                        // would read out as a mangled id. The game keys such copies back to the real
+                        // A quest-specific copy of an NPC gets its own untranslated obj id, which
+                        // would read out as a mangled id. Most such copies point back at the real
                         // character through npc_alias (that's how known_npcs finds their tasks — see
                         // WithNpcQuestInfo), and the alias is the id that has a name, so use it.
                         if (wgo.obj_def.IsNPC() && !string.IsNullOrEmpty(wgo.obj_def.npc_alias) &&
                             HasTranslation(wgo.obj_def.npc_alias))
                             return LocalizedObjectName(wgo.obj_def.npc_alias);
+
+                        // The rest have no alias either (the refugee-camp apparitions
+                        // "npc_clotho_refugees" read out as "Npc clotho refugees" in game) — name
+                        // those from the hand-mapped key of the character they depict.
+                        if (NpcNameKeyOverrides.TryGetValue(wgo.obj_def.id, out var nameKey) &&
+                            HasTranslation(nameKey))
+                            return LocalizedObjectName(nameKey);
                     }
                     return name;
                 }
