@@ -27,6 +27,7 @@ internal struct NavigationTarget
 internal enum NavCategory
 {
     Quests,
+    SomethingNew,
     Landmarks,
     Items,
     Corpses,
@@ -75,6 +76,7 @@ internal static class ObjectNavigator
     private static readonly NavCategory[] _categoryOrder =
     {
         NavCategory.Quests,
+        NavCategory.SomethingNew,
         NavCategory.Landmarks,
         NavCategory.Items,
         NavCategory.Corpses,
@@ -621,6 +623,7 @@ internal static class ObjectNavigator
     private static string CategoryName(NavCategory cat) => cat switch
     {
         NavCategory.Quests => "Quest targets",
+        NavCategory.SomethingNew => "Something new",
         NavCategory.Landmarks => "Landmarks",
         NavCategory.Items => "Items",
         NavCategory.Corpses => "Corpses",
@@ -2604,19 +2607,27 @@ internal static class ObjectNavigator
                 // Worker zombies read out their efficiency + assignment here, since pressing E on
                 // one picks it up rather than inspecting it. No-op for non-workers.
                 label = InteractionDetector.AppendWorkerInfo(label, obj);
-                // The game's "talk to ME next" bubble: a quest script armed this one copy with a
-                // one-shot interaction event. Say so in the list, and remember it for the Quests
-                // mirror below. No-op for everything else.
+                // The game's "talk to ME next" bubble: a script armed this one copy with a one-shot
+                // interaction event. Say so in the list, then route it by what was armed. An NPC
+                // ("wants to talk", the game's (speak) icon) is a quest script picking out whom to
+                // address, so it's mirrored into Quests. Anything else ("has something new", the
+                // (view) icon) is just as often a plain container the game flagged — the tavern
+                // money box, a delivery crate — which has no business in the quest list, so it goes
+                // to its own Something new category instead. No-op for unarmed objects.
                 if (InteractionDetector.HasPendingScriptedInteraction(obj))
                 {
                     label = InteractionDetector.WithPendingInteraction(label, obj);
-                    _pendingInteractionTargets.Add(new NavigationTarget
+                    var pending = new NavigationTarget
                     {
                         Object = obj,
                         Label = label,
                         Position = objPos,
                         Distance = distance
-                    });
+                    };
+                    if (obj.obj_def != null && obj.obj_def.IsNPC())
+                        _pendingInteractionTargets.Add(pending);
+                    else
+                        _byCategory[NavCategory.SomethingNew].Add(pending);
                 }
                 _byCategory[category].Add(new NavigationTarget
                 {
