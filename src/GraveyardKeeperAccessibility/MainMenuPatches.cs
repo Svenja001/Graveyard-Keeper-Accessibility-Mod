@@ -331,6 +331,38 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The world map: how much of the world is discovered, how many areas the remote craft
+        // control can reach, then land on the first row so arrowing walks the area list.
+        if (gui is MapGUI)
+        {
+            var areas = GetActiveElements();
+            var mapIntro = GlobalCraftControlHandler.MapIntro();
+            if (areas.Count > 0)
+            {
+                SelectedIndex = 0;
+                ScreenReader.Say($"{mapIntro} {areas[0].ReadLabel()}");
+            }
+            else
+            {
+                ScreenReader.Say(mapIntro);
+            }
+            return;
+        }
+
+        // The remote-crafting window: read the zone, the gratitude points left to spend and
+        // whether a soul receiver is even standing there (without one every station is dead),
+        // then land on the first station rather than on a tab row.
+        if (gui is GlobalCraftControlGUI globalCraftGui)
+        {
+            var stations = GetActiveElements();
+            var craftIntro = GlobalCraftControlHandler.IntroFor(globalCraftGui);
+            SelectedIndex = GlobalCraftControlHandler.FirstStationIndex(stations);
+            ScreenReader.Say(SelectedIndex >= 0
+                ? $"{craftIntro} {stations[SelectedIndex].ReadLabel()}"
+                : $"{craftIntro} No crafting stations in this area.");
+            return;
+        }
+
         // If this GUI exposes navigable item cells (e.g. the autopsy table's body parts),
         // mention the count so the player knows there's a grid to arrow through. The cells'
         // names are read individually as the player navigates.
@@ -678,6 +710,29 @@ internal static class GUIAccessibility
         if (gui is PorterStationGUI porterStation)
         {
             PorterStationHandler.Discover(porterStation, Elements);
+            return;
+        }
+
+        // The world map. Once the remote craft control is unlocked, the map is the ONLY way into
+        // remote crafting: it grows one clickable icon per zone group (ZoneControlItem), which is
+        // a bare MonoBehaviour with a collider — no UIButton — so the generic pass below found
+        // nothing at all and the map read as an empty window. See GlobalCraftControlHandler.
+        // …and the map's own contents (every discovered area, nearest first, with the bearing from
+        // where the player is standing) are drawn as labels pinned to a picture, so the window read
+        // as empty even before the DLC. Remote-crafting rows go first: they are the only pressable
+        // thing on the screen.
+        if (gui is MapGUI mapGui)
+        {
+            GlobalCraftControlHandler.DiscoverMapZones(mapGui, Elements);
+            GlobalCraftControlHandler.DiscoverMapAreas(mapGui, Elements);
+            return;
+        }
+
+        // The remote-crafting window itself: zone tabs plus one CraftControlItem row per craft
+        // station. Also MonoBehaviours, so nothing here was reachable either.
+        if (gui is GlobalCraftControlGUI globalCraft)
+        {
+            GlobalCraftControlHandler.Discover(globalCraft, Elements);
             return;
         }
 
@@ -3189,6 +3244,18 @@ internal static class GUIAccessibility
         // When several were queued, say so up front so the player knows their batch took.
         string countPrefix = amount > 1 ? $"{amount} queued. " : "";
 
+        // Remote crafting (Better Save Soul) has no start button at all: picking the recipe
+        // enqueues it and the station immediately begins working it off by itself, paying
+        // gratitude points instead of energy and running at an eighth of a worker's speed. Say
+        // that plainly — otherwise the window just closes and nothing appears to have happened.
+        string remoteSuffix = "";
+        try
+        {
+            if (GlobalCraftControlGUI.is_global_control_active)
+                remoteSuffix = $". It runs on its own, slowly. {Mathf.RoundToInt(MainGame.me.player.gratitude_points)} gratitude points left";
+        }
+        catch { }
+
         try
         {
             var wgo = _crafteryWgoField?.GetValue(craftGui) as WorldGameObject;
@@ -3200,8 +3267,8 @@ internal static class GUIAccessibility
                 catch { }
                 if (string.IsNullOrWhiteSpace(outName)) outName = recipeName;
                 int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
-                if (string.IsNullOrWhiteSpace(outName)) return countPrefix + "Crafting started";
-                return countPrefix + (pct >= 1 ? $"Crafting {outName}, {pct} percent done" : $"Started crafting {outName}");
+                if (string.IsNullOrWhiteSpace(outName)) return countPrefix + "Crafting started" + remoteSuffix;
+                return countPrefix + (pct >= 1 ? $"Crafting {outName}, {pct} percent done" : $"Started crafting {outName}") + remoteSuffix;
             }
         }
         catch { }
@@ -4148,6 +4215,27 @@ internal static class GUIAccessibility
             case "gratitude_points": return "gratitude points";
             default: return type;
         }
+    }
+
+    /// <summary>
+    /// Re-list the remote-crafting window after it switched zone. Switching destroys and rebuilds
+    /// every station row, so the old element list is stale; land on the first station of the new
+    /// zone (past the tab rows) and read it, the same way a branch switch works in the tech tree.
+    /// </summary>
+    internal static void RefreshAfterRemoteTabSwitch(string zoneName)
+    {
+        if (_currentGUI == null) return;
+
+        Elements.Clear();
+        DiscoverElements(_currentGUI);
+
+        var active = GetActiveElements();
+        var idx = GlobalCraftControlHandler.FirstStationIndex(active);
+        SelectedIndex = idx;
+
+        ScreenReader.Say(idx >= 0
+            ? $"{zoneName}. {active[idx].ReadLabel()}"
+            : $"{zoneName}. No crafting stations in this area");
     }
 
     /// <summary>Switch the tech tree to a branch, then re-list and announce its techs.</summary>
