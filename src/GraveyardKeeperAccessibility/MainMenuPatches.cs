@@ -1518,9 +1518,24 @@ internal static class GUIAccessibility
         DiscoverCraftTabs(craftGui);
 
         int added = 0;
+        // Rows the desk is hiding right now, by craft id. A desk's catalog is split across tab
+        // buttons and further filtered by Flow_UnlockCraft, so "the option I need isn't there" has
+        // two very different causes — wrong tab (switch to it) versus still locked (a quest has to
+        // unlock it). Logging both sides makes that answerable from a log alone.
+        var hidden = new List<string>();
         foreach (var cri in items)
         {
-            if (cri == null || !cri.gameObject.activeInHierarchy) continue;
+            if (cri == null) continue;
+            if (!cri.gameObject.activeInHierarchy)
+            {
+                try
+                {
+                    var d = cri.craft_definition;
+                    if (d != null) hidden.Add($"{d.id}{(d.IsLocked() ? " (locked)" : "")}");
+                }
+                catch { }
+                continue;
+            }
             var cell = cri.item_gui;
             if (cell == null) continue;
 
@@ -1534,7 +1549,8 @@ internal static class GUIAccessibility
             added++;
         }
 
-        Plugin.Log.LogInfo($"[BUILD] Catalog discovered {added} build option(s)");
+        Plugin.Log.LogInfo($"[BUILD] Catalog discovered {added} build option(s); " +
+                           $"{hidden.Count} row(s) not on this tab: [{string.Join(", ", hidden)}]");
     }
 
     /// <summary>Spoken label for a build catalog row: the object name + affordability.</summary>

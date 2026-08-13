@@ -508,7 +508,7 @@ internal static class InteractionDetector
             var def = GameBalance.me?.GetDataOrNull<ObjectDefinition>(targetId)
                       ?? GameBalance.me?.GetDataOrNull<ObjectDefinition>(targetId + "_place");
             if (def != null && def.has_craft) return true;
-            return wgo.has_removal_craft;
+            return BuildPlacementHandler.HasRemovalCraft(wgo);
         }
         catch
         {

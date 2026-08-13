@@ -42,6 +42,10 @@ internal static class BuildPlacementHandler
     private static MethodInfo _cancelRemoving; // private void CancelRemoving()
     private static MethodInfo _removeMarks;   // private void RemoveMarksFromAllWGOs()
 
+    // FloatingWorldGameObject's own live footprint list (private static List<FlowGridCell> _cells).
+    // See FootprintCells for why we must read this instead of walking the ghost's children.
+    private static FieldInfo _floatingCells;
+
     // Script-building (fixed-slot interior furniture) confirm/cancel/rotate hooks. These are
     // private static events on BuildModeLogics that the placement FlowScript subscribes to; we
     // invoke them to finalize or abort exactly as the game's own UpdateWhileScriptBuilding does.
@@ -85,6 +89,8 @@ internal static class BuildPlacementHandler
             _cancelEvent = AccessTools.Field(t, "on_cancel_while_script_building");
             _rotLeftEvent = AccessTools.Field(t, "on_rotate_left_while_script_building");
             _rotRightEvent = AccessTools.Field(t, "on_rotate_right_while_script_building");
+            _floatingCells = AccessTools.Field(typeof(FloatingWorldGameObject), "_cells");
+            _triedRemovalCraft = AccessTools.Field(typeof(WorldGameObject), "_tried_to_find_removal_craft");
             _log?.LogInfo("[BUILD] BuildPlacementHandler initialized");
         }
         catch (Exception ex)
@@ -498,6 +504,90 @@ internal static class BuildPlacementHandler
         ScreenReader.Say("Changed style", interrupt: true);
     }
 
+    // ---- removal crafts ---------------------------------------------------
+
+    // obj_id -> its BuildType.Remove craft (or null). Pure balance data, so it never goes stale;
+    // the desk and unlock filters below are re-applied live on every query.
+    private static readonly Dictionary<string, ObjectCraftDefinition> _removeCraftByObj =
+        new Dictionary<string, ObjectCraftDefinition>();
+
+    // WorldGameObject._tried_to_find_removal_craft — the game's one-shot cache flag, reset in
+    // RefreshRemovalCache. See HasRemovalCraft for why it has to be resettable.
+    private static FieldInfo _triedRemovalCraft;
+
+    /// <summary>
+    /// Does the build desk define a demolish craft for this object? Answers the same question as
+    /// <see cref="WorldGameObject.has_removal_craft"/>, but <em>never reads that property</em> —
+    /// and no mod code may, outside build mode.
+    ///
+    /// The game's getter is a one-shot lazy cache: it sets <c>_tried_to_find_removal_craft</c>
+    /// BEFORE looking the craft up, and the lookup
+    /// (<c>BuildModeLogics.GetObjectRemoveCraftDefinition</c>) dereferences the static
+    /// <c>BuildModeLogics.last_build_desk</c>, which stays null until the player opens their first
+    /// build desk in a session. So an early read — our navigator categorises every scene object on
+    /// each refresh, from the moment a save loads — throws a NullReferenceException inside the
+    /// getter, leaves <c>_has_removal_craft</c> at its default false, and leaves the "already
+    /// tried" flag set. The object is then permanently un-demolishable for the rest of the session,
+    /// for the game's own <c>EnterRemoveMode</c> as much as for us: remove mode lists nothing and
+    /// the desk looks like it defines no removals at all. The exception was invisible because every
+    /// call site sat inside a catch-all.
+    ///
+    /// This mirrors the game's own filters (desk lock list, craft unlock) without the null
+    /// dereference, and touches nothing on the WorldGameObject.
+    /// </summary>
+    internal static bool HasRemovalCraft(WorldGameObject wgo)
+    {
+        try
+        {
+            var id = wgo?.obj_id;
+            if (string.IsNullOrEmpty(id)) return false;
+
+            if (!_removeCraftByObj.TryGetValue(id, out var def))
+            {
+                def = null;
+                foreach (var c in GameBalance.me.craft_obj_data)
+                {
+                    if (c == null || c.out_obj != id) continue;
+                    if (c.build_type != ObjectCraftDefinition.BuildType.Remove) continue;
+                    def = c;
+                    break;
+                }
+                _removeCraftByObj[id] = def;
+            }
+            if (def == null) return false;
+
+            // Only a desk that is NOT in the craft's lock list may demolish it. With no desk open
+            // yet the game would have crashed here; we simply skip the filter, exactly as
+            // GetObjectPutCraftDefinition does for its own null check.
+            var desk = BuildModeLogics.last_build_desk;
+            if (desk != null && def.locked_builders_ids != null &&
+                def.locked_builders_ids.Contains(desk.obj_id)) return false;
+
+            return !def.IsLocked();
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] HasRemovalCraft failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Clear the game's one-shot removal cache on a zone's objects so its own remove-mode highlight
+    /// re-evaluates with a build desk in hand. Heals objects poisoned before <see
+    /// cref="HasRemovalCraft"/> existed — the flag is a runtime field, never serialized, so this is
+    /// enough and a restart would do the same.
+    /// </summary>
+    private static void RefreshRemovalCache(IEnumerable<WorldGameObject> wgos)
+    {
+        if (_triedRemovalCraft == null || wgos == null) return;
+        foreach (var w in wgos)
+        {
+            if (w == null) continue;
+            try { _triedRemovalCraft.SetValue(w, false); } catch { }
+        }
+    }
+
     // ---- remove mode ------------------------------------------------------
 
     /// <summary>
@@ -530,9 +620,14 @@ internal static class BuildPlacementHandler
             var zone = Logics?.cur_build_zone;
             if (zone == null) return;
 
-            foreach (var w in zone.GetZoneWGOs())
+            var zoneWgos = zone.GetZoneWGOs();
+            // The desk is open, so last_build_desk is set: let the game recompute its own flag now
+            // that the lookup can succeed, keeping its highlight in step with our list.
+            RefreshRemovalCache(zoneWgos);
+
+            foreach (var w in zoneWgos)
             {
-                if (w != null && w.has_removal_craft)
+                if (w != null && HasRemovalCraft(w))
                     _removables.Add(w);
             }
 
@@ -736,17 +831,17 @@ internal static class BuildPlacementHandler
     {
         try
         {
-            var cells = FloatingWorldGameObject.cur_floating?.gameObject.GetComponentsInChildren<FlowGridCell>();
+            var floating = FloatingWorldGameObject.cur_floating;
+            if (floating == null) return "none";
+            var cells = FootprintCells(floating);
             if (cells == null || cells.Length == 0) return "none";
 
-            var centre = (Vector2)FloatingWorldGameObject.cur_floating.transform.position + FootprintOffset();
+            var centre = (Vector2)floating.transform.position + FootprintOffset();
             var xs = new HashSet<int>();
             var ys = new HashSet<int>();
             float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
             foreach (var c in cells)
             {
-                if (c == null || c.gameObject == null || !c.gameObject.activeSelf) continue;
-                if (c.cell_type == FlowGridCell.CellType.TotemArea) continue;
                 Vector2 d = (Vector2)c.transform.position - centre;
                 xs.Add(Mathf.RoundToInt(d.x / Step));
                 ys.Add(Mathf.RoundToInt(d.y / Step));
@@ -997,6 +1092,44 @@ internal static class BuildPlacementHandler
     }
 
     /// <summary>
+    /// The ghost's live footprint: the cells the game itself tests in
+    /// <see cref="FloatingWorldGameObject.RecalculateAvailability"/>, already filtered to the ones
+    /// that count (active, not the totem-radius ring).
+    ///
+    /// Read from the game's private static <c>_cells</c> list rather than
+    /// <c>GetComponentsInChildren&lt;FlowGridCell&gt;</c> on the ghost. Every rotation rebuilds the
+    /// grid through <c>DrawFlowGrid</c>, which clears that list but disposes the old cell objects
+    /// with <c>Object.Destroy</c> — deferred to the end of the frame. Our snap sweep tries up to
+    /// eight rotations inside a single frame, so the ghost's children still hold every superseded
+    /// generation, and walking them counted the same tile once per rotation attempted: a 36-tile
+    /// table was reported as "180 of 180 tiles blocked" after five variations. The game's list holds
+    /// only the live generation, so the counts we speak match the footprint the player is placing.
+    /// </summary>
+    private static FlowGridCell[] FootprintCells(FloatingWorldGameObject floating)
+    {
+        try
+        {
+            var live = _floatingCells?.GetValue(null) as List<FlowGridCell>;
+            IEnumerable<FlowGridCell> source = live;
+            // Reflection failed (game update renamed the field): fall back to the ghost's children.
+            // The counts can then be inflated by stale generations, but a diagnosis is still better
+            // than none — and the ranking is unaffected, since the copies sit on the same tiles.
+            if (source == null)
+                source = floating.gameObject.GetComponentsInChildren<FlowGridCell>();
+
+            return source.Where(c => c != null && c.gameObject != null
+                                     && c.gameObject.activeSelf
+                                     && c.cell_type != FlowGridCell.CellType.TotemArea)
+                         .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] FootprintCells failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The sweep found no buildable cell. Log everything useful — including per-zone details for the
     /// matching wall strips (active state, collider bounds, and the game's can_be_built when the
     /// ghost is dropped on each zone's centre) — and speak a short diagnosis the user can relay.
@@ -1018,14 +1151,11 @@ internal static class BuildPlacementHandler
             var floating = FloatingWorldGameObject.cur_floating;
             if (floating == null) return null;
 
-            var cells = floating.gameObject.GetComponentsInChildren<FlowGridCell>();
+            var cells = FootprintCells(floating);
             if (cells == null || cells.Length == 0) return null;
 
             var zoneId = Logics?.cur_build_zone_id;
-            int counted = cells.Count(c => c != null && c.gameObject != null
-                                           && c.gameObject.activeSelf
-                                           && c.cell_type != FlowGridCell.CellType.TotemArea);
-            if (counted == 0) return null;
+            int counted = cells.Length;
 
             Vector2 best = playerPos;
             int bestBlocked = int.MaxValue, bestOutside = 0, bestBusy = 0;
@@ -1214,7 +1344,11 @@ internal static class BuildPlacementHandler
         // Per-strip split of WHY it failed, measured with the footprint centred on the strip:
         // busy>0 = mount already occupied, outside>0 = the object's tiles hang off the strip.
         FlowGridCell[] ghostCells = null;
-        try { ghostCells = FloatingWorldGameObject.cur_floating?.gameObject.GetComponentsInChildren<FlowGridCell>(); }
+        try
+        {
+            var ghost = FloatingWorldGameObject.cur_floating;
+            if (ghost != null) ghostCells = FootprintCells(ghost);
+        }
         catch { }
         var zoneIdForCount = Logics?.cur_build_zone_id;
 

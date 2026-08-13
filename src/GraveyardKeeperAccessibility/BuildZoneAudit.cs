@@ -8,10 +8,11 @@ namespace GraveyardKeeperAccessibility;
 /// This exists because a rating quest ("get the sacrifice area to 20") can otherwise dead-end
 /// invisibly: most decorations are restricted to a hand-placed <see cref="WorldSubZone"/> mount and
 /// the world usually contains exactly ONE mount per decoration, so once it's used the catalog entry
-/// stays visible but can never be placed again. On top of that, the game defines a removal craft
-/// for only a handful of objects (see <see cref="WorldGameObject.has_removal_craft"/>), so "nothing
-/// can be removed" is normally the truth, not a bug. The audit spells both out: the remaining
-/// headroom in points, and whether the shortfall is space, materials or a hard vanilla limit.
+/// stays visible but can never be placed again. Removability is the other half: the game defines
+/// ~276 <c>BuildType.Remove</c> crafts, so most player-built furniture CAN be demolished — read it
+/// through <see cref="BuildPlacementHandler.HasRemovalCraft"/>, never through the game's poisonable
+/// <c>has_removal_craft</c>. The audit spells both out: the remaining headroom in points, and
+/// whether the shortfall is space, materials or a hard vanilla limit.
 /// </summary>
 internal static class BuildZoneAudit
 {
@@ -89,7 +90,7 @@ internal static class BuildZoneAudit
 
             // 2. Demolition.
             lines.Add(removableCount == 0
-                ? "Nothing here can be demolished: the game defines no removal for any of these objects, so remove mode will always come up empty."
+                ? "Nothing here can be demolished: none of these objects has a removal craft, so remove mode will come up empty."
                 : $"{removableCount} object{(removableCount == 1 ? " can" : "s can")} be demolished in remove mode.");
 
             // 3. What is still placeable, and the headroom that gives.
@@ -158,8 +159,26 @@ internal static class BuildZoneAudit
             {
                 var c = cols[i];
                 if (c == null) continue;
+                // WHICH collider counts is the whole question. IsInsideWorldZone asks the collider's
+                // OWN GameObject for a WorldZone whose id matches — a child collider, or one owned
+                // by a nested zone, is invisible to it however large it looks. So say what each
+                // collider actually is: without this a huge "zone collider" covering the whole room
+                // reads as buildable floor when nothing may be built on it.
+                string owner;
+                try
+                {
+                    var wz = c.GetComponent<WorldZone>();
+                    var wsz = c.GetComponent<WorldSubZone>();
+                    owner = wz != null
+                        ? (wz.id == zone.id ? "BUILDABLE (this zone)" : $"other zone '{wz.id}'")
+                        : wsz != null ? $"sub-zone '{wsz.sub_zone_id}'"
+                        : "no zone component - not buildable";
+                }
+                catch { owner = "?"; }
+
                 _log?.LogInfo($"[AUDIT]   zonecol#{i} enabled={c.enabled} active={c.gameObject.activeInHierarchy} " +
-                              $"layer={c.gameObject.layer} center={c.bounds.center} size={c.bounds.size}");
+                              $"layer={c.gameObject.layer} center={c.bounds.center} size={c.bounds.size} " +
+                              $"go='{c.gameObject.name}' {owner}");
             }
         }
         catch (Exception ex)
@@ -190,8 +209,10 @@ internal static class BuildZoneAudit
         {
             if (w == null || w.obj_def == null) continue;
 
-            bool removable = false;
-            try { removable = w.has_removal_craft; } catch { }
+            // Never w.has_removal_craft: reading it outside build mode poisons the game's own
+            // one-shot cache — see BuildPlacementHandler.HasRemovalCraft. The audit runs from a
+            // hotkey anywhere in the world, so it is exactly such a caller.
+            bool removable = BuildPlacementHandler.HasRemovalCraft(w);
             if (removable) removableCount++;
 
             float q = 0f;

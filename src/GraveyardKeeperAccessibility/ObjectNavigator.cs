@@ -3804,7 +3804,7 @@ internal static class ObjectNavigator
                 }
                 // A script object with no craft that the player built (carries a removal craft,
                 // so the build desk can demolish it) goes under Buildables; otherwise Other.
-                category = obj.has_removal_craft ? NavCategory.Buildables : NavCategory.Other;
+                category = BuildPlacementHandler.HasRemovalCraft(obj) ? NavCategory.Buildables : NavCategory.Other;
                 return true;
             default:
                 // Smashable loot props (dungeon vases/pots, barrels/crates/urns): destructible
@@ -3866,7 +3866,7 @@ internal static class ObjectNavigator
                 // FINISHED obj_id, so the under-construction stage has no removal craft and used to
                 // fall through to "skip". Catch it by its Hammer build action — you literally hammer
                 // it to complete it — so unfinished builds still show up under Buildables to walk to.
-                if (obj.has_removal_craft || HasHammerBuildAction(def))
+                if (BuildPlacementHandler.HasRemovalCraft(obj) || HasHammerBuildAction(def))
                 {
                     category = NavCategory.Buildables;
                     return true;
