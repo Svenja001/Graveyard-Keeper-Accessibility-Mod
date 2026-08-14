@@ -332,6 +332,20 @@ internal static class GUIAccessibility
             return;
         }
 
+        // The time machine: say how many memories are unlocked out of the whole set, then land on
+        // the newest unlocked one rather than on the oldest, so Enter replays the memory the
+        // player most likely came down for.
+        if (gui is TimeMachineGUI timeMachineGui)
+        {
+            var memories = GetActiveElements();
+            var machineIntro = TimeMachineHandler.IntroFor(timeMachineGui);
+            SelectedIndex = TimeMachineHandler.FocusIndex(memories);
+            ScreenReader.Say(SelectedIndex >= 0
+                ? $"{machineIntro} {memories[SelectedIndex].ReadLabel()}"
+                : machineIntro);
+            return;
+        }
+
         // The world map: how much of the world is discovered, how many areas the remote craft
         // control can reach, then land on the first row so arrowing walks the area list.
         if (gui is MapGUI)
@@ -726,6 +740,16 @@ internal static class GUIAccessibility
         if (gui is PorterStationGUI porterStation)
         {
             PorterStationHandler.Discover(porterStation, Elements);
+            return;
+        }
+
+        // The time machine in the tavern cellar: one row per replayable memory. Its rows are
+        // cloned prefabs whose only pressable part is a generically-named UIButton, so the
+        // generic pass read every memory as the same word and never said which were unlocked.
+        // See TimeMachineHandler.
+        if (gui is TimeMachineGUI timeMachine)
+        {
+            TimeMachineHandler.Discover(timeMachine, Elements);
             return;
         }
 

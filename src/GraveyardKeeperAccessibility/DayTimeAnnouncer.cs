@@ -79,7 +79,8 @@ internal static class DayTimeAnnouncer
             // SURFACE time underground, so time_of_day_enum still reports e.g. "day" while
             // you're fighting in the dark. Reading just "day" there is misleading, so when the
             // dungeon is loaded we say so up front and label the clock as the surface time.
-            bool inDungeon = MainGame.me.dungeon_root != null && MainGame.me.dungeon_root.dungeon_is_loaded_now;
+            var dungeonDrawer = GameRefs.DungeonRoot();
+            bool inDungeon = dungeonDrawer != null && dungeonDrawer.dungeon_is_loaded_now;
             if (inDungeon)
                 ScreenReader.Say($"In the dungeon. Day {day}, {weekday}. Surface time {clock}");
             else

@@ -656,7 +656,7 @@ internal static class ObjectNavigator
             // The loaded dungeon level. Descending drops the player on the entry tile of a freshly
             // generated level — often barely a step from where they stood — so the position jump can
             // be too small to detect while every single object around them has been replaced.
-            var dungeonRoot = MainGame.me?.dungeon_root;
+            var dungeonRoot = GameRefs.DungeonRoot();
             if (dungeonRoot != null)
             {
                 bool loaded = dungeonRoot.dungeon_is_loaded_now;
@@ -1086,7 +1086,7 @@ internal static class ObjectNavigator
     /// </summary>
     internal static void WalkToDungeonExit()
     {
-        var dr = MainGame.me?.dungeon_root;
+        var dr = GameRefs.DungeonRoot();
         if (dr == null || !dr.dungeon_is_loaded_now)
         {
             ScreenReader.Say("Not in a dungeon", interrupt: true);
@@ -2734,9 +2734,9 @@ internal static class ObjectNavigator
             // single self-contained unit: every tile/mob/object is instantiated as a child of
             // dungeon_root (TextureDrawer), and NO outdoor object is — so scoping to dungeon_root's
             // children reveals the whole level and nothing beyond it. See isDungeonObj in the loop.
-            bool inDungeon = MainGame.me?.dungeon_root != null &&
-                             MainGame.me.dungeon_root.dungeon_is_loaded_now;
-            Transform dungeonRoot = inDungeon ? MainGame.me.dungeon_root.transform : null;
+            var dungeonDrawer = GameRefs.DungeonRoot();
+            bool inDungeon = dungeonDrawer != null && dungeonDrawer.dungeon_is_loaded_now;
+            Transform dungeonRoot = inDungeon ? dungeonDrawer.transform : null;
 
             // Remember what is currently selected so we can keep the cursor on it
             // across refreshes even as distances change. Drops have no WorldGameObject,
@@ -3349,7 +3349,7 @@ internal static class ObjectNavigator
             // "<prefab>(Clone)" — match on the prefix. Inactive children count: the dungeon culls
             // objects that are off-screen and re-activates them as the player approaches, and the
             // whole point of this entry is to be findable from across the level.
-            var dr = MainGame.me?.dungeon_root;
+            var dr = GameRefs.DungeonRoot();
             if (dr != null && dr.dungeon_is_loaded_now)
             {
                 foreach (var tf in dr.GetComponentsInChildren<Transform>(true))
