@@ -135,21 +135,72 @@ internal static class ObjectNavigator
     private static bool _hasLastPlayerPos = false;
     private static int _teleportRescanFramesLeft = 0;
 
-    // Room-switch detection. Walking through a door swaps which objects are culled/active and flips
-    // the interior sight-block state, but it is NOT a position jump, so the teleport path above never
-    // fires and the object list would otherwise stay stale until the next 30-frame refresh boundary
-    // (up to ~0.5s late — bad for timing-sensitive things). We watch the game's interior lighting
-    // state (Inside vs RealTime) and force an immediate refresh the frame it changes.
+    // ---- World-transition detection (see NotifyWorldTransition) -------------
+    //
+    // Every way the player's surroundings can be swapped out — walking through a door, a scripted
+    // teleport, descending a dungeon level, sleeping, dying, loading a save, crossing into another
+    // map zone — replaces which objects exist and which are culled around them. None of these are
+    // ordinary movement, so without an explicit signal the destination list only catches up at the
+    // next 30-frame boundary and then only if everything had already streamed in by that one frame.
+    // They arrive by completely different routes, so rather than giving each its own timing they all
+    // funnel into NotifyWorldTransition, which rebuilds the list at once and keeps rebuilding it on
+    // a short interval until the new surroundings have settled. The individual detectors below are
+    // just the signals; the handling is identical for all of them, which is what makes going in,
+    // coming back out, and every other switch feel the same.
+
+    // Signal 1 — the game's interior lighting state (Inside vs RealTime). Walking through a door
+    // flips it, and it is NOT a position jump, so nothing else would notice.
     private static EnvironmentEngine.State _lastEnvironmentState = EnvironmentEngine.State.RealTime;
     private static bool _hasLastEnvironmentState = false;
-    // After a room switch the destination objects don't all exist yet: entering an interior streams
-    // in / activates its objects over several frames, so a single immediate refresh catches an empty
-    // half-built room and the list then stays stale until the next 30-frame boundary. While this
-    // countdown is running we refresh on a much shorter interval so late-activating objects appear
-    // within a couple of frames instead of up to half a second later. Set on any room-state change.
-    private static int _fastRefreshFramesLeft = 0;
-    private const int FastRefreshWindowFrames = 60;   // ~1s of quick refreshes after a room switch
-    private const int FastRefreshInterval = 6;         // refresh every 6 frames during that window
+
+    // Signal 2 — the named WorldZone the player stands in (church, tavern, cellar, town...). The
+    // game resolves this on its own 0.5s poll (PlayerComponent.UpdateZone); we mirror the result so
+    // an area change that neither teleports nor changes the lighting still refreshes the list. The
+    // PlayerComponent is cached because it never changes within a session (cleared on scene change).
+    private static PlayerComponent _playerComponent;
+    private static WorldZone _lastPlayerZone;
+    private static bool _hasLastPlayerZone = false;
+
+    // Signal 3 — the loaded dungeon level. Descending puts the player back on the same entry tile of
+    // a brand-new level, so the position-jump detector can miss it entirely while the ENTIRE object
+    // set has been replaced. Tracked as (loaded, level number) so both entering/leaving and moving
+    // between levels register.
+    private static bool _lastDungeonLoaded = false;
+    private static int _lastDungeonLevel = -1;
+    private static bool _hasLastDungeonState = false;
+
+    // Signal 4 — the game's camera fade. Every scripted transition (door, sleep, respawn, dungeon,
+    // cutscene teleport) brackets itself in CameraTools.Fade/UnFade, so the fade flag is the one
+    // signal that covers transitions we have no specific detector for. It also tells us the world
+    // is still being rebuilt: the destination objects stream in while the screen is black, so the
+    // quick-refresh window must not start counting down until the fade is over — otherwise it can
+    // expire before the player can act at all, which is exactly what made entering a building feel
+    // slower than leaving one. Read reflectively (private static bool) and cached; null if the
+    // field ever moves, in which case the other signals still cover the common cases.
+    private static FieldInfo _cameraFadeField;
+    private static bool _cameraFadeFieldResolved = false;
+
+    // The quick-refresh window itself. While it is open the list is rebuilt every few frames instead
+    // of every 30, so objects that activate a few frames after the switch appear almost at once
+    // rather than up to half a second later. Held in unscaled time so it behaves the same at any
+    // frame rate and while the game is time-scaled (sleeping, cutscenes).
+    private static float _fastRefreshUntil = 0f;
+    private static bool _refreshNextUpdate = false;    // rebuild on the very next Update, whatever the counter says
+    private static string _lastTransitionReason;       // only for logging, so a held fade doesn't spam
+    private static int _lastRefreshFrame = -1;         // guards against rebuilding twice in one frame
+    private const float FastRefreshSeconds = 2f;       // quick refreshes for this long after the last signal
+    private const int FastRefreshInterval = 5;         // frames between rebuilds inside the window
+
+    // The window closes early once the new surroundings stop changing. A full rebuild walks every
+    // object in the scene, so holding the quick interval open for the full two seconds after every
+    // door would spend most of it re-deriving an answer that already stopped moving. Instead we
+    // count consecutive rebuilds that found the same number of targets: once the count holds still
+    // (and the fade is over) the room has finished streaming in and the normal cadence takes back
+    // over — which is never more than half a second behind, and every key that reads the list out
+    // re-measures it against where the player is standing first (see EnsureFreshList).
+    private static int _fastRefreshLastCount = -1;
+    private static int _fastRefreshStableTicks = 0;
+    private const int FastRefreshStableTicks = 3;      // identical rebuilds needed to call it settled
 
     // Long-distance auto-walk: targets too far for the A* player-graph to path to in one go
     // (e.g. the Tavern from home) are walked in short hops. Each tick we aim a chunk-sized
@@ -399,8 +450,11 @@ internal static class ObjectNavigator
                     var ppos = plr.pos;
                     if (_hasLastPlayerPos && Vector2.Distance(ppos, _lastPlayerPos) >= TeleportJumpDistance)
                     {
-                        _teleportRescanFramesLeft = TeleportRescanTotalFrames;
-                        _log?.LogInfo($"[NAVIGATOR] Teleport jump detected ({Vector2.Distance(ppos, _lastPlayerPos):F0}u), scheduling post-teleport navmesh rescans");
+                        // A jump lands the player among an entirely different set of objects, so the
+                        // destination list is as stale as the navmesh is — refresh both. This covers
+                        // the transitions that keep the same lighting state (cellar to church, one
+                        // dungeon room to the next), which nothing else here would notice.
+                        NotifyWorldTransition($"teleport jump ({Vector2.Distance(ppos, _lastPlayerPos):F0}u)");
                     }
                     _lastPlayerPos = ppos;
                     _hasLastPlayerPos = true;
@@ -490,37 +544,15 @@ internal static class ObjectNavigator
                 StartWalk(_fallbackDest, _fallbackLabel, MovementComponent.GoToMethod.Direct);
             }
 
-            // Room-switch: force an immediate list refresh the frame the interior state flips
-            // (walking through a door culls/activates a whole different object set but isn't a
-            // position jump, so the teleport rescan path above misses it). Without this the list
-            // lags up to ~0.5s behind the room you're actually in. We also kick the same bounded
-            // navmesh rescan schedule the teleport path uses so pathing into the new room is ready.
-            {
-                var envState = EnvironmentEngine.me?.data?.state;
-                if (envState.HasValue)
-                {
-                    if (_hasLastEnvironmentState && envState.Value != _lastEnvironmentState)
-                    {
-                        _log?.LogInfo($"[NAVIGATOR] Room state changed ({_lastEnvironmentState} -> {envState.Value}), forcing immediate refresh + fast-refresh window");
-                        _updateCounter = UpdateInterval;   // trip the refresh below this same frame
-                        // Keep refreshing quickly for ~1s so objects that stream in / activate a few
-                        // frames after the switch (entering an interior) get picked up promptly — a
-                        // single immediate refresh would catch a half-built room and then go stale.
-                        _fastRefreshFramesLeft = FastRefreshWindowFrames;
-                        if (_teleportRescanFramesLeft <= 0)
-                            _teleportRescanFramesLeft = TeleportRescanTotalFrames;
-                    }
-                    _lastEnvironmentState = envState.Value;
-                    _hasLastEnvironmentState = true;
-                }
-            }
+            // Watch for every kind of world switch and hand them all to the same handler.
+            DetectWorldTransitions();
 
             _updateCounter++;
-            int refreshInterval = _fastRefreshFramesLeft > 0 ? FastRefreshInterval : UpdateInterval;
-            if (_fastRefreshFramesLeft > 0) _fastRefreshFramesLeft--;
-            if (_updateCounter >= refreshInterval)
+            bool fastWindowOpen = Time.unscaledTime < _fastRefreshUntil;
+            int refreshInterval = fastWindowOpen ? FastRefreshInterval : UpdateInterval;
+            if (_refreshNextUpdate || _updateCounter >= refreshInterval)
             {
-                _updateCounter = 0;
+                _refreshNextUpdate = false;
                 RefreshDestinations();
             }
 
@@ -574,6 +606,249 @@ internal static class ObjectNavigator
         }
     }
 
+    // ---- World transitions --------------------------------------------------
+
+    /// <summary>
+    /// Poll every signal that says "the world around the player was just swapped out" and route
+    /// them all through <see cref="NotifyWorldTransition"/>. Run once per frame from Update; each
+    /// check is a field read or a cached reference compare, no scene queries.
+    /// </summary>
+    private static void DetectWorldTransitions()
+    {
+        try
+        {
+            // A camera fade is in progress: a scripted transition is running RIGHT NOW and the
+            // destination world is still being built behind the black screen. Re-arm every frame it
+            // lasts so the quick-refresh window only starts counting down once the player can see
+            // again — this is what makes stepping into a building settle as fast as stepping out.
+            // No navmesh rescan from this one: fades also cover pure camera work (cutscenes,
+            // sleeping) where nothing moved, and the teleport detector already covers the rest.
+            if (IsCameraFading())
+                NotifyWorldTransition("camera fade", rescanNavmesh: false);
+
+            // The interior lighting state. Walking through a door flips it without moving the
+            // player anywhere the teleport detector would notice.
+            var envState = EnvironmentEngine.me?.data?.state;
+            if (envState.HasValue)
+            {
+                if (_hasLastEnvironmentState && envState.Value != _lastEnvironmentState)
+                    NotifyWorldTransition($"lighting {_lastEnvironmentState} -> {envState.Value}");
+                _lastEnvironmentState = envState.Value;
+                _hasLastEnvironmentState = true;
+            }
+
+            // The named area the player stands in. Covers the switches that neither teleport nor
+            // change the lighting — crossing from the yard into the graveyard, or from an outdoor
+            // zone into a roofless interior — so an area change always refreshes the list.
+            var zone = CurrentPlayerZone();
+            if (_hasLastPlayerZone && zone != _lastPlayerZone)
+            {
+                // Zone names are the player-facing handle on where they are, so log by id.
+                string from = _lastPlayerZone != null ? _lastPlayerZone.id : "open ground";
+                string to = zone != null ? zone.id : "open ground";
+                // Crossing an area boundary re-activates a different slice of the map, but nothing
+                // was teleported, so the navmesh under the player is untouched — list only.
+                NotifyWorldTransition($"zone {from} -> {to}", rescanNavmesh: false);
+            }
+            _lastPlayerZone = zone;
+            _hasLastPlayerZone = true;
+
+            // The loaded dungeon level. Descending drops the player on the entry tile of a freshly
+            // generated level — often barely a step from where they stood — so the position jump can
+            // be too small to detect while every single object around them has been replaced.
+            var dungeonRoot = MainGame.me?.dungeon_root;
+            if (dungeonRoot != null)
+            {
+                bool loaded = dungeonRoot.dungeon_is_loaded_now;
+                int level = (loaded && dungeonRoot.cur_dungeon_preset != null)
+                    ? dungeonRoot.cur_dungeon_preset.dungeon_level : -1;
+                if (_hasLastDungeonState && (loaded != _lastDungeonLoaded || level != _lastDungeonLevel))
+                    NotifyWorldTransition($"dungeon level {_lastDungeonLevel} -> {level}");
+                _lastDungeonLoaded = loaded;
+                _lastDungeonLevel = level;
+                _hasLastDungeonState = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Transition detection error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The single handler for "the world around the player just changed". Rebuilds the destination
+    /// list on the next Update and keeps rebuilding it on a short interval for
+    /// <see cref="FastRefreshSeconds"/>, so objects that stream in / activate over the following
+    /// frames are picked up almost immediately instead of at the next 30-frame boundary. Repeat
+    /// calls while a transition is still running simply push the window further out.
+    /// </summary>
+    /// <param name="reason">Logged once per distinct transition (a held fade re-arms every frame).</param>
+    /// <param name="rescanNavmesh">
+    /// Also run the bounded post-teleport navmesh rescans. True when the player was physically moved
+    /// (the game doesn't rescan at the landing, so the far side of the new room reads unwalkable);
+    /// false when only the surroundings changed and the navmesh under the player is untouched.
+    /// </param>
+    internal static void NotifyWorldTransition(string reason, bool rescanNavmesh = true)
+    {
+        // A fade is re-armed on every frame it lasts, so distinguish a genuinely new signal from
+        // that hold: a new signal logs once and forces a rebuild on the spot, the hold only keeps
+        // the window from expiring (rebuilding every single frame of a fade would buy nothing —
+        // the window's own interval already covers the streaming).
+        bool isNewSignal = Time.unscaledTime >= _fastRefreshUntil || reason != _lastTransitionReason;
+        if (isNewSignal)
+        {
+            _log?.LogInfo($"[NAVIGATOR] World transition: {reason} — refreshing destinations");
+            _lastTransitionReason = reason;
+            _refreshNextUpdate = true;
+        }
+
+        _fastRefreshUntil = Time.unscaledTime + FastRefreshSeconds;
+        // A fresh signal means the surroundings are moving again: whatever had settled no longer has.
+        _fastRefreshStableTicks = 0;
+        _fastRefreshLastCount = -1;
+
+        if (rescanNavmesh && _teleportRescanFramesLeft <= 0)
+            _teleportRescanFramesLeft = TeleportRescanTotalFrames;
+    }
+
+    /// <summary>
+    /// True while the game is playing a screen fade. Every scripted transition brackets itself in
+    /// CameraTools.Fade/UnFade, which flips the private <c>_playing_transition</c> flag, so this is
+    /// the catch-all signal for transitions that have no detector of their own. Returns false if the
+    /// field can't be resolved — the other signals still cover the common cases.
+    /// </summary>
+    private static bool IsCameraFading()
+    {
+        if (!_cameraFadeFieldResolved)
+        {
+            _cameraFadeFieldResolved = true;
+            _cameraFadeField = AccessTools.Field(typeof(CameraTools), "_playing_transition");
+            if (_cameraFadeField == null)
+                _log?.LogWarning("[NAVIGATOR] CameraTools._playing_transition not found — fade-based transition detection is off");
+        }
+        if (_cameraFadeField == null) return false;
+        try { return (bool)_cameraFadeField.GetValue(null); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// The named zone the player currently stands in, straight off the game's own 0.5s zone poll
+    /// (PlayerComponent.current_zone) — no physics query of our own. Null in open ground.
+    /// </summary>
+    private static WorldZone CurrentPlayerZone()
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null) return null;
+            if (_playerComponent == null)
+                _playerComponent = player.GetComponent<PlayerComponent>();
+            return _playerComponent != null ? _playerComponent.current_zone : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Bring the lists up to date for a key the player just pressed. This deliberately does NOT do a
+    /// full rebuild: navigation keys get pressed in quick succession, and walking the whole scene on
+    /// every press puts a stall between the keystroke and the speech. What the lists CONTAIN is
+    /// already kept current by the scheduled rebuild and, right after a transition, by the
+    /// quick-refresh window; what a keypress needs on top of that is the part that changes
+    /// continuously as the player walks — distances, the positions of anything that moved, and
+    /// dropping whatever has been destroyed since. That is a pass over a few dozen entries instead
+    /// of a pass over the scene.
+    /// </summary>
+    private static void EnsureFreshList()
+    {
+        if (!_initialized) return;
+        if (_lastRefreshFrame == Time.frameCount) return;
+
+        // Nothing built yet (first navigation key of a session) — there is no cheap path, so build.
+        if (_lastRefreshFrame < 0)
+        {
+            RefreshDestinations();
+            return;
+        }
+
+        RemeasureTargets();
+    }
+
+    /// <summary>
+    /// Re-measure the existing lists against where the player is standing right now: refresh each
+    /// target's position and distance, drop entries whose object has been removed since the last
+    /// rebuild, re-sort by distance, and keep the cursor on whatever target it was on.
+    /// </summary>
+    private static void RemeasureTargets()
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null) return;
+            var playerPos = player.pos;
+
+            // Hold the selection by identity: the re-sort below can move it, and landmarks/quest
+            // targets have no object behind them, so they match by label (same rule as a rebuild).
+            var curList = CurrentList;
+            WorldGameObject selectedObject = null;
+            GameObject selectedDrop = null;
+            string selectedLabel = null;
+            if (curList.Count > 0 && _selectedIndex < curList.Count)
+            {
+                selectedObject = curList[_selectedIndex].Object;
+                selectedDrop = curList[_selectedIndex].DropGo;
+                selectedLabel = curList[_selectedIndex].Label;
+            }
+
+            foreach (var cat in _categoryOrder)
+            {
+                var list = _byCategory[cat];
+                for (int i = list.Count - 1; i >= 0; i--)
+                {
+                    var t = list[i];
+
+                    // ReferenceEquals, not ==: Unity's == reports a DESTROYED object as null, which
+                    // is exactly the case that has to be told apart from a target that never had an
+                    // object behind it (a landmark or quest arrow). Only the former gets dropped.
+                    if (!ReferenceEquals(t.Object, null))
+                    {
+                        // Destroyed or removed since the last rebuild — never announce or walk to it.
+                        if (t.Object == null || t.Object.is_removed) { list.RemoveAt(i); continue; }
+                        t.Position = t.Object.pos;   // NPCs and workers move between rebuilds
+                    }
+                    else if (!ReferenceEquals(t.DropGo, null))
+                    {
+                        if (t.DropGo == null) { list.RemoveAt(i); continue; }   // picked up / despawned
+                        t.Position = t.DropGo.transform.position;
+                    }
+                    // Landmarks, quest arrows and bare map points are fixed: keep their position.
+
+                    t.Distance = Vector2.Distance(t.Position, playerPos);
+                    list[i] = t;   // NavigationTarget is a struct — write the updated copy back
+                }
+
+                list.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+            }
+
+            var newList = CurrentList;
+            if (selectedObject != null || selectedDrop != null || selectedLabel != null)
+            {
+                var idx = newList.FindIndex(t =>
+                    (selectedObject != null && t.Object == selectedObject) ||
+                    (selectedDrop != null && t.DropGo == selectedDrop) ||
+                    (selectedObject == null && selectedDrop == null &&
+                     selectedLabel != null && t.Object == null && t.DropGo == null &&
+                     t.Label == selectedLabel));
+                _selectedIndex = idx >= 0 ? idx : 0;
+            }
+            if (_selectedIndex >= newList.Count)
+                _selectedIndex = 0;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Error re-measuring targets: {ex.Message}");
+        }
+    }
+
     private static List<NavigationTarget> CurrentList =>
         _byCategory.TryGetValue(_currentCategory, out var list) ? list : new List<NavigationTarget>();
 
@@ -584,6 +859,10 @@ internal static class ObjectNavigator
 
     private static void CycleCategory(int dir)
     {
+        // Measure against where the player is standing now, so the category the cursor lands in and
+        // the distance it reads out are current.
+        EnsureFreshList();
+
         int start = Array.IndexOf(_categoryOrder, _currentCategory);
         if (start < 0) start = 0;
 
@@ -661,6 +940,10 @@ internal static class ObjectNavigator
 
     internal static void SelectNext()
     {
+        // Re-measure first: the cursor is kept on the same object across it, so stepping through the
+        // list stays coherent while the distances and ordering are the ones for right now.
+        EnsureFreshList();
+
         var list = CurrentList;
         if (list.Count == 0) { EnsureNonEmptyCategory(); return; }
 
@@ -670,6 +953,8 @@ internal static class ObjectNavigator
 
     internal static void SelectPrevious()
     {
+        EnsureFreshList();
+
         var list = CurrentList;
         if (list.Count == 0) { EnsureNonEmptyCategory(); return; }
 
@@ -679,6 +964,10 @@ internal static class ObjectNavigator
 
     internal static void AnnounceSelected()
     {
+        // No-op when SelectNext/Previous already re-measured this frame; does the work when the
+        // player pressed the plain "what's selected" key after walking a stretch.
+        EnsureFreshList();
+
         var list = CurrentList;
         if (list.Count == 0)
         {
@@ -743,6 +1032,10 @@ internal static class ObjectNavigator
 
     internal static void WalkToSelected()
     {
+        // Walk to where the target is now, not to where it was at the last scheduled rebuild — and
+        // never set off toward one that has been destroyed in the meantime.
+        EnsureFreshList();
+
         var list = CurrentList;
         if (list.Count == 0)
         {
@@ -2235,8 +2528,18 @@ internal static class ObjectNavigator
         _rescanRetryPending = false;
         _teleportRescanFramesLeft = 0;
         _hasLastPlayerPos = false;
+        // Drop every transition baseline so the new session establishes its own instead of comparing
+        // against the last one (which would fire a phantom transition, or worse, miss a real one
+        // because the old value happens to match). The player object itself is replaced on load, so
+        // the cached PlayerComponent has to go with it.
         _hasLastEnvironmentState = false;
-        _fastRefreshFramesLeft = 0;
+        _playerComponent = null;
+        _hasLastPlayerZone = false;
+        _lastPlayerZone = null;
+        _hasLastDungeonState = false;
+        // A load IS a world transition — the biggest one there is — so let the arriving scene settle
+        // under the same quick-refresh window every other switch gets.
+        NotifyWorldTransition("scene change");
         // The escape offer belongs to one dungeon level; never let it survive into the next.
         _escapeExitObject = null;
         _escapeTeleportArmed = false;
@@ -2386,6 +2689,11 @@ internal static class ObjectNavigator
 
     private static void RefreshDestinations()
     {
+        // Stamped before the work, not after: an early return (no player yet, empty scene) still
+        // counts as "this frame's rebuild attempt", so an on-demand call can't loop it per key.
+        _lastRefreshFrame = Time.frameCount;
+        _updateCounter = 0;
+
         try
         {
             var player = MainGame.me?.player;
@@ -2466,6 +2774,18 @@ internal static class ObjectNavigator
                 bool isDungeonObj = dungeonRoot != null && obj.transform != null &&
                                     obj.transform.IsChildOf(dungeonRoot);
 
+                // Distance first, before any classification work. Every category caps out at
+                // MaxHarvestableNavDistance or below, so anything farther is dropped no matter what
+                // it turns out to be — and finding out what it is costs a definition lookup plus
+                // reading obj.name, which allocates a fresh string out of the engine on every access.
+                // The scene holds thousands of objects and only a small ring around the player can
+                // ever be listed, so testing the cheap thing first (pos is a per-frame cached
+                // transform read) is what keeps a rebuild small enough to run on a keypress. Dungeon
+                // objects are exempt: a loaded level is revealed whole, with no distance cap at all.
+                var objPos = obj.pos;
+                var distance = Vector2.Distance(objPos, playerPos);
+                if (!isDungeonObj && distance > MaxHarvestableNavDistance) continue;
+
                 // Skip DLC "ruins" the player doesn't own (souls zone, Euric's room, etc.) — they
                 // spawn into every save regardless of ownership but are inert without the DLC.
                 // EXCEPTION: objects the game generated into the active dungeon level (children of
@@ -2535,9 +2855,6 @@ internal static class ObjectNavigator
                 // obj.data, which stays valid while the object is culled, so the mirrored Empty /
                 // Exhumable / Decorate / Fence lists below are correct for culled graves too.
                 bool graveCategory = category == NavCategory.Graves;
-
-                var objPos = obj.pos;
-                var distance = Vector2.Distance(objPos, playerPos);
 
                 bool keepIfCulled =
                     ((farReach || builtCategory || graveCategory) && !interiorSightBlocked) ||
@@ -2765,10 +3082,44 @@ internal static class ObjectNavigator
             }
             if (_selectedIndex >= list.Count)
                 _selectedIndex = 0;
+
+            NoteRefreshSettled();
         }
         catch (Exception ex)
         {
             _log?.LogError($"[NAVIGATOR] Error refreshing destinations: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Close the quick-refresh window early once the rebuilt list has stopped changing size for
+    /// <see cref="FastRefreshStableTicks"/> rebuilds in a row and no fade is still running. See the
+    /// field comments above — this is what keeps a transition from paying for a full two seconds of
+    /// scene-wide rebuilds when the new room finished streaming in after a couple of frames.
+    /// </summary>
+    private static void NoteRefreshSettled()
+    {
+        if (Time.unscaledTime >= _fastRefreshUntil)
+        {
+            _fastRefreshStableTicks = 0;
+            _fastRefreshLastCount = -1;
+            return;
+        }
+
+        int total = 0;
+        foreach (var cat in _categoryOrder)
+            total += _byCategory[cat].Count;
+
+        if (total == _fastRefreshLastCount) _fastRefreshStableTicks++;
+        else _fastRefreshStableTicks = 0;
+        _fastRefreshLastCount = total;
+
+        if (_fastRefreshStableTicks >= FastRefreshStableTicks && !IsCameraFading())
+        {
+            _fastRefreshUntil = 0f;
+            _fastRefreshStableTicks = 0;
+            _fastRefreshLastCount = -1;
+            _log?.LogInfo($"[NAVIGATOR] New surroundings settled ({total} targets), back to the normal refresh cadence");
         }
     }
 
