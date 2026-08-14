@@ -119,17 +119,20 @@ internal static class InventoryItemHandler
                 if (!string.IsNullOrEmpty(price))
                     label = $"{label}, {price}";
 
-                // Only while a survey/study station is open (alchemy survey table OR the
-                // research/study table), tell which items still pay study points the first time
-                // they're studied — sighted players read this off the tooltip. It's only useful
-                // when you're actually at the table deciding what to study, so we gate it there
-                // rather than narrating it over every bag and chest.
-                if (GUIAccessibility.IsStudyStationOpen())
-                {
-                    var study = DescribeStudyReward(cell.item?.definition);
-                    if (!string.IsNullOrEmpty(study))
-                        label = $"{label}, {study}";
-                }
+                // The study status the game prints on the item tooltip ("Studie: nicht beendet" /
+                // "Alchemie-Studie: NICHT BEENDET"). Anywhere: flag the un-studied ones, since that
+                // is the actionable half (carry it to the table). Only at a survey/study station do
+                // we add the point payout and confirm the finished ones — that's where "already
+                // studied" saves you a wasted press, and elsewhere it would be pure noise.
+                var study = DescribeStudyStatus(cell.item?.definition, GUIAccessibility.IsStudyStationOpen());
+                if (!string.IsNullOrEmpty(study))
+                    label = $"{label}, {study}";
+
+                // ... and once it IS studied, the tooltip's "Zerfällt in" line, which is the
+                // pay-off of having studied it.
+                var alchemy = DescribeAlchemyDecompose(cell.item?.definition);
+                if (!string.IsNullOrEmpty(alchemy))
+                    label = $"{label}, {alchemy}";
 
                 // Greyed (inactive) cells can't be moved into an offer: on the Buy side the item
                 // is tier-locked (vendor won't sell it yet), on the Sell side the vendor won't buy
@@ -390,26 +393,39 @@ internal static class InventoryItemHandler
     }
 
     /// <summary>
-    /// What studying this item at the study table pays out the first time — e.g. "studying gives
-    /// 50 blue points, 10 red points". It's a one-time "survey" craft (ItemDefinition.GetSurveyCraft,
-    /// id "surv:&lt;item&gt;") whose <c>output</c> holds the tech points (red/green/blue/violet);
-    /// once it's in the save's completed_one_time_crafts it pays nothing more, so we return null then.
+    /// The item's study state, and — at the table — what studying it pays out: "not studied yet",
+    /// "not studied yet, studying gives 50 blue points", or "already studied".
+    ///
+    /// This is the tooltip line the game draws as "Studie: beendet / nicht beendet" and, for
+    /// alchemy ingredients, "Alchemie-Studie: NICHT BEENDET" — two labels, but ONE flag underneath:
+    /// <c>GameSave.IsSurveyComplete</c> ignores its sub-type argument and just asks whether the
+    /// one-time craft "surv:&lt;item&gt;" is done. Until it is, the item's alchemy details (what it
+    /// decomposes into, which mixer slots it fits) stay hidden and its decompose recipes are absent
+    /// from the alchemy bench, so "not studied yet" is the whole story either way.
+    ///
+    /// Not every survey pays tech points — a pure alchemy survey pays none, which is exactly why an
+    /// output-only read-out stayed silent on herbs and mushrooms, the items this matters most for.
+    /// So the state is reported on its own, and the payout only added when there is one.
     ///
     /// IMPORTANT: we always name a tech point by its COLOUR (PointColorName), never by the game's
     /// localized item name. The blue point ("b") is named "Wissenschaft" in the German data, which
     /// collides with the UNRELATED science resource you get from decomposing paper — so calling a
     /// blue-point reward "Wissenschaft" badly confused players. Blue points are just blue points.
-    /// Returns null for items with no study reward or already studied.
+    /// Returns null for items the game shows no study line for (no survey craft at all).
     /// </summary>
-    private static string DescribeStudyReward(ItemDefinition def)
+    private static string DescribeStudyStatus(ItemDefinition def, bool atStudyStation)
     {
         try
         {
             if (def == null) return null;
             var surveyCraft = def.GetSurveyCraft();
-            if (surveyCraft?.output == null) return null;
+            if (surveyCraft == null) return null;
+
             if (MainGame.me?.save != null && MainGame.me.save.completed_one_time_crafts.Contains(surveyCraft.id))
-                return null;
+                return atStudyStation ? "already studied" : null;
+
+            if (surveyCraft.output == null) return "not studied yet";
+            if (!atStudyStation) return "not studied yet";
 
             var parts = new List<string>();
             foreach (var outp in surveyCraft.output)
@@ -429,7 +445,9 @@ internal static class InventoryItemHandler
 
                 parts.Add($"{amount} {PointColorName(outp.id)}");
             }
-            return parts.Count > 0 ? $"studying gives {string.Join(", ", parts)}" : null;
+            return parts.Count > 0
+                ? $"not studied yet, studying gives {string.Join(", ", parts)}"
+                : "not studied yet";
         }
         catch { return null; }
     }
@@ -468,6 +486,47 @@ internal static class InventoryItemHandler
         {
             return outp.value > 0 ? outp.value.ToString() : null;
         }
+    }
+
+    /// <summary>
+    /// The tooltip's "Zerfällt in" / "Decomposes into" line, spoken as "decomposes into powder,
+    /// essence" — which of the three alchemy ingredient kinds this item breaks down into at the
+    /// alchemy bench. The game draws it as bare icons ((alc1)(alc2), BubbleWidgetAlchemyItem
+    /// DrawDecomposeInfo), which never voice, so it was silent even though it's the whole pay-off
+    /// of having studied the item.
+    ///
+    /// Gated on the survey being done, exactly as the game gates it: the alchemy widget is only
+    /// attached inside the *studied* branch of <see cref="ItemDefinition.GetItemDescription"/>,
+    /// and the decompose recipes stay hidden from the bench until then
+    /// (<see cref="BaseCraftGUI"/> filters AlchemyDecompose crafts on IsSurveyComplete). Speaking
+    /// it early would hand out what studying is supposed to reveal.
+    ///
+    /// Null for alchemy ingredients themselves — <c>GetItemDetails</c> leaves <c>alchemy</c> null
+    /// when <c>alch_type != None</c>, so a powder has no decompose line of its own. The companion
+    /// "Alchemisch kompatible Plätze" (slots) half of that widget is dead code in this build:
+    /// <c>ItemDetailsAlchemy.slots</c> is never populated, so there is nothing to read there.
+    /// </summary>
+    private static string DescribeAlchemyDecompose(ItemDefinition def)
+    {
+        try
+        {
+            if (def == null) return null;
+            if (MainGame.me?.save == null) return null;
+            // The game's own helper — it also resolves a ":quality" suffix back to the base item.
+            if (!MainGame.me.save.IsSurveyComplete(CraftDefinition.CraftSubType.Alchemy, def.id)) return null;
+
+            var decomposes = def.GetItemDetails()?.alchemy?.decomposes;
+            if (decomposes == null || decomposes.Count == 0) return null;
+
+            var kinds = new List<string>(decomposes.Count);
+            foreach (var d in decomposes)
+            {
+                var kind = GUIAccessibility.AlchemyTypeName((ItemDefinition.AlchemyType)d);
+                if (kind != null && !kinds.Contains(kind)) kinds.Add(kind);
+            }
+            return kinds.Count > 0 ? $"decomposes into {string.Join(", ", kinds)}" : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>Fallback spoken name for a tech-point pool when no localized name is available (r/g/b/v colors or gratitude).</summary>

@@ -4234,7 +4234,7 @@ internal static class GUIAccessibility
         catch { return null; }
     }
 
-    private static string AlchemyTypeName(ItemDefinition.AlchemyType type)
+    internal static string AlchemyTypeName(ItemDefinition.AlchemyType type)
     {
         switch (type)
         {
