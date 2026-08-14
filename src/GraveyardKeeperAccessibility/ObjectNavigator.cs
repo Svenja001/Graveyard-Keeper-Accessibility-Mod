@@ -3829,6 +3829,18 @@ internal static class ObjectNavigator
                     return true;
                 }
 
+                // Story rubble you clear away with the HAMMER (tavern_broken_bottles /
+                // warehouse_broken_barrels, the two halves of the village-cleanup task). Checked
+                // here for the same reason as the block above: their "broken"/"barrel" ids make the
+                // spent-scenery skip just below drop them outright, and a hammer action is rejected
+                // by both IsWorkedDestructible and TryClassifyHarvestable — so they were reachable
+                // from no category at all. See IsScriptedCleanupProp.
+                if (IsScriptedCleanupProp(obj, def))
+                {
+                    category = NavCategory.Destructibles;
+                    return true;
+                }
+
                 // The spent "..._broken" replacement left after a smash is inert scenery. Skip it
                 // outright (don't let a broken barrel's leftover Axe action drop it into Trees below).
                 if (IsSpentBrokenProp(obj) && HasLootPropKeyword(obj))
@@ -4408,6 +4420,54 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
+    /// Story rubble the player clears away by HAMMERING it down — the broken bottles and the broken
+    /// warehouse barrels a flowscript drops in front of the tavern for the village-cleanup task
+    /// (dlc_souls_s40_1: "Mache vor dem Toten Pferd sauber"). Recognised structurally rather than by
+    /// id: a destructible non-mob object worked with the Hammer whose destruction fires a script or
+    /// craft (script_after_hp_0 / craft_after_hp_0 — that's the node that ticks the quest flag).
+    ///
+    /// They need a rule of their own because every generic bucket rejected them and they ended up
+    /// listed nowhere: the tool is a HAMMER, which <see cref="IsWorkedDestructible"/> and
+    /// <see cref="TryClassifyHarvestable"/> both exclude (a hammer means build/repair, not harvest);
+    /// they carry no craft and no E-interaction, so the interaction_type switch passes them over;
+    /// and their "broken"/"barrel" ids trip the spent-scenery skip, which dropped the barrels
+    /// outright. Requiring the Hammer AND no harvest tool also keeps this from stealing trees or ore
+    /// that happen to run a script when felled — those keep their own categories.
+    /// </summary>
+    private static bool IsScriptedCleanupProp(WorldGameObject obj, ObjectDefinition def)
+    {
+        try
+        {
+            if (def == null || def.hp == null) return false;
+            if (def.IsMob() || def.IsNPC() ||
+                def.type == ObjectDefinition.ObjType.NPC ||
+                def.type == ObjectDefinition.ObjType.Mob) return false;
+
+            // The destruction must DO something scripted — that's what separates quest rubble from
+            // ordinary broken scenery left lying around after a smash.
+            if (string.IsNullOrEmpty(def.script_after_hp_0) &&
+                string.IsNullOrEmpty(def.craft_after_hp_0)) return false;
+
+            var tools = def.tool_actions;
+            if (tools == null || tools.no_actions) return false;
+            if (!tools.HasToolK(ItemDefinition.ItemType.Hammer)) return false;
+            return !tools.HasToolK(ItemDefinition.ItemType.Axe) &&
+                   !tools.HasToolK(ItemDefinition.ItemType.Pickaxe) &&
+                   !tools.HasToolK(ItemDefinition.ItemType.Shovel) &&
+                   !tools.HasToolK(ItemDefinition.ItemType.Hand);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Same rule as <see cref="IsScriptedCleanupProp(WorldGameObject, ObjectDefinition)"/>, for
+    /// callers that only hold the object — the proximity readout uses it to explain that F plus a
+    /// hammer is what clears the thing, since these props answer to neither E nor an attack.
+    /// </summary>
+    internal static bool IsScriptedCleanupProp(WorldGameObject obj) =>
+        IsScriptedCleanupProp(obj, obj?.obj_def);
+
+    /// <summary>
     /// Obj_id keyword for an explicit smashable loot prop — barrels/crates/vases/urns and generic
     /// dungeon smashables. These may carry a tool_action (you can chop a barrel), which is what
     /// distinguishes them from a plain resource node: they're still loot props, not trees.
@@ -4892,6 +4952,26 @@ internal static class ObjectNavigator
                               obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0;
                 return broken ? $"{label} ({BrokenWord()})" : label;
             }
+
+            // Story rubble cleared with the hammer (see IsScriptedCleanupProp). Nothing in the name
+            // says how to get rid of it, and E — the thing a player tries first — does nothing here,
+            // so spell out the tool right in the tracker entry. (The name itself comes from
+            // InteractionDetector.UntranslatedObjectNames; the game translates neither id.)
+            if (IsScriptedCleanupProp(obj))
+                return $"{InteractionDetector.GetObjectLabel(obj)}, clear with hammer";
+
+            // Smashable loot props (Breakables) are the one category whose action is an ATTACK, not
+            // E and not F: their tool_action is the Sword, and HPActionComponent deliberately shows
+            // no work bubble for a Sword action. So the entry reads like an ordinary object that
+            // simply refuses to respond — the exact complaint raised about the barrels left behind
+            // once the tavern cleanup swapped them back to plain "Fass". Say what breaks them.
+            // Guarded on interaction_type None because that's the only branch of TryClassify that
+            // can reach Breakables — a chest whose id merely contains "crate" is filed under Storage
+            // and must not be told to attack it.
+            if (obj?.obj_def != null &&
+                obj.obj_def.interaction_type == ObjectDefinition.InteractionType.None &&
+                IsBreakableLootProp(obj))
+                return $"{InteractionDetector.GetObjectLabel(obj)}, attack to smash";
 
             // Special handling for graves by checking obj_id. Skip build/craft/chest
             // stations whose id merely embeds "grave" (e.g. the graveyard build desk):

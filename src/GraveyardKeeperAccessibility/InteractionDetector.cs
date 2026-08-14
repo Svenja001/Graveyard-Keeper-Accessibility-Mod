@@ -55,8 +55,7 @@ internal static class InteractionDetector
                     var target = FindClosestInteractable();
                     if (target != null)
                     {
-                        var label = WithPendingInteraction(WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(target), target), target), target), target), target), target), target), target);
-                        ScreenReader.Say(label, interrupt: true);
+                        ScreenReader.Say(DescribeObject(target), interrupt: true);
                         _lastAnnouncedObject = AnnounceKey(target);
                     }
                 }
@@ -69,8 +68,7 @@ internal static class InteractionDetector
                 var key = AnnounceKey(nearby);
                 if (key != _lastAnnouncedObject)
                 {
-                    var label = WithPendingInteraction(WithZombieInfo(WithPalletInfo(WithBuffetInfo(WithNpcQuestInfo(WithCraftStatus(WithUpgradeInfo(WithRepairInfo(GetObjectLabel(nearby), nearby), nearby), nearby), nearby), nearby), nearby), nearby), nearby);
-                    ScreenReader.Say(label, interrupt: false);
+                    ScreenReader.Say(DescribeObject(nearby), interrupt: false);
                     _lastAnnouncedObject = key;
                 }
             }
@@ -310,6 +308,11 @@ internal static class InteractionDetector
                 catch { }
                 return string.IsNullOrEmpty(outName) ? "craft" : $"craft {outName}";
             }
+
+            // Story rubble (broken bottles / warehouse barrels) is hammered down, not built up —
+            // the generic Hammer verb below would say "Press F to build", which reads as the exact
+            // opposite of the job. See ObjectNavigator.IsScriptedCleanupProp.
+            if (ObjectNavigator.IsScriptedCleanupProp(wgo)) return "clear it away";
 
             var actions = wgo.obj_def?.tool_actions;
             if (actions != null && !actions.no_actions && actions.action_tools != null && actions.action_tools.Count > 0)
@@ -572,6 +575,58 @@ internal static class InteractionDetector
             var result = $"{label}. {string.Join(". ", parts)}";
             _log?.LogInfo($"[INTERACTION] Buffet requirements announced: {result}");
             return result;
+        }
+        catch
+        {
+            return label;
+        }
+    }
+
+    /// <summary>
+    /// Tell the player how to clear story rubble — the broken bottles and warehouse barrels the
+    /// village-cleanup task wants gone. These props answer to nothing a blind player would try:
+    /// E does nothing (no interaction), attacking does nothing (no sword action), and the only way
+    /// through is to hold the Work key with a HAMMER equipped. Say that outright, and flag when
+    /// there's no hammer in the toolbelt — the game only shows that as a "(not_equipped)" glyph on
+    /// the F bubble, so otherwise the player holds F at the right spot and nothing happens.
+    /// Returns the bare label unchanged for anything else.
+    /// </summary>
+    private static string WithCleanupInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            if (!ObjectNavigator.IsScriptedCleanupProp(wgo)) return label;
+
+            // GetEquippedTool searches the toolbelt and equipped items, which is exactly what the
+            // game's own work check does (HPActionComponent.DoAction).
+            bool haveHammer = false;
+            try { haveHammer = MainGame.me.player.GetEquippedTool(ItemDefinition.ItemType.Hammer) != null; }
+            catch { }
+
+            return haveHammer
+                ? $"{label}. Hold F to clear it away"
+                : $"{label}. Put a hammer in your toolbelt, then hold F to clear it away";
+        }
+        catch
+        {
+            return label;
+        }
+    }
+
+    /// <summary>
+    /// Tell the player a smashable loot prop is broken by ATTACKING it. These carry a Sword
+    /// tool_action, and the game shows no work bubble for a Sword action (HPActionComponent skips
+    /// it), so neither E nor F does anything and the object reads as inert — while a swing would
+    /// break it open for loot. Returns the bare label unchanged for anything else.
+    /// </summary>
+    private static string WithBreakableInfo(string label, WorldGameObject wgo)
+    {
+        try
+        {
+            if (wgo?.obj_def == null) return label;
+            if (wgo.obj_def.interaction_type != ObjectDefinition.InteractionType.None) return label;
+            if (!ObjectNavigator.IsBreakableLootProp(wgo)) return label;
+            return $"{label}. Attack it to smash it open";
         }
         catch
         {
@@ -1310,6 +1365,16 @@ internal static class InteractionDetector
             ["mf_alchemy_survey"] = "Forschungstisch",
         };
 
+    // Objects the game ships with no translation at all and no craft/alias to borrow a name from,
+    // so the label fell back to a mangled id ("Tavern broken bottles"). The two entries here are
+    // the rubble the village-cleanup task wants gone — see ObjectNavigator.IsScriptedCleanupProp.
+    private static readonly Dictionary<string, string> UntranslatedObjectNames =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["tavern_broken_bottles"] = "Broken bottles",
+            ["warehouse_broken_barrels"] = "Broken barrels",
+        };
+
     /// <summary>
     /// Quest-spawned copies of an existing character that the game never gave a name of their own:
     /// their obj id has no translation, and (unlike most copies) no <c>npc_alias</c> either, so the
@@ -1328,6 +1393,30 @@ internal static class InteractionDetector
             ["npc_clotho_refugees"] = "npc_witch",
             ["npc_clotho_dlc"] = "npc_witch",
         };
+
+    /// <summary>
+    /// The full spoken description of an object for the proximity / E readout: its name plus every
+    /// piece of state a sighted player would read off it (repair and upgrade materials, live craft
+    /// progress, quest markers, pallet and zombie state, and how to act on it). Each With* step
+    /// returns the label untouched for objects it doesn't apply to, so the order only decides the
+    /// order the clauses are spoken in.
+    /// </summary>
+    private static string DescribeObject(WorldGameObject wgo)
+    {
+        var label = GetObjectLabel(wgo);
+        label = WithRepairInfo(label, wgo);
+        label = WithUpgradeInfo(label, wgo);
+        label = WithCraftStatus(label, wgo);
+        label = WithNpcQuestInfo(label, wgo);
+        label = WithBuffetInfo(label, wgo);
+        label = WithPalletInfo(label, wgo);
+        label = WithZombieInfo(label, wgo);
+        label = WithPendingInteraction(label, wgo);
+        // The two "here's how you act on this" clauses go last, so they close the sentence.
+        label = WithCleanupInfo(label, wgo);
+        label = WithBreakableInfo(label, wgo);
+        return label;
+    }
 
     internal static string GetObjectLabel(WorldGameObject wgo)
     {
@@ -1366,6 +1455,9 @@ internal static class InteractionDetector
                     var name = LocalizedObjectName(wgo.obj_def.id);
                     if (!HasTranslation(wgo.obj_def.id))
                     {
+                        if (UntranslatedObjectNames.TryGetValue(wgo.obj_def.id, out var plainName))
+                            return plainName;
+
                         var catalogId = ObjectNavigator.ScriptPlacedBuildNameId(wgo.obj_def.id);
                         if (!string.IsNullOrEmpty(catalogId) && HasTranslation(catalogId))
                             return LocalizedObjectName(catalogId);
