@@ -558,6 +558,20 @@ internal static class GUIAccessibility
             return;
         }
 
+        // Every plain confirmation / message box ("Ungespeicherter Fortschritt geht verloren. Bist
+        // du sicher?", "Throw away X?", the autopsy and demolish confirms, ...) is a DialogGUI.
+        // Its prefab carries TWO copies of the button row, so the generic UIButton pass below
+        // listed every option twice — "Ja, Ja, Nein, Nein". Worse, only ONE copy works: the dialog
+        // wires up whichever DialogButtonsGUI it found in Init (_dialog_buttons), and
+        // DialogButtonsGUI.OnBtnClicked resolves the pressed button against its OWN _buttons list,
+        // so pressing the spare copy resolves to index -1 and is dropped silently. List only the
+        // wired widget's buttons and activate them by option index.
+        if (gui is DialogGUI confirmDialog)
+        {
+            DiscoverConfirmDialogButtons(confirmDialog);
+            return;
+        }
+
         // The build-desk catalog reuses the regular CraftGUI in "build" mode. Its generic
         // UIButtons are all anonymous "Anfertigen" (Craft) buttons, so the heuristic below
         // would list four identical "Anfertigen" entries with no clue what you're building.
@@ -1223,6 +1237,108 @@ internal static class GUIAccessibility
                     catch (Exception ex) { Plugin.Log.LogWarning($"[TECH] button click failed: {ex.Message}"); }
                 }
             });
+        }
+    }
+
+    // The DialogButtonsGUI a DialogGUI actually wired up in Init, and that widget's own ordered
+    // button list. The prefab holds a second, unwired copy of the whole button row; going through
+    // these two fields is what keeps us on the live one.
+    private static readonly AccessTools.FieldRef<DialogGUI, DialogButtonsGUI> _dialogButtonsField =
+        AccessTools.FieldRefAccess<DialogGUI, DialogButtonsGUI>("_dialog_buttons");
+    private static readonly AccessTools.FieldRef<DialogButtonsGUI, List<DialogButtonGUI>> _dialogButtonListField =
+        AccessTools.FieldRefAccess<DialogButtonsGUI, List<DialogButtonGUI>>("_buttons");
+
+    // List the options of a plain confirmation dialog (yes/no, or a single OK) exactly once each.
+    // A button's index in the widget's _buttons list IS its option index — DialogButtonsGUI.Redraw
+    // fills button[i] from _texts[i] — so we confirm through InvokeOption(i) rather than
+    // DialogButtonGUI.OnClick, which NREs on windows where the per-button _gui back-ref was left
+    // null (the same trap DiscoverReportDialogButtons works around).
+    private static void DiscoverConfirmDialogButtons(DialogGUI gui)
+    {
+        DialogButtonsGUI widget = null;
+        try { widget = _dialogButtonsField(gui); } catch { }
+        if (widget == null) widget = gui.GetComponentInChildren<DialogButtonsGUI>(true);
+
+        List<DialogButtonGUI> buttons = null;
+        if (widget != null)
+        {
+            try { buttons = _dialogButtonListField(widget); } catch { }
+        }
+
+        if (widget != null && buttons != null)
+        {
+            for (int i = 0; i < buttons.Count; i++)
+            {
+                var btn = buttons[i];
+                // Redraw deactivates the options the dialog didn't use (an OK-only box leaves two
+                // of the three buttons off), so the active ones are exactly what's on screen.
+                if (btn == null || !btn.gameObject.activeInHierarchy) continue;
+
+                var label = ScreenReader.StripNguiCodes(btn.GetComponentInChildren<UILabel>()?.text)?.Trim();
+                if (string.IsNullOrWhiteSpace(label)) continue;
+
+                var optionIndex = i;
+                var capturedWidget = widget;
+                Plugin.Log.LogInfo($"[DiscoverElements] Adding dialog option {optionIndex}: '{label}'");
+                Elements.Add(new GUIElement
+                {
+                    Go = btn.gameObject,
+                    Label = label,
+                    Type = ElementType.Button,
+                    OnActivate = () =>
+                    {
+                        try { capturedWidget.InvokeOption(optionIndex); }
+                        catch (Exception ex) { Plugin.Log.LogWarning($"[DIALOG] option {optionIndex} failed: {ex.Message}"); }
+                    }
+                });
+            }
+        }
+        else
+        {
+            // No widget to drive (shouldn't happen): fall back to the raw buttons, still deduped
+            // by label so the spare prefab copy can't double the list.
+            Plugin.Log.LogWarning("[DIALOG] no DialogButtonsGUI found; falling back to raw buttons");
+            foreach (var btn in gui.GetComponentsInChildren<DialogButtonGUI>(true))
+            {
+                if (btn == null || !btn.gameObject.activeInHierarchy) continue;
+                var label = ScreenReader.StripNguiCodes(btn.GetComponentInChildren<UILabel>()?.text)?.Trim();
+                if (string.IsNullOrWhiteSpace(label)) continue;
+                if (Elements.Any(e => e.Label == label)) continue;
+
+                var captured = btn;
+                Elements.Add(new GUIElement
+                {
+                    Go = btn.gameObject,
+                    Label = label,
+                    Type = ElementType.Button,
+                    OnActivate = () =>
+                    {
+                        try { captured.OnClick(); }
+                        catch (Exception ex) { Plugin.Log.LogWarning($"[DIALOG] button click failed: {ex.Message}"); }
+                    }
+                });
+            }
+        }
+
+        // The window's own X, when the dialog shows one. Listed last and named, rather than as the
+        // bare "X" the generic pass produced, so it can't be mistaken for one of the answers.
+        foreach (var close in gui.GetComponentsInChildren<UIButton>(true))
+        {
+            if (close == null || !close.name.Contains("close")) continue;
+            if (!close.gameObject.activeInHierarchy) continue;
+
+            Elements.Add(new GUIElement
+            {
+                Go = close.gameObject,
+                Label = "Schließen",
+                Type = ElementType.Button,
+                OnActivate = () =>
+                {
+                    try { gui.OnClosePressed(); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[DIALOG] close failed: {ex.Message}"); }
+                }
+            });
+            break;
         }
     }
 
