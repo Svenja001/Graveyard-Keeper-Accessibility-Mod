@@ -37,7 +37,7 @@ internal static class InventoryItemHandler
             // Only the player's own inventory gets a spoken close; chests/containers close
             // silently as before. (We say this here rather than scraping labels — see below.)
             if (_currentInventoryGUI is InventoryGUI)
-                ScreenReader.Say("Inventory closed");
+                ScreenReader.Say(Loc.Get("inventory.closed"));
 
             _currentInventoryGUI = null;
         }
@@ -108,9 +108,9 @@ internal static class InventoryItemHandler
                 var label = DescribeItemCell(cell, partView);
                 if (string.IsNullOrEmpty(label)) continue;
 
-                var (panel, rank) = GetPanelContext(cell, gui);
-                if (!string.IsNullOrEmpty(panel))
-                    label = $"{panel}: {label}";
+                var (panel, panelName, rank) = GetPanelContext(cell, gui);
+                if (!string.IsNullOrEmpty(panelName))
+                    label = Loc.Fmt("inventory.panel_prefix", panelName, label);
 
                 // Vendor cells: append each item's per-unit price so the player knows what it's
                 // worth ("Sell: Bestattungsurkunde, 3, sells for 2 silver each"). Without this the
@@ -143,8 +143,8 @@ internal static class InventoryItemHandler
                 {
                     var reason = VendorLockReason(cell.item?.definition, vguiLock, panel);
                     label = string.IsNullOrEmpty(reason)
-                        ? $"{label}, not available"
-                        : $"{label}, not available, {reason}";
+                        ? Loc.Fmt("inventory.not_available", label)
+                        : Loc.Fmt("inventory.not_available_reason", label, reason);
                 }
 
                 // With a bag open, every main-grid row is a candidate to put in — except the ones
@@ -152,7 +152,7 @@ internal static class InventoryItemHandler
                 // those cells, which says nothing out loud, so mark them as the player arrows past.
                 if (openBag != null && !BagHandler.IsBagPanelCell(cell, gui)
                     && cell.item != null && !cell.item.CanBeInsertedInBag(openBag))
-                    label = $"{label}, does not fit in the bag";
+                    label = Loc.Fmt("inventory.does_not_fit_bag", label);
 
                 discovered.Add(new GUIElement
                 {
@@ -194,20 +194,31 @@ internal static class InventoryItemHandler
         catch { return false; }
     }
 
+    // Stable panel identifiers. These are keys, never spoken: the side an item sits on decides how
+    // it is priced and why it may be locked, so that logic must not depend on translated wording.
+    // PanelDisplayName turns one into the spoken label.
+    internal const string PanelChest = "chest";
+    internal const string PanelInventory = "inventory";
+    internal const string PanelBuy = "buy";
+    internal const string PanelSell = "sell";
+    internal const string PanelPlayerOffer = "player_offer";
+    internal const string PanelVendorOffer = "vendor_offer";
+    internal const string PanelBag = "bag";
+
     /// <summary>
-    /// Determine which inventory panel an item cell belongs to and a sort rank for ordering.
-    /// For a chest, the chest side ("Chest", rank 0) sorts before the player side
-    /// ("Inventory", rank 1). Other two-panel GUIs fall back to the panel's own title.
+    /// Determine which inventory panel an item cell belongs to, plus a sort rank for ordering.
+    /// For a chest, the chest side (rank 0) sorts before the player side (rank 1). Other two-panel
+    /// GUIs fall back to the panel's own (already localized) title, which has no stable key.
     /// </summary>
-    private static (string label, int rank) GetPanelContext(BaseItemCellGUI cell, BaseGUI gui)
+    private static (string key, string display, int rank) GetPanelContext(BaseItemCellGUI cell, BaseGUI gui)
     {
         try
         {
             if (gui is ChestGUI chest)
             {
                 var chestPanel = cell.GetComponentInParent<InventoryPanelGUI>();
-                if (chestPanel == chest.chest_panel) return ("Chest", 0);
-                if (chestPanel == chest.player_panel) return ("Inventory", 1);
+                if (chestPanel == chest.chest_panel) return (PanelChest, PanelDisplayName(PanelChest), 0);
+                if (chestPanel == chest.player_panel) return (PanelInventory, PanelDisplayName(PanelInventory), 1);
             }
 
             // The vendor screen has two panels (stock you can buy, your inventory to sell)
@@ -217,12 +228,12 @@ internal static class InventoryItemHandler
             if (gui is VendorGUI vendor)
             {
                 var widget = cell.GetComponentInParent<InventoryWidget>();
-                if (widget != null && widget == vendor.player_offer_widget) return ("Your offer", 2);
-                if (widget != null && widget == vendor.vendor_offer_widget) return ("Vendor offer", 3);
+                if (widget != null && widget == vendor.player_offer_widget) return (PanelPlayerOffer, PanelDisplayName(PanelPlayerOffer), 2);
+                if (widget != null && widget == vendor.vendor_offer_widget) return (PanelVendorOffer, PanelDisplayName(PanelVendorOffer), 3);
 
                 var vendorPanel = cell.GetComponentInParent<InventoryPanelGUI>();
-                if (vendorPanel == vendor.vendor_panel) return ("Buy", 0);
-                if (vendorPanel == vendor.player_panel) return ("Sell", 1);
+                if (vendorPanel == vendor.vendor_panel) return (PanelBuy, PanelDisplayName(PanelBuy), 0);
+                if (vendorPanel == vendor.player_panel) return (PanelSell, PanelDisplayName(PanelSell), 1);
             }
 
             // The player's own inventory becomes a two-sided window only while a bag is actually
@@ -232,44 +243,59 @@ internal static class InventoryItemHandler
             // you can't otherwise tell apart from the loose items.
             if (gui is InventoryGUI inv && BagHandler.HasAnyBag(inv))
             {
-                if (BagHandler.IsBagPanelCell(cell, inv)) return ("Bag", 0);
+                if (BagHandler.IsBagPanelCell(cell, inv)) return (PanelBag, PanelDisplayName(PanelBag), 0);
 
                 // Toolbelt / hotbar cells sit outside any inventory panel — leave them ungrouped
                 // so the side switch only ever flips between the real item grids.
-                if (cell.GetComponentInParent<InventoryPanelGUI>() == null) return (null, 3);
+                if (cell.GetComponentInParent<InventoryPanelGUI>() == null) return (null, null, 3);
 
                 var inlineBag = BagHandler.BagOfInlineCell(cell);
-                if (inlineBag != null) return ($"In {BagHandler.BagName(inlineBag)}", 2);
+                if (inlineBag != null)
+                    return (null, Loc.Fmt("inventory.panel.in_bag", BagHandler.BagName(inlineBag)), 2);
 
-                return (BagHandler.OpenBagIn(inv) != null ? "Inventory" : null, 1);
+                return BagHandler.OpenBagIn(inv) != null
+                    ? (PanelInventory, PanelDisplayName(PanelInventory), 1)
+                    : (null, null, 1);
             }
 
             var panel = cell.GetComponentInParent<InventoryPanelGUI>();
-            if (panel == null) return (null, 2);
+            if (panel == null) return (null, null, 2);
 
-            return (PanelLabel(panel, gui), 2);
+            return (PanelKeyOf(panel, gui), PanelLabel(panel, gui), 2);
         }
         catch
         {
-            return (null, 2);
+            return (null, null, 2);
         }
     }
 
-    /// <summary>Spoken name for an inventory panel: "Chest"/"Inventory" for a chest, else its title.</summary>
-    private static string PanelLabel(InventoryPanelGUI panel, BaseGUI gui)
+    /// <summary>The stable key for a panel, or null when it's an unrecognised (title-named) one.</summary>
+    private static string PanelKeyOf(InventoryPanelGUI panel, BaseGUI gui)
     {
         if (panel == null) return null;
         if (gui is ChestGUI chest)
         {
-            if (panel == chest.chest_panel) return "Chest";
-            if (panel == chest.player_panel) return "Inventory";
+            if (panel == chest.chest_panel) return PanelChest;
+            if (panel == chest.player_panel) return PanelInventory;
         }
         if (gui is VendorGUI vendor)
         {
-            if (panel == vendor.vendor_panel) return "Buy";
-            if (panel == vendor.player_panel) return "Sell";
+            if (panel == vendor.vendor_panel) return PanelBuy;
+            if (panel == vendor.player_panel) return PanelSell;
         }
-        if (gui is InventoryGUI inv && panel == inv.bag_panel) return "Bag";
+        if (gui is InventoryGUI inv && panel == inv.bag_panel) return PanelBag;
+        return null;
+    }
+
+    /// <summary>Spoken name for a panel key.</summary>
+    private static string PanelDisplayName(string key) => Loc.Get("inventory.panel." + key);
+
+    /// <summary>Spoken name for an inventory panel: the known sides, else the panel's own title.</summary>
+    private static string PanelLabel(InventoryPanelGUI panel, BaseGUI gui)
+    {
+        if (panel == null) return null;
+        var key = PanelKeyOf(panel, gui);
+        if (key != null) return PanelDisplayName(key);
         var title = ScreenReader.StripNguiCodes(panel.panel_title?.text)?.Trim();
         return string.IsNullOrWhiteSpace(title) ? null : title;
     }
@@ -303,12 +329,13 @@ internal static class InventoryItemHandler
                     var bag = BagHandler.OpenBagIn(inv);
                     var capacity = BagHandler.DescribeCapacity(bag);
                     empties.Add(string.IsNullOrEmpty(capacity)
-                        ? $"{BagHandler.BagName(bag)} empty"
+                        ? Loc.Fmt("inventory.panel_empty", BagHandler.BagName(bag))
                         : $"{BagHandler.BagName(bag)} {capacity}");
                     continue;
                 }
 
-                empties.Add($"{PanelLabel(panel, gui) ?? "Inventory"} empty");
+                empties.Add(Loc.Fmt("inventory.panel_empty",
+                    PanelLabel(panel, gui) ?? PanelDisplayName(PanelInventory)));
             }
 
             return empties.Count > 0 ? string.Join(", ", empties) : null;
@@ -344,7 +371,7 @@ internal static class InventoryItemHandler
             // The autopsy grid includes a pseudo-item cell for inserting a part into the
             // body; its raw name is unreadable, so give it a clear spoken label.
             if (item.id == "insertion_button_pseudoitem")
-                return "Insert body part";
+                return Loc.Get("autopsy.insert_body_part");
 
             var name = ScreenReader.StripNguiCodes(item.definition?.GetItemName() ?? "").Trim();
             if (string.IsNullOrEmpty(name)) name = item.id;
@@ -422,10 +449,10 @@ internal static class InventoryItemHandler
             if (surveyCraft == null) return null;
 
             if (MainGame.me?.save != null && MainGame.me.save.completed_one_time_crafts.Contains(surveyCraft.id))
-                return atStudyStation ? "already studied" : null;
+                return atStudyStation ? Loc.Get("study.already") : null;
 
-            if (surveyCraft.output == null) return "not studied yet";
-            if (!atStudyStation) return "not studied yet";
+            if (surveyCraft.output == null) return Loc.Get("study.not_yet");
+            if (!atStudyStation) return Loc.Get("study.not_yet");
 
             var parts = new List<string>();
             foreach (var outp in surveyCraft.output)
@@ -446,8 +473,8 @@ internal static class InventoryItemHandler
                 parts.Add($"{amount} {PointColorName(outp.id)}");
             }
             return parts.Count > 0
-                ? $"not studied yet, studying gives {string.Join(", ", parts)}"
-                : "not studied yet";
+                ? Loc.Fmt("study.not_yet_reward", string.Join(", ", parts))
+                : Loc.Get("study.not_yet");
         }
         catch { return null; }
     }
@@ -477,7 +504,7 @@ internal static class InventoryItemHandler
                 if (max < min) max = min;   // ResModificator falls back to min when max < min
 
                 if (max <= 0) return null;
-                return min == max ? min.ToString() : $"{min} to {max}";
+                return min == max ? min.ToString() : Loc.Fmt("study.range", min, max);
             }
 
             return outp.value > 0 ? outp.value.ToString() : null;
@@ -524,7 +551,7 @@ internal static class InventoryItemHandler
                 var kind = GUIAccessibility.AlchemyTypeName((ItemDefinition.AlchemyType)d);
                 if (kind != null && !kinds.Contains(kind)) kinds.Add(kind);
             }
-            return kinds.Count > 0 ? $"decomposes into {string.Join(", ", kinds)}" : null;
+            return kinds.Count > 0 ? Loc.Fmt("alchemy.decomposes_into", string.Join(", ", kinds)) : null;
         }
         catch { return null; }
     }
@@ -534,11 +561,11 @@ internal static class InventoryItemHandler
     {
         switch (id)
         {
-            case "r": return "red points";
-            case "g": return "green points";
-            case "b": return "blue points";
-            case "v": return "violet points";
-            case "gratitude_points": return "gratitude points";
+            case "r": return Loc.Get("points.red");
+            case "g": return Loc.Get("points.green");
+            case "b": return Loc.Get("points.blue");
+            case "v": return Loc.Get("points.violet");
+            case "gratitude_points": return Loc.Get("points.gratitude");
             default: return id;
         }
     }
@@ -558,8 +585,8 @@ internal static class InventoryItemHandler
             if (!(gui is VendorGUI vendor) || vendor.trading == null) return null;
             if (cell?.item == null || cell.item.IsEmpty()) return null;
 
-            bool buySide = panel == "Buy" || panel == "Vendor offer";
-            bool sellSide = panel == "Sell" || panel == "Your offer";
+            bool buySide = panel == PanelBuy || panel == PanelVendorOffer;
+            bool sellSide = panel == PanelSell || panel == PanelPlayerOffer;
             if (!buySide && !sellSide) return null;
 
             float per = buySide
@@ -567,11 +594,11 @@ internal static class InventoryItemHandler
                 : vendor.trading.GetSingleItemCostInPlayerInventory(cell.item, 0);
 
             var money = GUIAccessibility.MoneyToSpeech(per);
-            if (money == "nothing")
-                return sellSide ? "vendor pays nothing" : null;
+            if (money == Loc.Get("money.nothing"))
+                return sellSide ? Loc.Get("vendor.pays_nothing") : null;
 
-            var suffix = cell.item.value > 1 ? " each" : "";
-            return buySide ? $"costs {money}{suffix}" : $"sells for {money}{suffix}";
+            var suffix = cell.item.value > 1 ? Loc.Get("vendor.price_each") : "";
+            return Loc.Fmt(buySide ? "vendor.costs" : "vendor.sells_for", money, suffix);
         }
         catch
         {
@@ -598,30 +625,27 @@ internal static class InventoryItemHandler
 
             // "Buy" = vendor's stock (CanSellItem / not_selling);
             // "Sell" = your inventory the vendor buys (CanBuyItem / not_buying).
-            bool sellSide = panel == "Sell";              // vendor buying from you
+            bool sellSide = panel == PanelSell;           // vendor buying from you
             var mods = sellSide ? trader.definition.not_buying : trader.definition.not_selling;
 
             if (def.product_types == null || def.product_types.Count == 0)
-                return "this item can't be traded";
+                return Loc.Get("vendor.lock.not_tradeable");
 
             if (def.product_tier > trader.cur_tier)
-                return $"unlocks when this vendor reaches tier {def.product_tier}, "
-                     + $"currently tier {trader.cur_tier}; trade more with them to raise it";
+                return Loc.Fmt("vendor.lock.tier", def.product_tier, trader.cur_tier);
 
             // CanTradeItemType: none of the item's product types are in the vendor's list.
             bool tradesType = def.product_types.Any(t => trader.definition.GetProductTypes().Contains(t));
             if (!tradesType)
-                return sellSide ? "this vendor doesn't buy this kind of item"
-                                : "this vendor doesn't sell this kind of item";
+                return Loc.Get(sellSide ? "vendor.lock.kind_not_bought" : "vendor.lock.kind_not_sold");
 
             foreach (var m in mods)
             {
                 if (m.item_name != def.id) continue;
                 if (m.tier < 1)
-                    return sellSide ? "this vendor never buys this item"
-                                    : "this vendor never sells this item";
+                    return Loc.Get(sellSide ? "vendor.lock.never_buys" : "vendor.lock.never_sells");
                 if (m.tier == trader.cur_tier)
-                    return "locked at the vendor's current tier, unlocks at the next tier";
+                    return Loc.Get("vendor.lock.current_tier");
             }
             return null; // genuinely greyed but no check matched; fall back to "not available"
         }
@@ -641,11 +665,11 @@ internal static class InventoryItemHandler
         int stars = Mathf.FloorToInt(def.quality);
         switch (stars)
         {
-            case 1: return "bronze quality";
-            case 2: return "silver quality";
-            case 3: return "gold quality";
+            case 1: return Loc.Get("quality.bronze");
+            case 2: return Loc.Get("quality.silver");
+            case 3: return Loc.Get("quality.gold");
             case <= 0: return null;
-            default: return $"{stars} stars";
+            default: return Loc.Fmt("quality.stars", stars);
         }
     }
 
@@ -667,7 +691,7 @@ internal static class InventoryItemHandler
         try
         {
             if (need.is_multiquality)
-                return playerPicksQuality ? "" : ", any quality";
+                return playerPicksQuality ? "" : ", " + Loc.Get("quality.any");
 
             var tier = QualityTierName(need.definition);
             return string.IsNullOrEmpty(tier) ? "" : $", {tier}";
@@ -706,9 +730,9 @@ internal static class InventoryItemHandler
             }
 
             var parts = new List<string>(3);
-            AppendPerk(parts, Mathf.RoundToInt(energy), "energy");
-            AppendPerk(parts, Mathf.RoundToInt(hp), "health");
-            AppendPerk(parts, Mathf.RoundToInt(sanity), "sanity");
+            AppendPerk(parts, Mathf.RoundToInt(energy), Loc.Get("perk.energy"));
+            AppendPerk(parts, Mathf.RoundToInt(hp), Loc.Get("perk.health"));
+            AppendPerk(parts, Mathf.RoundToInt(sanity), Loc.Get("perk.sanity"));
 
             return parts.Count == 0 ? null : string.Join(", ", parts);
         }
@@ -735,11 +759,11 @@ internal static class InventoryItemHandler
             switch (item.durability_state)
             {
                 case Item.DurabilityState.Broken:
-                    return "broken";
+                    return Loc.Get("durability.broken");
                 case Item.DurabilityState.PreBroken:
-                    return $"condition {percent} percent, almost broken";
+                    return Loc.Fmt("durability.almost_broken", percent);
                 default:
-                    return $"condition {percent} percent";
+                    return Loc.Fmt("durability.condition", percent);
             }
         }
         catch
@@ -795,8 +819,8 @@ internal static class InventoryItemHandler
     /// <summary>Add "gives N energy" / "drains N energy" to <paramref name="parts"/> when N != 0.</summary>
     private static void AppendPerk(List<string> parts, int value, string label)
     {
-        if (value > 0) parts.Add($"gives {value} {label}");
-        else if (value < 0) parts.Add($"drains {-value} {label}");
+        if (value > 0) parts.Add(Loc.Fmt("perk.gives", value, label));
+        else if (value < 0) parts.Add(Loc.Fmt("perk.drains", -value, label));
     }
 
     /// <summary>
@@ -891,7 +915,7 @@ internal static class InventoryItemHandler
             if (item.is_bag)
             {
                 PressItemCell(cell);
-                return ($"Opened {name}", false);
+                return (Loc.Fmt("item.opened", name), false);
             }
 
             // Usable items (teleport stone, food, potions): use via the game's own path, mirroring
@@ -900,25 +924,25 @@ internal static class InventoryItemHandler
             if (def != null && def.can_be_used)
             {
                 if (item.GetGrayedCooldownPercent() > 0)
-                    return ($"{name} on cooldown", false);
+                    return (Loc.Fmt("item.on_cooldown", name), false);
 
                 if (def.close_inv_on_use)
                 {
                     GUIElements.me.game_gui.Hide();
                     MainGame.me.player.UseItemFromInventory(item);
-                    return ($"Used {name}", true);
+                    return (Loc.Fmt("item.used", name), true);
                 }
 
                 MainGame.me.player.UseItemFromInventory(item);
                 try { panel?.Redraw(); } catch { }
-                return ($"Used {name}", false);
+                return (Loc.Fmt("item.used", name), false);
             }
 
             // Weapons / equipment: equip, or unequip if already worn.
             if (def != null && (def.IsWeapon() || def.IsEquipment()))
             {
                 if (item.durability_state == Item.DurabilityState.Broken)
-                    return ($"{name} is broken", false);
+                    return (Loc.Fmt("item.is_broken", name), false);
 
                 bool equipped = item.is_equipped ||
                                 MainGame.me.player.data.secondary_inventory.Contains(item);
@@ -926,12 +950,12 @@ internal static class InventoryItemHandler
                 {
                     MainGame.me.player.UnEquipItem(item);
                     try { panel?.Redraw(); } catch { }
-                    return ($"Unequipped {name}", false);
+                    return (Loc.Fmt("item.unequipped", name), false);
                 }
 
                 MainGame.me.player.EquipItem(item, -1, null);
                 try { panel?.Redraw(); } catch { }
-                return ($"Equipped {name}", false);
+                return (Loc.Fmt("item.equipped", name), false);
             }
         }
         catch (Exception ex)
@@ -968,7 +992,7 @@ internal static class InventoryItemHandler
         // Some items (quest items, the starting tools) are flagged un-throwable; the game greys the
         // "destroy" option out for them. Say so rather than silently doing nothing.
         if (def != null && def.player_cant_throw_out)
-            return $"{name} can't be destroyed";
+            return Loc.Fmt("item.cant_destroy", name);
 
         var invGui = cell.GetComponentInParent<InventoryGUI>();
         if (invGui == null) return null;

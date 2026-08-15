@@ -81,11 +81,11 @@ internal static class FishingAssist
                 // With NoTimeForFishing installed the catch isn't ours to toggle — it drives it.
                 if (DeferToNoTimeForFishing)
                 {
-                    ScreenReader.Say("Catch is handled by the No Time For Fishing mod.");
+                    ScreenReader.Say(Loc.Get("fishing.deferred"));
                     return;
                 }
                 _enabled = !_enabled;
-                ScreenReader.Say(_enabled ? "Auto catch on" : "Auto catch off, manual fishing");
+                ScreenReader.Say(Loc.Get(_enabled ? "fishing.autocatch.on" : "fishing.autocatch.off"));
                 return;
             }
 
@@ -128,28 +128,28 @@ internal static class FishingAssist
                 case FishingGUI.FishingState.BaitChoosing:
                     // Bounced back here from the cast bar = the chosen distance had no fish.
                     if (prev == FishingGUI.FishingState.DistanceChoosing)
-                        ScreenReader.Say("No fish at that distance. Choose bait and cast again.");
+                        ScreenReader.Say(Loc.Get("fishing.no_fish_there"));
                     else if (DeferToNoTimeForFishing)
-                        ScreenReader.Say("Fishing. Tab changes bait, hold E to cast. Catch is automatic.");
+                        ScreenReader.Say(Loc.Get("fishing.intro.deferred"));
                     else
-                        ScreenReader.Say(_enabled
-                            ? "Fishing. Tab changes bait, hold E to cast. Auto catch is on, Control F to toggle."
-                            : "Fishing. Tab changes bait, hold E to cast. Manual fishing.");
+                        ScreenReader.Say(Loc.Get(_enabled
+                            ? "fishing.intro.auto"
+                            : "fishing.intro.manual"));
                     break;
 
                 case FishingGUI.FishingState.DistanceChoosing:
                     _lastAnnouncedTier = -1;   // start a fresh sweep; live narration takes over
-                    ScreenReader.Say("Casting. Release E to set distance.");
+                    ScreenReader.Say(Loc.Get("fishing.casting"));
                     break;
 
                 case FishingGUI.FishingState.WaitingForBite:
-                    ScreenReader.Say("Line cast. Waiting for a bite.");
+                    ScreenReader.Say(Loc.Get("fishing.waiting"));
                     break;
 
                 case FishingGUI.FishingState.WaitingForPulling:
                     // The fish is on the line. In auto-catch mode the prefix below turns this into a
                     // catch a frame later; in manual mode the player now has the vanilla window.
-                    ScreenReader.Say("Bite!");
+                    ScreenReader.Say(Loc.Get("fishing.bite"));
                     break;
 
                 case FishingGUI.FishingState.Pulling:
@@ -158,7 +158,7 @@ internal static class FishingAssist
                     // Only then do we spell out the controls; otherwise stay quiet so the flow reads
                     // cleanly as "Bite!" then "Caught X" without a misleading instruction in between.
                     if (!DeferToNoTimeForFishing && !_enabled)
-                        ScreenReader.Say("Reeling in. Hold E to raise, release to lower, keep the fish in the bar.");
+                        ScreenReader.Say(Loc.Get("fishing.reeling"));
                     break;
 
                 case FishingGUI.FishingState.TakingOut:
@@ -182,11 +182,11 @@ internal static class FishingAssist
         {
             // From the waiting stage with nothing hooked = a deliberate/timed-out empty pull;
             // from the reel game = the fish escaped.
-            ScreenReader.Say(prev == FishingGUI.FishingState.Pulling ? "The fish got away." : "Reeled in empty.", interrupt: false);
+            ScreenReader.Say(Loc.Get(prev == FishingGUI.FishingState.Pulling ? "fishing.got_away" : "fishing.empty"), interrupt: false);
             return;
         }
 
-        string name = "a fish";
+        string name = Loc.Get("fishing.a_fish");
         try
         {
             var fish = Traverse.Create(gui).Field("_fish").GetValue<Item>();
@@ -199,7 +199,7 @@ internal static class FishingAssist
         }
         catch { }
 
-        ScreenReader.Say($"Caught {name}!", interrupt: false);
+        ScreenReader.Say(Loc.Fmt("fishing.caught", name), interrupt: false);
     }
 
     // ── Bait narration ──────────────────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ internal static class FishingAssist
             if (string.IsNullOrEmpty(label)) return;
             var clean = ScreenReader.StripNguiCodes(label).Trim();
             if (!string.IsNullOrEmpty(clean))
-                ScreenReader.Say($"Bait: {clean}");
+                ScreenReader.Say(Loc.Fmt("fishing.bait", clean));
         }
         catch (Exception ex)
         {
@@ -256,8 +256,8 @@ internal static class FishingAssist
             }
             catch { }
 
-            string tierName = tier == 0 ? "Near" : tier == 1 ? "Medium" : "Far";
-            ScreenReader.Say(hasFish ? $"{tierName}, fish here" : $"{tierName}, empty");
+            string tierName = Loc.Get(tier == 0 ? "fishing.tier.near" : tier == 1 ? "fishing.tier.medium" : "fishing.tier.far");
+            ScreenReader.Say(Loc.Fmt(hasFish ? "fishing.tier.has_fish" : "fishing.tier.empty", tierName));
         }
         catch (Exception ex)
         {

@@ -31,7 +31,7 @@ internal static class TitleScreenAccessibility
         {
             LoadingStarted = false;
             _announced = true;
-            ScreenReader.Say("Loading");
+            ScreenReader.Say(Loc.Get("title.loading"));
             return;
         }
 
@@ -45,12 +45,12 @@ internal static class TitleScreenAccessibility
             // Auto-focus the first entry so the player doesn't have to press down once first.
             _announced = true;
             SelectedIndex = 0;
-            ScreenReader.Say($"Title Screen. {active[0].ReadLabel()}");
+            ScreenReader.Say(Loc.Fmt("title.opened", active[0].ReadLabel()));
         }
         else if (!_announced)
         {
             _announced = true;
-            ScreenReader.Say("Title Screen");
+            ScreenReader.Say(Loc.Get("title.name"));
         }
     }
 

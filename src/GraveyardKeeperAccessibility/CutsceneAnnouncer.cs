@@ -71,7 +71,7 @@ internal static class CutsceneAnnouncer
             _log?.LogInfo("[CUTSCENE] control returned");
             // Silent start + short scene = the player knows exactly what happened; stay quiet.
             if (_spokeStart || wasLong)
-                ScreenReader.Say("Cutscene over", interrupt: false);
+                ScreenReader.Say(Loc.Get("cutscene.over"), interrupt: false);
             _spokeStart = false;
         }
         catch (Exception ex)
@@ -139,7 +139,7 @@ internal static class CutsceneAnnouncer
                 _log?.LogInfo($"[CUTSCENE] control taken by the game (expected={expected})");
                 if (_spokeStart)
                     // Non-interrupting: the scene's own first line matters more than this notice.
-                    ScreenReader.Say("Cutscene. Please wait and do not press any keys", interrupt: false);
+                    ScreenReader.Say(Loc.Get("cutscene.start"), interrupt: false);
                 return;
             }
 
@@ -149,7 +149,7 @@ internal static class CutsceneAnnouncer
             if (now - ScreenReader.LastSpokenAt > SilenceReminder && now - _lastReminder > SilenceReminder)
             {
                 _lastReminder = now;
-                ScreenReader.Say("Cutscene still running", interrupt: false);
+                ScreenReader.Say(Loc.Get("cutscene.still_running"), interrupt: false);
             }
         }
         catch (Exception ex)

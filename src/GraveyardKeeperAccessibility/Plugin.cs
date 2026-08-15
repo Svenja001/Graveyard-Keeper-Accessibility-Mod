@@ -9,6 +9,8 @@ public class Plugin : BaseUnityPlugin
     {
         Log = Logger;
         Log.LogInfo("[PLUGIN_INIT] NEW CODE PATH EXECUTING");
+        // Must come first: everything below can speak, and speech goes through Loc.
+        Loc.Init(Log);
         ScreenReader.Init(Log);
         MovementFeedback.Init(Log);
         InteractionDetector.Init(Log);
@@ -33,9 +35,9 @@ public class Plugin : BaseUnityPlugin
         FishingAssist.Init(Log);
         ToolbarHandler.Init(Log);
 
-        // Test TTS
-        Log.LogInfo("[TTS TEST] Speaking test message...");
-        ScreenReader.Say("Game starting", interrupt: true);
+        // The greeting is deferred to Update: at Awake the game hasn't applied its language yet
+        // (GameSettings._cur_lng is still empty), so speaking here would always come out English.
+        Log.LogInfo("[TTS TEST] Greeting deferred until the game language is known");
 
         var harmony = new HarmonyLib.Harmony(MyPluginInfo.PLUGIN_GUID);
 
@@ -193,10 +195,25 @@ public class Plugin : BaseUnityPlugin
     private int _tickCounter;
     private string _lastSceneName;
 
+    // Startup greeting, spoken once the game has settled on a language (see Awake). The timeout
+    // covers the case where it never reports one, so the player still hears the mod is alive.
+    private bool _greeted;
+    private const float GreetingTimeout = 10f;
+
+    private void SpeakGreetingWhenLanguageKnown()
+    {
+        if (_greeted) return;
+        if (!Loc.LanguageKnown && Time.unscaledTime < GreetingTimeout) return;
+        _greeted = true;
+        ScreenReader.Say(Loc.Get("plugin.game_starting"), interrupt: true);
+    }
+
     private void Update()
     {
         try
         {
+            SpeakGreetingWhenLanguageKnown();
+
             // Log scene changes
             var currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
             if (currentScene != _lastSceneName)

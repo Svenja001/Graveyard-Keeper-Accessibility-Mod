@@ -129,18 +129,18 @@ internal static class GlobalCraftControlHandler
 
             if (zoneId == playerZone)
             {
-                parts.Add("you are here");
+                parts.Add(Loc.Get("map.you_are_here"));
                 distance = 0f;
             }
             else if (TryZoneCenter(zoneId, out var center))
             {
                 distance = Vector2.Distance(playerPos, center);
                 parts.Add(CompassDirection(playerPos, center));
-                parts.Add($"{distance / TileSize:F0} meters away");
+                parts.Add(Loc.Fmt("map.meters_away", (distance / TileSize).ToString("F0")));
             }
 
             if (HasReceiver(WorldZone.GetZoneByID(zoneId, null_is_error: false)))
-                parts.Add("soul receiver");
+                parts.Add(Loc.Get("map.soul_receiver"));
 
             rows.Add(new KeyValuePair<string, float>(string.Join(", ", parts), distance));
         }
@@ -151,9 +151,7 @@ internal static class GlobalCraftControlHandler
             elements.Add(InfoRow(gui, row.Key));
 
         if (UnknownAreaCount > 0)
-            elements.Add(InfoRow(gui, UnknownAreaCount == 1
-                ? "1 area not discovered yet"
-                : $"{UnknownAreaCount} areas not discovered yet"));
+            elements.Add(InfoRow(gui, Loc.Plural("map.undiscovered", UnknownAreaCount, UnknownAreaCount)));
 
         Plugin.Log.LogInfo($"[MAP] {KnownAreaCount} known area(s), {UnknownAreaCount} undiscovered");
     }
@@ -161,16 +159,14 @@ internal static class GlobalCraftControlHandler
     /// <summary>Spoken header for the world map.</summary>
     internal static string MapIntro()
     {
-        var parts = new List<string> { "Map" };
+        var parts = new List<string> { Loc.Get("map.title") };
 
-        parts.Add(KnownAreaCount == 1 ? "1 area discovered" : $"{KnownAreaCount} areas discovered");
+        parts.Add(Loc.Plural("map.discovered", KnownAreaCount, KnownAreaCount));
 
         if (RemoteRowCount > 0)
-            parts.Add(RemoteRowCount == 1
-                ? "1 can be crafted in remotely, listed first"
-                : $"{RemoteRowCount} can be crafted in remotely, listed first");
+            parts.Add(Loc.Plural("map.remote_craftable", RemoteRowCount, RemoteRowCount));
         else if (RemoteControlUnlocked)
-            parts.Add("no area can be crafted in remotely yet");
+            parts.Add(Loc.Get("map.no_remote_craftable"));
 
         return string.Join(". ", parts) + ".";
     }
@@ -213,20 +209,20 @@ internal static class GlobalCraftControlHandler
     private static string CompassDirection(Vector2 from, Vector2 to)
     {
         var d = to - from;
-        if (d.sqrMagnitude < 1f) return "here";
+        if (d.sqrMagnitude < 1f) return Loc.Get("compass.here");
 
         var angle = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
         if (angle < 0f) angle += 360f;
         return (Mathf.RoundToInt(angle / 45f) % 8) switch
         {
-            0 => "east",
-            1 => "north-east",
-            2 => "north",
-            3 => "north-west",
-            4 => "west",
-            5 => "south-west",
-            6 => "south",
-            _ => "south-east",
+            0 => Loc.Get("compass.east"),
+            1 => Loc.Get("compass.north_east"),
+            2 => Loc.Get("compass.north"),
+            3 => Loc.Get("compass.north_west"),
+            4 => Loc.Get("compass.west"),
+            5 => Loc.Get("compass.south_west"),
+            6 => Loc.Get("compass.south"),
+            _ => Loc.Get("compass.south_east"),
         };
     }
 
@@ -256,18 +252,18 @@ internal static class GlobalCraftControlHandler
     private static string MapZoneRowLabel(List<WorldZone> zones)
     {
         var first = ZoneName(zones[0].id);
-        var name = zones.Count > 1 ? $"{first} and {zones.Count - 1} more" : first;
+        var name = zones.Count > 1 ? Loc.Fmt("remote.group_name", first, zones.Count - 1) : first;
 
         var withReceiver = zones.Count(HasReceiver);
         string receiver;
         if (withReceiver == 0)
-            receiver = "no soul receiver built yet";
+            receiver = Loc.Get("remote.receiver.none");
         else if (withReceiver == zones.Count)
-            receiver = "soul receiver built";
+            receiver = Loc.Get("remote.receiver.built");
         else
-            receiver = $"soul receiver in {withReceiver} of {zones.Count}";
+            receiver = Loc.Fmt("remote.receiver.partial", withReceiver, zones.Count);
 
-        return $"Remote crafting: {name}, {receiver}";
+        return Loc.Fmt("remote.map_row", name, receiver);
     }
 
     // ------------------------------------------------------ remote-crafting window
@@ -282,12 +278,14 @@ internal static class GlobalCraftControlHandler
         var tabIds = TabIds(gui);
         var current = CurrentTab(gui);
 
+        TabRowCount = tabIds.Count > 1 ? tabIds.Count : 0;
+
         if (tabIds.Count > 1)
         {
             foreach (var id in tabIds)
             {
                 var captured = id;
-                var label = id == current ? $"Area: {ZoneName(id)}, current" : $"Area: {ZoneName(id)}";
+                var label = Loc.Fmt(id == current ? "remote.tab.current" : "remote.tab", ZoneName(id));
                 elements.Add(new GUIElement
                 {
                     Go = gui.gameObject,
@@ -329,26 +327,29 @@ internal static class GlobalCraftControlHandler
     internal static string IntroFor(GlobalCraftControlGUI gui)
     {
         var current = CurrentTab(gui);
-        var parts = new List<string> { "Remote crafting" };
+        var parts = new List<string> { Loc.Get("remote.title") };
 
         if (!string.IsNullOrEmpty(current)) parts.Add(ZoneName(current));
 
-        parts.Add($"{GratitudePoints()} gratitude points");
+        parts.Add(Loc.Fmt("remote.gratitude_points", GratitudePoints()));
 
         if (!HasReceiverForTab(gui, current))
-            parts.Add("No soul receiver in this area. Build one here before you can craft remotely");
+            parts.Add(Loc.Get("remote.no_receiver_here"));
 
         if (TabIds(gui).Count > 1)
-            parts.Add("Use the area rows to switch zone");
+            parts.Add(Loc.Get("remote.switch_hint"));
 
         return string.Join(". ", parts) + ".";
     }
 
-    /// <summary>Index of the first station row (i.e. past the "Area:" tab rows), or 0.</summary>
+    /// <summary>How many leading rows of the last discovery were zone tabs rather than stations.</summary>
+    private static int TabRowCount;
+
+    /// <summary>Index of the first station row (i.e. past the zone tab rows), or 0.</summary>
     internal static int FirstStationIndex(List<GUIElement> rows)
     {
-        var idx = rows.FindIndex(e => e.Label == null || !e.Label.StartsWith("Area:"));
-        return idx >= 0 ? idx : (rows.Count > 0 ? 0 : -1);
+        if (rows.Count == 0) return -1;
+        return TabRowCount < rows.Count ? TabRowCount : 0;
     }
 
     /// <summary>
@@ -381,7 +382,7 @@ internal static class GlobalCraftControlHandler
     {
         if (item == null || item.linked_wgo == null)
         {
-            ScreenReader.Say("That station is gone");
+            ScreenReader.Say(Loc.Get("remote.station_gone"));
             return;
         }
 
@@ -404,7 +405,7 @@ internal static class GlobalCraftControlHandler
     /// </summary>
     private static string StationLabel(CraftControlItem item)
     {
-        if (item == null || item.linked_wgo == null) return "Empty slot";
+        if (item == null || item.linked_wgo == null) return Loc.Get("remote.empty_slot");
 
         var wgo = item.linked_wgo;
         var parts = new List<string> { StationName(wgo) };
@@ -418,22 +419,22 @@ internal static class GlobalCraftControlHandler
                 {
                     var making = CurrentOutputName(craft);
                     var pct = Mathf.Clamp(Mathf.RoundToInt(wgo.progress * 100f), 0, 100);
-                    parts.Add(string.IsNullOrEmpty(making) ? $"working, {pct} percent" : $"making {making}, {pct} percent");
+                    parts.Add(string.IsNullOrEmpty(making) ? Loc.Fmt("remote.working", pct) : Loc.Fmt("remote.making", making, pct));
                 }
                 else if (craft.craft_queue != null && craft.craft_queue.Count > 0)
                 {
-                    parts.Add(craft.craft_queue.Count == 1 ? "1 craft queued" : $"{craft.craft_queue.Count} crafts queued");
+                    parts.Add(Loc.Plural("remote.queued", craft.craft_queue.Count, craft.craft_queue.Count));
                 }
                 else
                 {
-                    parts.Add("idle");
+                    parts.Add(Loc.Get("remote.idle"));
                 }
             }
 
             if (wgo.has_linked_worker && wgo.linked_worker != null && !wgo.linked_worker.IsInvisibleWorker())
             {
                 var eff = wgo.linked_worker.worker?.GetWorkerEfficiencyTextOnlyPercent();
-                parts.Add(string.IsNullOrEmpty(eff) ? "zombie worker" : $"zombie worker at {eff}");
+                parts.Add(string.IsNullOrEmpty(eff) ? Loc.Get("remote.zombie_worker") : Loc.Fmt("remote.zombie_worker_at", eff));
             }
         }
         catch (Exception ex) { Plugin.Log.LogWarning($"[REMOTE CRAFT] station label failed: {ex.Message}"); }
@@ -453,16 +454,16 @@ internal static class GlobalCraftControlHandler
         try
         {
             if (!wgo.HasSoulsTotemInZone())
-                return "not available, no soul receiver in this area";
+                return Loc.Get("remote.blocked.no_receiver");
 
             var def = wgo.obj_def;
             if (def != null && def.interaction_type != ObjectDefinition.InteractionType.Craft
                 && def.GetValidInteraction(wgo) == null)
-                return "not available";
+                return Loc.Get("remote.blocked.unavailable");
 
             var canWhileBusy = def != null && (def.can_insert_zombie || def.tool_actions.no_actions);
             if (!canWhileBusy && wgo.components?.craft != null && wgo.components.craft.is_crafting)
-                return "busy, wait for the current craft to finish";
+                return Loc.Get("remote.blocked.busy");
         }
         catch (Exception ex) { Plugin.Log.LogWarning($"[REMOTE CRAFT] blocker check failed: {ex.Message}"); }
 
@@ -477,7 +478,7 @@ internal static class GlobalCraftControlHandler
             if (!string.IsNullOrWhiteSpace(name)) return name;
         }
         catch { }
-        return "Station";
+        return Loc.Get("remote.station");
     }
 
     private static string CurrentOutputName(CraftComponent craft)
@@ -550,7 +551,7 @@ internal static class GlobalCraftControlHandler
     /// <summary>Localized zone name ("zone_&lt;id&gt;", the same token the map labels use).</summary>
     private static string ZoneName(string zoneId)
     {
-        if (string.IsNullOrEmpty(zoneId)) return "Unknown area";
+        if (string.IsNullOrEmpty(zoneId)) return Loc.Get("common.unknown_area");
         try
         {
             var loc = ScreenReader.StripNguiCodes(GJL.L("zone_" + zoneId) ?? "").Trim();

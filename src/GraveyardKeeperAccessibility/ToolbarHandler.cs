@@ -73,25 +73,25 @@ internal static class ToolbarHandler
 
             if (string.IsNullOrEmpty(__state.Id))
             {
-                ScreenReader.Say($"Slot {index + 1} empty");
+                ScreenReader.Say(Loc.Fmt("toolbar.slot_empty", index + 1));
                 return;
             }
 
             var name = ItemName(__state.Id);
             if (__state.Before <= 0)
             {
-                ScreenReader.Say($"No {name} left");
+                ScreenReader.Say(Loc.Fmt("toolbar.none_left", name));
                 return;
             }
 
             int after = MainGame.me.player.data.GetTotalCount(__state.Id);
             if (after < __state.Before)
-                ScreenReader.Say(after > 0 ? $"Used {name}, {after} left" : $"Used {name}, none left");
+                ScreenReader.Say(after > 0 ? Loc.Fmt("toolbar.used", name, after) : Loc.Fmt("toolbar.used_last", name));
             else
                 // Count unchanged means the use had no effect (e.g. a bar that's already full). The
                 // game itself refuses to put the reusable teleport stone on the hotbar, so a
                 // "does something without being consumed" item never lands here.
-                ScreenReader.Say($"Can't use {name} now");
+                ScreenReader.Say(Loc.Fmt("toolbar.cant_use", name));
         }
         catch (Exception ex)
         {
@@ -125,21 +125,21 @@ internal static class ToolbarHandler
             bool eligible = def != null && def.can_be_used
                             && (def.cooldown == null || !def.cooldown.has_expression);
             if (!eligible)
-                return $"{name} can't go in the hotbar";
+                return Loc.Fmt("toolbar.not_eligible", name);
 
             // Already in this slot -> clear it (toggle off).
             if (save.GetEquippedItem(slot) == item.id)
             {
                 save.UnEquip(slot);
                 RedrawToolbars();
-                return $"Removed {name} from slot {slot + 1}";
+                return Loc.Fmt("toolbar.removed", name, slot + 1);
             }
 
             // SetToolbarEquipped clears any other slot holding this id first, so an item only ever
             // occupies one slot.
             save.SetToolbarEquipped(item.id, slot);
             RedrawToolbars();
-            return $"Assigned {name} to slot {slot + 1}";
+            return Loc.Fmt("toolbar.assigned", name, slot + 1);
         }
         catch (Exception ex)
         {
@@ -164,17 +164,17 @@ internal static class ToolbarHandler
                 var id = save.GetEquippedItem(i);
                 if (string.IsNullOrEmpty(id))
                 {
-                    parts.Add($"Slot {i + 1} empty");
+                    parts.Add(Loc.Fmt("toolbar.slot_empty", i + 1));
                     continue;
                 }
 
                 var name = ItemName(id);
                 int count = 0;
                 try { count = MainGame.me.player.data.GetTotalCount(id); } catch { }
-                parts.Add(count > 0 ? $"Slot {i + 1} {name}, {count}" : $"Slot {i + 1} {name}, none left");
+                parts.Add(count > 0 ? Loc.Fmt("toolbar.slot_item", i + 1, name, count) : Loc.Fmt("toolbar.slot_item_empty", i + 1, name));
             }
 
-            ScreenReader.Say("Hotbar: " + string.Join(". ", parts));
+            ScreenReader.Say(Loc.Fmt("toolbar.hotbar", string.Join(". ", parts)));
         }
         catch (Exception ex)
         {

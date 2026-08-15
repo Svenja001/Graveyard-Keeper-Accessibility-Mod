@@ -48,7 +48,7 @@ internal static class ZoneScoreAnnouncer
         {
             if (!MainGame.game_started || MainGame.me == null)
             {
-                ScreenReader.Say("No game in progress");
+                ScreenReader.Say(Loc.Get("common.no_game"));
                 return;
             }
 
@@ -71,7 +71,7 @@ internal static class ZoneScoreAnnouncer
                     AddFallbackParam(id, parts, reported);
             }
 
-            ScreenReader.Say(parts.Count > 0 ? string.Join(". ", parts) : "No zone scores available");
+            ScreenReader.Say(parts.Count > 0 ? string.Join(". ", parts) : Loc.Get("zonescore.none"));
         }
         catch (Exception ex)
         {
@@ -134,8 +134,8 @@ internal static class ZoneScoreAnnouncer
         // Camp/Souls-style zones carry their real number inside the game's own format string.
         var gameText = ExtraValueQualityText(zone);
         parts.Add(gameText != null
-            ? $"{name}: {gameText}"
-            : $"{name} rating: {Format(zone.GetTotalQuality())}");
+            ? Loc.Fmt("zonescore.game_text", name, gameText)
+            : Loc.Fmt("zonescore.rating", name, Format(zone.GetTotalQuality())));
 
         string extra = null;
         if (id == "graveyard") extra = SummarizeZoneSkulls(zone);
@@ -156,7 +156,7 @@ internal static class ZoneScoreAnnouncer
             var player = MainGame.me?.player;
             if (player == null) return;
             float rating = player.GetParam(id + "_qual");
-            parts.Add($"{ZoneName(id, id)} rating: {Format(rating)}");
+            parts.Add(Loc.Fmt("zonescore.rating", ZoneName(id, id), Format(rating)));
             reported.Add(id);
         }
         catch { }
@@ -204,7 +204,7 @@ internal static class ZoneScoreAnnouncer
         // Each zone prefixes its own currency sprite — "(refugee_happiness_slot)", "(tavern)",
         // "(soul_zone_capacity)" — which has no spoken meaning once the zone is named.
         text = Regex.Replace(text, @"\([a-zA-Z0-9_]+\)", " ");
-        text = text.Replace("/", " of ");
+        text = text.Replace("/", Loc.Get("zonescore.of"));
         text = Regex.Replace(text, @"\s+", " ").Trim();
         return string.IsNullOrEmpty(text) ? null : text;
     }
@@ -234,9 +234,8 @@ internal static class ZoneScoreAnnouncer
             int slots = CampSlots();
             if (slots > 0 && filled >= slots)
                 return slots >= DLCRefugees.RefugeesCampEngine.MAX_REFUGEE_CAMP_QUALITY
-                    ? "at the maximum, the camp is fully developed"
-                    : $"at the limit of {slots}, build more camp facilities to raise it, up to "
-                      + $"{DLCRefugees.RefugeesCampEngine.MAX_REFUGEE_CAMP_QUALITY}";
+                    ? Loc.Get("camp.at_maximum")
+                    : Loc.Fmt("camp.at_limit", slots, DLCRefugees.RefugeesCampEngine.MAX_REFUGEE_CAMP_QUALITY);
 
             float perDay = engine.PredictRefugeeHappinessChange(1f);
             // The widget clamps a drop that would push an already-empty bar below zero.
@@ -245,10 +244,10 @@ internal static class ZoneScoreAnnouncer
             int pct = Mathf.RoundToInt(progress * 100f);
             int trend = Mathf.RoundToInt(perDay * 100f);
             string trendText = trend > 0
-                ? $"rising {trend} percent per day"
-                : trend < 0 ? $"falling {-trend} percent per day" : "steady";
+                ? Loc.Fmt("camp.trend.rising", trend)
+                : trend < 0 ? Loc.Fmt("camp.trend.falling", -trend) : Loc.Get("camp.trend.steady");
 
-            return $"{pct} percent toward the next point, {trendText}";
+            return Loc.Fmt("camp.progress", pct, trendText);
         }
         catch (Exception ex)
         {
@@ -288,7 +287,7 @@ internal static class ZoneScoreAnnouncer
             if (bar != null && !bar.is_removed)
             {
                 int stars = bar.data.GetItemsCount(TavernStarItemId);
-                bits.Add(stars == 1 ? "reputation: 1 star" : $"reputation: {stars} stars");
+                bits.Add(Loc.Plural("tavern.reputation", stars, stars));
             }
         }
         catch (Exception ex)
@@ -299,9 +298,9 @@ internal static class ZoneScoreAnnouncer
         try
         {
             float quality = zone.GetTotalQuality();
-            if (quality > 55f) bits.Add("alcohol sales bonus: 20 percent");
-            else if (quality > 30f) bits.Add("alcohol sales bonus: 10 percent, 55 rating for 20 percent");
-            else bits.Add("no alcohol sales bonus yet, 30 rating for 10 percent");
+            if (quality > 55f) bits.Add(Loc.Get("tavern.alcohol_bonus.high"));
+            else if (quality > 30f) bits.Add(Loc.Get("tavern.alcohol_bonus.mid"));
+            else bits.Add(Loc.Get("tavern.alcohol_bonus.none"));
         }
         catch { }
 
@@ -324,7 +323,7 @@ internal static class ZoneScoreAnnouncer
         catch { }
 
         var basis = string.IsNullOrEmpty(id) ? fallbackId : id;
-        if (string.IsNullOrEmpty(basis)) return "Zone";
+        if (string.IsNullOrEmpty(basis)) return Loc.Get("zonescore.zone");
         return char.ToUpperInvariant(basis[0]) + basis.Substring(1);
     }
 
@@ -354,7 +353,7 @@ internal static class ZoneScoreAnnouncer
             }
 
             if (graves == 0) return null;
-            return $"{red} red, {white} white across {graves} graves";
+            return Loc.Fmt("zonescore.graveyard_skulls", red, white, graves);
         }
         catch (Exception ex)
         {

@@ -883,7 +883,7 @@ internal static class ObjectNavigator
             }
         }
 
-        ScreenReader.Say("No navigable objects nearby", interrupt: true);
+        ScreenReader.Say(Loc.Get("nav.none_nearby"), interrupt: true);
     }
 
     private static void AnnounceCategory()
@@ -892,52 +892,18 @@ internal static class ObjectNavigator
         var name = CategoryName(_currentCategory);
         if (list.Count == 0)
         {
-            ScreenReader.Say($"{name}, empty", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("nav.category_empty", name), interrupt: true);
             return;
         }
 
         var target = list[_selectedIndex];
-        ScreenReader.Say($"{name}, {list.Count}. {target.Label}, {DirectionTo(target)}{DistanceText(target.Distance)}{SkullSuffix(target)}", interrupt: true);
+        ScreenReader.Say(Loc.Fmt("nav.category_entry", name, list.Count, target.Label, DirectionTo(target), DistanceText(target.Distance), SkullSuffix(target)), interrupt: true);
         _log?.LogInfo($"[NAVIGATOR] Category {name} ({list.Count}) -> {target.Label}");
     }
 
-    private static string CategoryName(NavCategory cat) => cat switch
-    {
-        NavCategory.Quests => "Quest targets",
-        NavCategory.SomethingNew => "Something new",
-        NavCategory.Landmarks => "Landmarks",
-        NavCategory.Items => "Items",
-        NavCategory.Corpses => "Corpses",
-        NavCategory.Doors => "Doors",
-        NavCategory.Graves => "Graves",
-        NavCategory.EmptyGraves => "Empty graves",
-        NavCategory.ExhumableGraves => "Exhumable graves",
-        NavCategory.DiggableGraves => "Diggable graves",
-        NavCategory.People => "People",
-        NavCategory.Enemies => "Enemies",
-        NavCategory.Vendors => "Vendors",
-        NavCategory.Storage => "Storage",
-        NavCategory.LoadedPallets => "Loaded pallets",
-        NavCategory.EmptyPallets => "Empty pallets",
-        NavCategory.Stations => "Crafting stations",
-        NavCategory.Trees => "Trees",
-        NavCategory.Stones => "Stones",
-        NavCategory.Ores => "Ores",
-        NavCategory.Bushes => "Bushes",
-        NavCategory.Flowers => "Flowers",
-        NavCategory.Mushrooms => "Mushrooms",
-        NavCategory.Beehives => "Beehives",
-        NavCategory.Gatherables => "Gatherables",
-        NavCategory.Breakables => "Breakables",
-        NavCategory.Destructibles => "Destructibles",
-        NavCategory.Fences => "Broken fences",
-        NavCategory.GravesToDecorate => "Graves to decorate",
-        NavCategory.Buildables => "Built objects",
-        NavCategory.Roofs => "Roofs",
-        NavCategory.FishingSpots => "Fishing spots",
-        NavCategory.ZombieMines => "Zombie mines",
-        _ => "Other"
-    };
+    // One lang key per category ("nav.category.Quests" …), so the tracker's headings translate
+    // with the rest of the mod instead of being fixed English.
+    private static string CategoryName(NavCategory cat) => Loc.Get("nav.category." + cat);
 
     // ---- Item cycling within the current category (PageUp / PageDown) -------
 
@@ -974,7 +940,7 @@ internal static class ObjectNavigator
         var list = CurrentList;
         if (list.Count == 0)
         {
-            ScreenReader.Say("No navigable objects nearby", interrupt: false);
+            ScreenReader.Say(Loc.Get("nav.none_nearby"), interrupt: false);
             return;
         }
 
@@ -983,7 +949,7 @@ internal static class ObjectNavigator
             if (_selectedIndex >= list.Count) _selectedIndex = 0;
             var target = list[_selectedIndex];
             var dir = DirectionTo(target);
-            var message = $"{target.Label}, {dir}{DistanceText(target.Distance)}, {_selectedIndex + 1} of {list.Count}{SkullSuffix(target)}";
+            var message = Loc.Fmt("nav.entry", target.Label, dir, DistanceText(target.Distance), _selectedIndex + 1, list.Count, SkullSuffix(target));
             ScreenReader.Say(message, interrupt: false);
             _log?.LogInfo($"[NAVIGATOR] Announced: {message}");
         }
@@ -1006,13 +972,13 @@ internal static class ObjectNavigator
                 return;
             }
         }
-        ScreenReader.Say("No navigable objects nearby", interrupt: false);
+        ScreenReader.Say(Loc.Get("nav.none_nearby"), interrupt: false);
     }
 
     private static string DistanceText(float worldDistance)
     {
         var tiles = worldDistance / TileSize;
-        return $"{tiles:F0} meters away";
+        return Loc.Fmt("nav.meters_away", tiles.ToString("F0"));
     }
 
     // Compass heading from the player to a target, formatted as a trailing ", " so it can
@@ -1042,7 +1008,7 @@ internal static class ObjectNavigator
         var list = CurrentList;
         if (list.Count == 0)
         {
-            ScreenReader.Say("Nothing selected to walk to", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.nothing_selected"), interrupt: true);
             return;
         }
 
@@ -1092,7 +1058,7 @@ internal static class ObjectNavigator
         var dr = GameRefs.DungeonRoot();
         if (dr == null || !dr.dungeon_is_loaded_now)
         {
-            ScreenReader.Say("Not in a dungeon", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.not_in_dungeon"), interrupt: true);
             return;
         }
 
@@ -1114,14 +1080,14 @@ internal static class ObjectNavigator
 
         if (best == null)
         {
-            ScreenReader.Say("No way out found on this level", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.no_way_out"), interrupt: true);
             return;
         }
 
         var target = new NavigationTarget
         {
             Object = best,
-            Label = "Dungeon exit, way out",
+            Label = Loc.Get("door.dungeon_exit"),
             Position = best.pos,
             Distance = bestDist
         };
@@ -1140,10 +1106,10 @@ internal static class ObjectNavigator
         {
             _escapeTeleportArmed = false;
             _log?.LogWarning($"[NAVIGATOR] Escape-to-exit: confirmed teleport to {best.obj_id} at {standPos}");
-            if (TeleportPlayerTo(standPos, "Moved you to the dungeon exit. Press E to leave.",
+            if (TeleportPlayerTo(standPos, Loc.Get("nav.moved_to_exit"),
                                  () => SetArrivedTarget(best)))
                 return;
-            ScreenReader.Say("Could not move you to the exit.", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.could_not_move_to_exit"), interrupt: true);
             return;
         }
         _escapeTeleportArmed = false;
@@ -1189,7 +1155,7 @@ internal static class ObjectNavigator
     {
         _escapeTeleportArmed = true;
         _escapeTeleportArmedAt = Time.realtimeSinceStartup;
-        ScreenReader.Say("No path to the dungeon exit from here. Press L again to be moved onto it.",
+        ScreenReader.Say(Loc.Get("nav.no_path_to_exit"),
                          interrupt: true);
     }
 
@@ -1226,7 +1192,7 @@ internal static class ObjectNavigator
             _escalatePending = false;
             _shortWalkTarget = target;        // kept so an A* failure can escalate to fence-aware routing
             _walkFacePos = facePos;           // face it on arrival so plain E interacts/picks up
-            ScreenReader.Say($"Walking to {target.Label}, {DistanceText(target.Distance)}", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("nav.walking_to", target.Label, DistanceText(target.Distance)), interrupt: true);
             StartWalk(dest, target.Label, MovementComponent.GoToMethod.AStar);
         }
         finally
@@ -1252,7 +1218,7 @@ internal static class ObjectNavigator
         var pp = MainGame.me?.player?.pos ?? Vector2.zero;
         _longWalkProgressPos = pp;
         _longWalkAnnouncePos = pp;
-        ScreenReader.Say($"Walking to {target.Label}, {DirectionTo(target)}{DistanceText(Vector2.Distance(pp, target.Position))}", interrupt: true);
+        ScreenReader.Say(Loc.Fmt("nav.walking_to_dir", target.Label, DirectionTo(target), DistanceText(Vector2.Distance(pp, target.Position))), interrupt: true);
         _log?.LogInfo($"[NAVIGATOR] Long walk started to {target.Label}");
 
         // Ask the whole-map NPC navmesh for an obstacle-aware route to the interaction tile;
@@ -1435,7 +1401,7 @@ internal static class ObjectNavigator
             _walkFacePos = target.Position;
             FacePlayerAtTarget();
             SetArrivedTarget(target.Object);
-            ScreenReader.Say($"At the door. Press E to step outside, then go to {_exitAssistLabel} again.", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("nav.at_the_door", _exitAssistLabel), interrupt: true);
             _log?.LogInfo("[NAVIGATOR] Exit-assist reached door");
             return;
         }
@@ -1467,7 +1433,7 @@ internal static class ObjectNavigator
                 _walkFacePos = target.Position;
                 FacePlayerAtTarget();
                 SetArrivedTarget(target.Object);
-                ScreenReader.Say($"Arrived at {target.Label}, {DistanceText(remaining)}", interrupt: true);
+                ScreenReader.Say(Loc.Fmt("nav.arrived_at", target.Label, DistanceText(remaining)), interrupt: true);
             }
             else if (remaining <= FinalApproachReach)
             {
@@ -1481,7 +1447,7 @@ internal static class ObjectNavigator
             {
                 _walkFacePos = target.Position;
                 FacePlayerAtTarget();
-                ScreenReader.Say($"As close as auto-walk can get to {target.Label}, {DistanceText(remaining)}. It's {DirectionTo(target)}walk the rest yourself.", interrupt: true);
+                ScreenReader.Say(Loc.Fmt("nav.as_close_as_possible", target.Label, DistanceText(remaining), DirectionTo(target)), interrupt: true);
             }
         }
         else if (_finalPartial)
@@ -1492,7 +1458,7 @@ internal static class ObjectNavigator
             _walkFacePos = target.Position;
             FacePlayerAtTarget();
             SetArrivedTarget(target.Object);
-            ScreenReader.Say($"Arrived as close as I can walk to {target.Label}, {DistanceText(Vector2.Distance(playerPos, target.Position))}. Look for the entrance ahead.", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("nav.arrived_near_entrance", target.Label, DistanceText(Vector2.Distance(playerPos, target.Position))), interrupt: true);
             _log?.LogInfo($"[NAVIGATOR] Reached closest navmesh point to {target.Label}");
         }
         else
@@ -1535,7 +1501,7 @@ internal static class ObjectNavigator
                 _longWalkDest = ApproachPoint(door.Value.Position);
                 _routeReachesTarget = true;
                 _finalPartial = false;
-                ScreenReader.Say($"You are inside a building. Walking to the nearest door — press E to step outside, then go to {_exitAssistLabel} again.", interrupt: true);
+                ScreenReader.Say(Loc.Fmt("nav.inside_building", _exitAssistLabel), interrupt: true);
                 _log?.LogInfo($"[NAVIGATOR] Inside building; exit-assist to {door.Value.Label}");
                 RequestGraph0Route(MainGame.me.player.pos, _longWalkDest);
                 return;
@@ -1653,7 +1619,7 @@ internal static class ObjectNavigator
             return;
         }
 
-        ScreenReader.Say($"No clear auto-walk path. Switching to manual guidance to {target.Label}.", interrupt: true);
+        ScreenReader.Say(Loc.Fmt("nav.manual_guidance", target.Label), interrupt: true);
         StartBeacon(target);
     }
 
@@ -1667,7 +1633,7 @@ internal static class ObjectNavigator
         ReleaseScriptControl();
         _isWalking = false;
         if (announce)
-            ScreenReader.Say("Walking stopped", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.walking_stopped"), interrupt: true);
         _log?.LogInfo("[NAVIGATOR] Long walk stopped");
     }
 
@@ -1707,7 +1673,7 @@ internal static class ObjectNavigator
         else if (!_isWalking || ++_longWalkStuckTicks >= StuckTickLimit)
         {
             _longWalkActive = false;
-            ScreenReader.Say($"Auto-walk is blocked. Switching to manual guidance to {target.Label}.", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("nav.autowalk_blocked", target.Label), interrupt: true);
             _log?.LogWarning($"[NAVIGATOR] Long walk stuck near {playerPos} (walking={_isWalking}), beacon fallback");
             StartBeacon(target);
             return;
@@ -1717,7 +1683,7 @@ internal static class ObjectNavigator
         if (Vector2.Distance(playerPos, _longWalkAnnouncePos) >= AnnounceProgressDistance)
         {
             _longWalkAnnouncePos = playerPos;
-            ScreenReader.Say($"{target.Label}, {DistanceText(Vector2.Distance(playerPos, target.Position))}", interrupt: false);
+            ScreenReader.Say(Loc.Fmt("nav.label_distance", target.Label, DistanceText(Vector2.Distance(playerPos, target.Position))), interrupt: false);
         }
     }
 
@@ -1734,7 +1700,7 @@ internal static class ObjectNavigator
         var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
         _beaconLastAnnouncePos = playerPos;
         _log?.LogInfo($"[NAVIGATOR] Beacon started to {target.Label}");
-        AnnounceBeacon(playerPos, prefix: "Guiding to ");
+        AnnounceBeacon(playerPos, prefix: Loc.Get("nav.guiding_to_prefix"));
     }
 
     internal static void StopBeacon(bool announce = true)
@@ -1742,7 +1708,7 @@ internal static class ObjectNavigator
         if (!_beaconActive) return;
         _beaconActive = false;
         if (announce)
-            ScreenReader.Say("Guidance stopped", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.guidance_stopped"), interrupt: true);
         _log?.LogInfo("[NAVIGATOR] Beacon stopped");
     }
 
@@ -1769,7 +1735,7 @@ internal static class ObjectNavigator
         {
             var target = _beaconTarget;
             _beaconActive = false;
-            ScreenReader.Say($"{target.Label} is close. Walking the rest of the way.", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("nav.close_walking_rest", target.Label), interrupt: true);
             _log?.LogInfo($"[NAVIGATOR] Beacon handoff to A* for {target.Label} at {dist:F0}u");
             WalkToTarget(target);
             return;
@@ -1787,7 +1753,7 @@ internal static class ObjectNavigator
     {
         var dir = CompassDirection(playerPos, _beaconTarget.Position);
         var dist = Vector2.Distance(playerPos, _beaconTarget.Position);
-        ScreenReader.Say($"{prefix}{_beaconTarget.Label}, {dir}, {DistanceText(dist)}", interrupt: true);
+        ScreenReader.Say(Loc.Fmt("nav.beacon", prefix, _beaconTarget.Label, dir, DistanceText(dist)), interrupt: true);
     }
 
     /// <summary>
@@ -1797,7 +1763,7 @@ internal static class ObjectNavigator
     private static string CompassDirection(Vector2 from, Vector2 to)
     {
         var d = to - from;
-        if (d.sqrMagnitude < 1f) return "here";
+        if (d.sqrMagnitude < 1f) return Loc.Get("compass.here");
 
         // 0 deg = east, increasing counter-clockwise. Convert to a 0..8 sector.
         float angle = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
@@ -1805,14 +1771,14 @@ internal static class ObjectNavigator
         int sector = Mathf.RoundToInt(angle / 45f) % 8;
         return sector switch
         {
-            0 => "east",
-            1 => "north-east",
-            2 => "north",
-            3 => "north-west",
-            4 => "west",
-            5 => "south-west",
-            6 => "south",
-            7 => "south-east",
+            0 => Loc.Get("compass.east"),
+            1 => Loc.Get("compass.north_east"),
+            2 => Loc.Get("compass.north"),
+            3 => Loc.Get("compass.north_west"),
+            4 => Loc.Get("compass.west"),
+            5 => Loc.Get("compass.south_west"),
+            6 => Loc.Get("compass.south"),
+            7 => Loc.Get("compass.south_east"),
             _ => "",
         };
     }
@@ -2311,7 +2277,7 @@ internal static class ObjectNavigator
                     _log?.LogWarning($"[NAVIGATOR] Player wedged at {pp}; freeing to connected node {nodePos} " +
                                      $"({Vector2.Distance(pp, nodePos):F0}u)");
                     return TeleportPlayerTo(nodePos,
-                        "You were stuck in the scenery. Moved you to walkable ground.", onFreed);
+                        Loc.Get("nav.unstuck"), onFreed);
                 }
             }
         }
@@ -2391,7 +2357,7 @@ internal static class ObjectNavigator
             if (character == null)
             {
                 _log?.LogError("[NAVIGATOR] Player character component is null");
-                ScreenReader.Say("Cannot walk right now", interrupt: true);
+                ScreenReader.Say(Loc.Get("nav.cannot_walk"), interrupt: true);
                 _isWalking = false;
                 return;
             }
@@ -2426,7 +2392,7 @@ internal static class ObjectNavigator
                     FacePlayerAtTarget();
                     // Bias vanilla E onto the object we walked to, not a closer neighbour.
                     SetArrivedTarget(_shortWalkTarget.Object);
-                    ScreenReader.Say($"Arrived at {label}", interrupt: true);
+                    ScreenReader.Say(Loc.Fmt("nav.arrived_at_simple", label), interrupt: true);
                     _log?.LogInfo($"[NAVIGATOR] Arrived at {label} ({method})");
                 },
                 on_failed: () =>
@@ -2483,7 +2449,7 @@ internal static class ObjectNavigator
                         // control so the player is never locked out, then report.
                         ReleaseScriptControl();
                         _isWalking = false;
-                        ScreenReader.Say($"Could not reach {label}", interrupt: true);
+                        ScreenReader.Say(Loc.Fmt("nav.could_not_reach", label), interrupt: true);
                         _log?.LogWarning($"[NAVIGATOR] Direct walk failed to {label}");
                     }
                 },
@@ -2502,7 +2468,7 @@ internal static class ObjectNavigator
         {
             _log?.LogError($"[NAVIGATOR] Error starting walk: {ex.Message}\n{ex.StackTrace}");
             ReleaseScriptControl();
-            ScreenReader.Say("Walk failed", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.walk_failed"), interrupt: true);
             _isWalking = false;
         }
     }
@@ -2602,7 +2568,7 @@ internal static class ObjectNavigator
             _hasBusyPos = false;
             ClearArrivedTarget();
             ReleaseScriptControl();
-            ScreenReader.Say("Navigation cancelled", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.cancelled"), interrupt: true);
             _log?.LogInfo("[NAVIGATOR] Navigation aborted after teleport");
         }
         catch (Exception ex)
@@ -2620,7 +2586,7 @@ internal static class ObjectNavigator
             ReleaseScriptControl();
             _isWalking = false;
             _walkWatchdog = 0;
-            ScreenReader.Say("Walking stopped", interrupt: true);
+            ScreenReader.Say(Loc.Get("nav.walking_stopped"), interrupt: true);
             _log?.LogInfo("[NAVIGATOR] Walking stopped");
         }
         catch (Exception ex)
@@ -3184,7 +3150,7 @@ internal static class ObjectNavigator
             // show up with the objective and vanish when it completes — same lifetime as an arrow.
             // ExactPoint on both: these fire on the player collider ENTERING them, and the normal
             // approach offset stops about a tile short, i.e. outside.
-            foreach (var (npcId, taskId, gdPoint, label) in TaskGdPointLandmarks)
+            foreach (var (npcId, taskId, gdPoint, labelKey) in TaskGdPointLandmarks)
             {
                 if (!IsTaskVisible(npcId, taskId)) continue;
                 // GD points can be disabled per quest state and GetGDPointBy* skip disabled ones,
@@ -3194,21 +3160,21 @@ internal static class ObjectNavigator
                 if (point == null) continue;
                 questList.Add(new NavigationTarget
                 {
-                    Label = label,
+                    Label = Loc.Get(labelKey),
                     Position = point.pos,
                     Distance = Vector2.Distance(point.pos, playerPos),
                     ExactPoint = true
                 });
             }
 
-            foreach (var (npcId, taskId, objectName, label) in TaskObjectLandmarks)
+            foreach (var (npcId, taskId, objectName, labelKey) in TaskObjectLandmarks)
             {
                 if (!IsTaskVisible(npcId, taskId)) continue;
                 var objPos = TaskObjectPosition(objectName);
                 if (objPos == null) continue;
                 questList.Add(new NavigationTarget
                 {
-                    Label = label,
+                    Label = Loc.Get(labelKey),
                     Position = objPos.Value,
                     Distance = Vector2.Distance(objPos.Value, playerPos),
                     ExactPoint = true
@@ -3280,14 +3246,14 @@ internal static class ObjectNavigator
     // why they belong in Quests, not Landmarks: a Landmark is a permanent feature of the map, and
     // someone hunting an objective looks under Quests. Gathered in GatherQuestTargets.
     // (npc id, task id, GD point gd_tag/name, spoken label).
-    private static readonly (string npcId, string taskId, string gdPoint, string label)[] TaskGdPointLandmarks =
+    private static readonly (string npcId, string taskId, string gdPoint, string labelKey)[] TaskGdPointLandmarks =
     {
         // Snake's trap for the vampire hunter (task snake_trap: "meet me at the Witch Hill, right
         // above the road"). He is teleported to gd_cultist_near_stone (7272, -1452) and locked
         // there, ~6 m north of the mountain road and ~35 m south-west of the burning site — open
         // ground below the hill, i.e. no zone anchors it. Bring one wooden plank; the flow charges
         // it as the price of the "here's a plank" answer.
-        ("npc_cultist", "snake_trap", "gd_cultist_near_stone", "Snake meeting point"),
+        ("npc_cultist", "snake_trap", "gd_cultist_near_stone", "landmark.snake_meeting_point"),
     };
 
     // Task-gated quest targets anchored on a named scene OBJECT rather than a GD point. Same
@@ -3297,7 +3263,7 @@ internal static class ObjectNavigator
     // interior preset, so there is no GD point to aim at AND no WorldGameObject for the normal
     // object scan to pick up — without an entry here they are unreachable by any category.
     // (npc id, task id, object/prefab name, spoken label).
-    private static readonly (string npcId, string taskId, string objectName, string label)[] TaskObjectLandmarks =
+    private static readonly (string npcId, string taskId, string objectName, string labelKey)[] TaskObjectLandmarks =
     {
         // "Bring the pagan amulet to the last room of the eighth dungeon floor" (Game of Crone).
         // The trigger is the WSO gd_zone_refugees_exit_8, baked into the Exit_8 exit-room preset at
@@ -3305,7 +3271,7 @@ internal static class ObjectNavigator
         // room, with a collider only about a tile wide. Its flow script on_enter_gd_zone_s23 fires
         // on zone ENTRY and additionally wants floor 8 cleared plus the amulet in the inventory, so
         // ExactPoint matters here exactly as it does for the cliff meeting: a tile short is outside.
-        ("player", "s_ev_22_goto_8lvl", "gd_zone_refugees_exit_8", "Amulet delivery spot"),
+        ("player", "s_ev_22_goto_8lvl", "gd_zone_refugees_exit_8", "landmark.amulet_delivery_spot"),
 
         // "Bring the leg to the ghost on the eighth dungeon floor" (task s_ev_28_leg_return, after
         // the golem fight). Same trigger object as the amulet above — on_enter_gd_zone_s23 has a
@@ -3313,7 +3279,7 @@ internal static class ObjectNavigator
         // skeleton_leg in the inventory runs refugee_ev_s29_2, which is what sets this task to
         // Complete. No dungeon-cleared condition on this branch, so the leg can be handed over on a
         // revisit; only the two tasks differ, hence a row of its own rather than a shared one.
-        ("npc_ghost_priest", "s_ev_28_leg_return", "gd_zone_refugees_exit_8", "Ghost, leg delivery spot"),
+        ("npc_ghost_priest", "s_ev_28_leg_return", "gd_zone_refugees_exit_8", "landmark.ghost_leg_delivery_spot"),
     };
 
     /// <summary>
@@ -3413,11 +3379,11 @@ internal static class ObjectNavigator
     // prettified id so every zone in the world is still reachable.
     private static readonly Dictionary<string, string> ZoneLabelOverrides = new()
     {
-        ["graveyard"] = "Graveyard, home",
-        ["church"] = "Church",
-        ["players_tavern"] = "Player's tavern, DLC",
-        ["player_tavern_cellar"] = "Player's tavern cellar, DLC",
-        ["refugees_camp"] = "Refugee camp",
+        ["graveyard"] = "zone.graveyard",
+        ["church"] = "zone.church",
+        ["players_tavern"] = "zone.players_tavern",
+        ["player_tavern_cellar"] = "zone.player_tavern_cellar",
+        ["refugees_camp"] = "zone.refugees_camp",
     };
 
     /// <summary>
@@ -3750,8 +3716,8 @@ internal static class ObjectNavigator
 
     private static string ZoneLabel(string zoneId)
     {
-        if (ZoneLabelOverrides.TryGetValue(zoneId, out var nice))
-            return nice;
+        if (ZoneLabelOverrides.TryGetValue(zoneId, out var niceKey))
+            return Loc.Get(niceKey);
 
         // Prettify the raw id: "flat_under_waterflow_3" -> "Flat under waterflow 3".
         var text = zoneId.Replace('_', ' ').Replace('-', ' ').Trim();
@@ -3995,7 +3961,7 @@ internal static class ObjectNavigator
     private static string PalletLabel(WorldGameObject obj, string baseLabel)
     {
         int n = PalletCrateCount(obj);
-        return n <= 0 ? baseLabel : $"{baseLabel}, {n} {(n == 1 ? "crate" : "crates")}";
+        return n <= 0 ? baseLabel : Loc.Plural("nav.pallet_crates", n, baseLabel, n);
     }
 
     private static bool TryClassify(WorldGameObject obj, out NavCategory category)
@@ -4643,7 +4609,7 @@ internal static class ObjectNavigator
             if (fence == null) return false;
             float dur = fence.durability;
             if (dur >= WornFenceThreshold) return false;
-            desc = $"Worn fence {Mathf.RoundToInt(Mathf.Clamp01(dur) * 100f)} percent";
+            desc = Loc.Fmt("grave.worn_fence", Mathf.RoundToInt(Mathf.Clamp01(dur) * 100f));
             return true;
         }
         catch
@@ -4673,9 +4639,9 @@ internal static class ObjectNavigator
             bool noCross = cross == null || cross.IsEmpty();
             if (!noFence && !noCross) return false;
 
-            desc = (noFence && noCross) ? "Undecorated grave, needs cross and fence"
-                 : noCross ? "Grave needs a cross"
-                 : "Grave needs a fence";
+            desc = Loc.Get((noFence && noCross) ? "grave.needs_both"
+                 : noCross ? "grave.needs_cross"
+                 : "grave.needs_fence");
             return true;
         }
         catch
@@ -5053,20 +5019,7 @@ internal static class ObjectNavigator
     /// Planungstisch" can't connect to — so we lead with this word and keep the zone name
     /// only to tell multiple desks apart.
     /// </summary>
-    private static string PlanningTableWord()
-    {
-        string code = "";
-        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
-        return code switch
-        {
-            "de" => "Planungstisch",
-            "fr" => "Table de planification",
-            "es" => "Mesa de planificación",
-            "it" => "Tavolo di progettazione",
-            "ru" => "Стол планирования",
-            _ => "Planning table",
-        };
-    }
+    private static string PlanningTableWord() => Loc.Get("nav.planning_table");
 
     /// <summary>
     /// Distinct, informative label for a part of a zombie mine cluster (base building, production
@@ -5076,7 +5029,7 @@ internal static class ObjectNavigator
     /// </summary>
     private static string MineLabel(WorldGameObject obj)
     {
-        const string mine = "Zombiemine";
+        string mine = Loc.Get("mine.name");
         string id = obj?.obj_id ?? "";
         try
         {
@@ -5097,13 +5050,13 @@ internal static class ObjectNavigator
                 string product = MineBenchProduct(obj);
                 string state = worker ? MineWord("working") : MineWord("empty");
                 return string.IsNullOrEmpty(product)
-                    ? $"{mine}, {MineWord("bench")} ({state})"
-                    : $"{mine}: {product} ({state})";
+                    ? Loc.Fmt("mine.bench_generic", mine, MineWord("bench"), state)
+                    : Loc.Fmt("mine.bench_product", mine, product, state);
             }
 
             // Plain enclosure walls — mark them so they don't masquerade as the staffing gate/bench.
             if (id.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0)
-                return $"{mine} ({MineWord("fence")})";
+                return Loc.Fmt("mine.fence", mine, MineWord("fence"));
         }
         catch { }
 
@@ -5209,24 +5162,7 @@ internal static class ObjectNavigator
     }
 
     /// <summary>Localized descriptor words used in mine labels.</summary>
-    private static string MineWord(string which)
-    {
-        string code = "";
-        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
-        switch (which)
-        {
-            case "fence":
-                return code switch { "de" => "Zaun", "fr" => "clôture", "es" => "valla", "it" => "recinto", "ru" => "забор", _ => "fence" };
-            case "bench":
-                return code switch { "de" => "Arbeitsplatz", "fr" => "poste", "es" => "puesto", "it" => "postazione", "ru" => "рабочее место", _ => "workbench" };
-            case "working":
-                return code switch { "de" => "Zombie arbeitet", "fr" => "zombie au travail", "es" => "zombi trabajando", "it" => "zombie al lavoro", "ru" => "зомби работает", _ => "zombie working" };
-            case "empty":
-                return code switch { "de" => "frei", "fr" => "vide", "es" => "vacío", "it" => "vuoto", "ru" => "пусто", _ => "empty" };
-            default:
-                return which;
-        }
-    }
+    private static string MineWord(string which) => Loc.Get("mine.word." + which);
 
     /// <summary>
     /// Distinct label for a dungeon mining vein (obj_id "dungeon_source_&lt;resource&gt;", e.g.
@@ -5236,17 +5172,14 @@ internal static class ObjectNavigator
     /// </summary>
     private static string DungeonSourceLabel(string objId)
     {
-        string code = "";
-        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
-
         string res;
-        if (Has(objId, "diamond")) res = code switch { "de" => "Diamant", "fr" => "diamant", "es" => "diamante", "it" => "diamante", "ru" => "алмаз", _ => "diamond" };
-        else if (Has(objId, "gold")) res = code switch { "de" => "Gold", "fr" => "or", "es" => "oro", "it" => "oro", "ru" => "золото", _ => "gold" };
-        else if (Has(objId, "silver")) res = code switch { "de" => "Silber", "fr" => "argent", "es" => "plata", "it" => "argento", "ru" => "серебро", _ => "silver" };
-        else if (Has(objId, "iron")) res = code switch { "de" => "Eisen", "fr" => "fer", "es" => "hierro", "it" => "ferro", "ru" => "железо", _ => "iron" };
-        else if (Has(objId, "marble")) res = code switch { "de" => "Marmor", "fr" => "marbre", "es" => "mármol", "it" => "marmo", "ru" => "мрамор", _ => "marble" };
-        else if (Has(objId, "granite")) res = code switch { "de" => "Granit", "fr" => "granite", "es" => "granito", "it" => "granito", "ru" => "гранит", _ => "granite" };
-        else if (Has(objId, "stone")) res = code switch { "de" => "Stein", "fr" => "pierre", "es" => "piedra", "it" => "pietra", "ru" => "камень", _ => "stone" };
+        if (Has(objId, "diamond")) res = Loc.Get("resource.diamond");
+        else if (Has(objId, "gold")) res = Loc.Get("resource.gold");
+        else if (Has(objId, "silver")) res = Loc.Get("resource.silver");
+        else if (Has(objId, "iron")) res = Loc.Get("resource.iron");
+        else if (Has(objId, "marble")) res = Loc.Get("resource.marble");
+        else if (Has(objId, "granite")) res = Loc.Get("resource.granite");
+        else if (Has(objId, "stone")) res = Loc.Get("resource.stone");
         else
         {
             // Unknown resource: fall back to the raw suffix after "dungeon_source_", capitalized,
@@ -5257,9 +5190,9 @@ internal static class ObjectNavigator
             res = suffix.Length > 0 ? char.ToUpperInvariant(suffix[0]) + suffix.Substring(1) : objId;
         }
 
-        string vein = code switch { "de" => "Ader", "fr" => "filon", "es" => "veta", "it" => "vena", "ru" => "жила", _ => "vein" };
-        // German compounds naturally ("Diamant-Ader"); other locales read "<resource> vein".
-        return code == "de" ? $"{res}-{vein}" : $"{res} {vein}";
+        // German compounds naturally ("Diamant-Ader"); other locales read "<resource> vein". Which
+        // it is comes from the lang file's own "nav.vein" pattern, not a hard-coded locale check.
+        return Loc.Fmt("nav.vein", res);
 
         static bool Has(string s, string kw) => s.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0;
     }
@@ -5269,20 +5202,7 @@ internal static class ObjectNavigator
     /// player knows it can't be used to build yet. The actual repair materials are read out by the
     /// proximity/E repair readout (InteractionDetector.WithRepairInfo) when the player reaches it.
     /// </summary>
-    private static string BrokenWord()
-    {
-        string code = "";
-        try { code = (GJL.GetCurrentLocaleCode() ?? "").ToLowerInvariant(); } catch { }
-        return code switch
-        {
-            "de" => "kaputt, reparieren",
-            "fr" => "cassé, à réparer",
-            "es" => "roto, reparar",
-            "it" => "rotto, da riparare",
-            "ru" => "сломан, починить",
-            _ => "broken, repair it",
-        };
-    }
+    private static string BrokenWord() => Loc.Get("nav.broken_repair_it");
 
     private static string GetObjectLabelSafe(WorldGameObject obj)
     {
@@ -5299,8 +5219,8 @@ internal static class ObjectNavigator
             if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
                 obj.obj_id.IndexOf("dungeon_exit", StringComparison.OrdinalIgnoreCase) >= 0)
                 return obj.obj_id.IndexOf("dungeon_exit2", StringComparison.OrdinalIgnoreCase) >= 0
-                    ? "Dungeon stairs down, leads deeper"
-                    : "Dungeon exit, way out";
+                    ? Loc.Get("door.dungeon_stairs_down")
+                    : Loc.Get("door.dungeon_exit");
 
             // Dungeon mining veins (obj_id "dungeon_source_diamond"/_gold/…): the crystal/metal
             // formations broken with the pickaxe. They localize to a generic rock name, so give
@@ -5318,7 +5238,7 @@ internal static class ObjectNavigator
                 obj.obj_id.IndexOf("morgue_throw", StringComparison.OrdinalIgnoreCase) >= 0 &&
                 obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                return "Broken morgue, can't throw bodies here";
+                return Loc.Get("nav.broken_morgue");
             }
 
             // A placed zombie mine is a cluster of objects that ALL localize to the generic
@@ -5362,10 +5282,10 @@ internal static class ObjectNavigator
                 var planning = PlanningTableWord();
                 var label = string.IsNullOrEmpty(zoneName) || zoneName == planning
                     ? planning
-                    : $"{planning}: {zoneName}";
+                    : Loc.Fmt("nav.planning_table_zone", planning, zoneName);
                 bool broken = !string.IsNullOrEmpty(obj.obj_id) &&
                               obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0;
-                return broken ? $"{label} ({BrokenWord()})" : label;
+                return broken ? Loc.Fmt("nav.label_broken", label, BrokenWord()) : label;
             }
 
             // Story rubble cleared with the hammer (see IsScriptedCleanupProp). Nothing in the name
@@ -5373,7 +5293,7 @@ internal static class ObjectNavigator
             // so spell out the tool right in the tracker entry. (The name itself comes from
             // InteractionDetector.UntranslatedObjectNames; the game translates neither id.)
             if (IsScriptedCleanupProp(obj))
-                return $"{InteractionDetector.GetObjectLabel(obj)}, clear with hammer";
+                return Loc.Fmt("nav.clear_with_hammer", InteractionDetector.GetObjectLabel(obj));
 
             // Smashable loot props (Breakables) are the one category whose action is an ATTACK, not
             // E and not F: their tool_action is the Sword, and HPActionComponent deliberately shows
@@ -5386,7 +5306,7 @@ internal static class ObjectNavigator
             if (obj?.obj_def != null &&
                 obj.obj_def.interaction_type == ObjectDefinition.InteractionType.None &&
                 IsBreakableLootProp(obj))
-                return $"{InteractionDetector.GetObjectLabel(obj)}, attack to smash";
+                return Loc.Fmt("nav.attack_to_smash", InteractionDetector.GetObjectLabel(obj));
 
             // The three stages of a self-built grave share one id family, and the generic grave
             // relabel below would read them out as "Grave grave empty place" / "Grave grave empty"
@@ -5399,15 +5319,15 @@ internal static class ObjectNavigator
             if (graveStageId == "grave_empty_place")
             {
                 return InteractionDetector.HasTranslation(graveStageId)
-                    ? $"{InteractionDetector.LocalizedObjectName(graveStageId)}, dig it out"
-                    : "Marked grave plot, dig it out";
+                    ? Loc.Fmt("grave.dig_it_out", InteractionDetector.LocalizedObjectName(graveStageId))
+                    : Loc.Get("grave.marked_plot");
             }
             if (graveStageId == "grave_empty" || graveStageId == "grave_ground")
             {
                 var hdr = HoldsBody(obj) ? "grave_body_hdr" : "grave_empty_hdr";
                 if (InteractionDetector.HasTranslation(hdr))
                     return InteractionDetector.LocalizedObjectName(hdr);
-                return HoldsBody(obj) ? "Grave with a body" : "Empty grave";
+                return Loc.Get(HoldsBody(obj) ? "grave.with_body" : "grave.empty");
             }
 
             // Special handling for graves by checking obj_id. Skip build/craft/chest
@@ -5421,7 +5341,7 @@ internal static class ObjectNavigator
                 var cleanId = obj.obj_id.Replace("_", " ").Replace("-", " ");
                 if (cleanId.Length > 0)
                     cleanId = char.ToUpper(cleanId[0]) + cleanId.Substring(1);
-                return "Grave " + cleanId.Trim();
+                return Loc.Fmt("grave.generic", cleanId.Trim());
             }
 
             return InteractionDetector.GetObjectLabel(obj);
@@ -5429,7 +5349,7 @@ internal static class ObjectNavigator
         catch (Exception ex)
         {
             _log?.LogWarning($"[NAVIGATOR] Failed to get label for object {obj?.name}: {ex.Message}");
-            return "Unknown Object";
+            return Loc.Get("common.unknown_object");
         }
     }
 }

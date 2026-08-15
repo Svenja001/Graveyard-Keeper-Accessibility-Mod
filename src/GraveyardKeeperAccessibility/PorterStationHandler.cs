@@ -59,7 +59,7 @@ internal static class PorterStationHandler
             elements.Add(new GUIElement
             {
                 Go = gui.gameObject,
-                Label = "Take zombie back",
+                Label = Loc.Get("porter.take_zombie_back"),
                 Type = ElementType.Button,
                 OnActivate = () => TakeZombie(gui)
             });
@@ -78,7 +78,7 @@ internal static class PorterStationHandler
         string status;
         if (station == null || !station.HasLinkedWorker())
         {
-            status = "Transport station. No zombie assigned. Bring a zombie here to carry goods.";
+            status = Loc.Get("porter.intro.no_zombie");
         }
         else
         {
@@ -86,26 +86,25 @@ internal static class PorterStationHandler
             switch (station.state)
             {
                 case PorterStation.PorterState.Waiting:
-                    state = "Zombie assigned, waiting for goods to carry.";
+                    state = Loc.Get("porter.state.waiting");
                     break;
                 case PorterStation.PorterState.GoingToDestination:
-                    state = "Zombie assigned, carrying goods to the destination.";
+                    state = Loc.Get("porter.state.to_destination");
                     break;
                 case PorterStation.PorterState.GoingToSource:
-                    state = "Zombie assigned, returning for more.";
+                    state = Loc.Get("porter.state.to_source");
                     break;
                 default:
-                    state = "Zombie assigned.";
+                    state = Loc.Get("porter.state.assigned");
                     break;
             }
-            status = "Transport station. " + state;
+            status = Loc.Fmt("porter.intro.with_zombie", state);
         }
 
         var goods = CountGoods(gui);
         if (goods == 0)
-            return status + " No goods set up for this route.";
-        var noun = goods == 1 ? "good" : "goods";
-        return $"{status} {goods} {noun}. Press Enter on each to turn carrying on or off.";
+            return status + " " + Loc.Get("porter.no_goods");
+        return status + " " + Loc.Plural("porter.goods", goods, goods);
     }
 
     private static int CountGoods(PorterStationGUI gui)
@@ -128,11 +127,11 @@ internal static class PorterStationHandler
         try
         {
             var name = ScreenReader.StripNguiCodes(cell?.item?.definition?.GetItemName() ?? cell?.item?.id ?? "")?.Trim();
-            if (string.IsNullOrWhiteSpace(name)) name = "goods";
+            if (string.IsNullOrWhiteSpace(name)) name = Loc.Get("porter.generic_goods");
             var on = cell?.item != null && cell.item.value == 1;
-            return on ? $"{name}, transporting" : $"{name}, not transporting";
+            return Loc.Fmt(on ? "porter.row.transporting" : "porter.row.not_transporting", name);
         }
-        catch { return "goods"; }
+        catch { return Loc.Get("porter.generic_goods"); }
     }
 
     // Flip a good on/off by driving the game's own OnItemClicked (value cycles 1->2->1 and
@@ -159,7 +158,7 @@ internal static class PorterStationHandler
     {
         try
         {
-            ScreenReader.Say("Taking zombie back", interrupt: true);
+            ScreenReader.Say(Loc.Get("porter.taking_zombie_back"), interrupt: true);
             gui.TakeWorker();
         }
         catch (Exception ex)

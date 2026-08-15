@@ -64,7 +64,7 @@ internal static class InteractionDetector
                 if (gameNearest != null && IsTutorialDisabled(gameNearest))
                 {
                     var label = GetObjectLabel(gameNearest);
-                    ScreenReader.Say($"{label}. Not available during the intro.", interrupt: true);
+                    ScreenReader.Say(Loc.Fmt("interaction.intro_blocked", label), interrupt: true);
                     _lastAnnouncedObject = AnnounceKey(gameNearest);
                 }
                 else
@@ -136,7 +136,7 @@ internal static class InteractionDetector
 
             var name = ScreenReader.StripNguiCodes(drop.res.definition.GetItemName() ?? "").Trim();
             if (string.IsNullOrEmpty(name)) name = drop.res.id;
-            ScreenReader.Say($"{name}, press E to pick up", interrupt: false);
+            ScreenReader.Say(Loc.Fmt("interaction.press_e_pickup", name), interrupt: false);
         }
         catch (Exception ex)
         {
@@ -172,9 +172,9 @@ internal static class InteractionDetector
                 }
                 catch { }
 
-                var spoken = !string.IsNullOrEmpty(name) ? $"Carrying {name}"
-                           : isBody ? "Carrying a body"
-                           : "Carrying item";
+                var spoken = !string.IsNullOrEmpty(name) ? Loc.Fmt("carry.carrying", name)
+                           : isBody ? Loc.Get("carry.body")
+                           : Loc.Get("carry.item");
                 ScreenReader.Say(spoken, interrupt: false);
             }
             else
@@ -186,7 +186,7 @@ internal static class InteractionDetector
                 //   3. just dropped — bare "Hands free".
                 if (FindNearbyRiverThrowSpot() != null)
                 {
-                    ScreenReader.Say("Body thrown in the river", interrupt: false);
+                    ScreenReader.Say(Loc.Get("carry.thrown_in_river"), interrupt: false);
                 }
                 else
                 {
@@ -194,11 +194,11 @@ internal static class InteractionDetector
                     if (table != null)
                     {
                         var label = GetObjectLabel(table);
-                        ScreenReader.Say($"Body placed on {label}, press E to open", interrupt: false);
+                        ScreenReader.Say(Loc.Fmt("carry.body_placed", label), interrupt: false);
                     }
                     else
                     {
-                        ScreenReader.Say("Hands free", interrupt: false);
+                        ScreenReader.Say(Loc.Get("carry.hands_free"), interrupt: false);
                     }
                 }
             }
@@ -231,7 +231,7 @@ internal static class InteractionDetector
             {
                 _lastWorkHighlight = highlight;
                 if (highlight != null)
-                    ScreenReader.Say($"Press F to {GetWorkVerb(highlight)}", interrupt: false);
+                    ScreenReader.Say(Loc.Fmt("interaction.press_f", GetWorkVerb(highlight)), interrupt: false);
             }
 
             // 2) "In progress" — while the character is actually working (F held, Tool anim).
@@ -244,7 +244,7 @@ internal static class InteractionDetector
                 if (_workAnnounceAccum >= 2f)
                 {
                     _workAnnounceAccum = 0f;
-                    ScreenReader.Say("In progress", interrupt: false);
+                    ScreenReader.Say(Loc.Get("craft.in_progress"), interrupt: false);
                 }
             }
             _wasWorking = working;
@@ -291,22 +291,22 @@ internal static class InteractionDetector
                 // swapped for the repaired version, or the demolition completed and destroyed it
                 // (the old WGO now reads as destroyed/null). We're still standing next to it.
                 if (_craftIsRemoving)
-                    ScreenReader.Say("Removed", interrupt: false);
+                    ScreenReader.Say(Loc.Get("craft.removed"), interrupt: false);
                 else if (_craftIsFixing)
-                    ScreenReader.Say("Repaired", interrupt: false);
+                    ScreenReader.Say(Loc.Get("craft.repaired"), interrupt: false);
                 else if (string.IsNullOrEmpty(_craftOutputName))
-                    ScreenReader.Say("Finished", interrupt: false);
+                    ScreenReader.Say(Loc.Get("craft.finished"), interrupt: false);
                 else
                     // Say where the output went, because that differs per station and a blind
                     // player has no way to check: a craft the player worked drops it beside the
                     // station, a zombie-worked or gratitude craft files it into the linked
                     // storage, and a few stations hand it straight to an NPC.
-                    ScreenReader.Say(_craftOutputDest switch
+                    ScreenReader.Say(Loc.Fmt(_craftOutputDest switch
                     {
-                        CraftOutputDest.Storage => $"{_craftOutputName} crafted, put into storage",
-                        CraftOutputDest.Delivered => $"{_craftOutputName} crafted, delivered",
-                        _ => $"{_craftOutputName} crafted, on the ground nearby",
-                    }, interrupt: false);
+                        CraftOutputDest.Storage => "craft.done.storage",
+                        CraftOutputDest.Delivered => "craft.done.delivered",
+                        _ => "craft.done.ground",
+                    }, _craftOutputName), interrupt: false);
                 ClearPendingCraft();
             }
         }
@@ -325,11 +325,11 @@ internal static class InteractionDetector
             // An object marked for demolition in build remove-mode runs a "removal craft" — the
             // work that tears it down. That craft is a live is_crafting craft, so without this the
             // generic branch below would call it "craft"; say "remove" so the F prompt matches.
-            if (wgo.is_removing) return "remove";
+            if (wgo.is_removing) return Loc.Get("verb.remove");
 
             // A broken station/fence carries a repair craft — the action that rebuilds it. Name
             // it "repair" rather than the generic Hammer "build" so the prompt matches the task.
-            if (GetRepairCraft(wgo) != null) return "repair";
+            if (GetRepairCraft(wgo) != null) return Loc.Get("verb.repair");
 
             var craft = (wgo.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
             if (craft != null && craft.is_crafting && craft.current_craft != null)
@@ -337,31 +337,31 @@ internal static class InteractionDetector
                 string outName = null;
                 try { outName = ScreenReader.StripNguiCodes(craft.current_craft.GetFirstRealOutput()?.definition?.GetItemName() ?? "").Trim(); }
                 catch { }
-                return string.IsNullOrEmpty(outName) ? "craft" : $"craft {outName}";
+                return string.IsNullOrEmpty(outName) ? Loc.Get("verb.craft") : Loc.Fmt("verb.craft_named", outName);
             }
 
             // Story rubble (broken bottles / warehouse barrels) is hammered down, not built up —
             // the generic Hammer verb below would say "Press F to build", which reads as the exact
             // opposite of the job. See ObjectNavigator.IsScriptedCleanupProp.
-            if (ObjectNavigator.IsScriptedCleanupProp(wgo)) return "clear it away";
+            if (ObjectNavigator.IsScriptedCleanupProp(wgo)) return Loc.Get("verb.clear_away");
 
             var actions = wgo.obj_def?.tool_actions;
             if (actions != null && !actions.no_actions && actions.action_tools != null && actions.action_tools.Count > 0)
             {
                 switch (actions.action_tools[0])
                 {
-                    case ItemDefinition.ItemType.Shovel: return "dig";
-                    case ItemDefinition.ItemType.Axe: return "chop";
-                    case ItemDefinition.ItemType.Pickaxe: return "mine";
-                    case ItemDefinition.ItemType.Hammer: return "build";
-                    case ItemDefinition.ItemType.Hand: return "gather";
+                    case ItemDefinition.ItemType.Shovel: return Loc.Get("verb.dig");
+                    case ItemDefinition.ItemType.Axe: return Loc.Get("verb.chop");
+                    case ItemDefinition.ItemType.Pickaxe: return Loc.Get("verb.mine");
+                    case ItemDefinition.ItemType.Hammer: return Loc.Get("verb.build");
+                    case ItemDefinition.ItemType.Hand: return Loc.Get("verb.gather");
                 }
             }
 
-            if (craft != null) return "craft";
+            if (craft != null) return Loc.Get("verb.craft");
         }
         catch { }
-        return "work";
+        return Loc.Get("verb.work");
     }
 
     // True while the given station still has a live, running craft. A destroyed/replaced WGO
@@ -631,7 +631,7 @@ internal static class InteractionDetector
     {
         public string ItemId;  // exact gold-quality id the serve script checks for
         public int Count;      // how many the quest wants total
-        public string Noun;    // spoken noun, e.g. "beer" / "burgers"
+        public string NounKey; // lang key of the spoken noun, e.g. "beer" / "burgers"
     }
 
     // The buffet is a single crafting station (obj_id "vendor_stall", whose object def is literally
@@ -641,8 +641,8 @@ internal static class InteractionDetector
     // dict, to keep that order deterministic) whenever the player reaches the stand.
     private static readonly BuffetNeed[] _buffetNeeds =
     {
-        new BuffetNeed { ItemId = "cup_beer:3", Count = 10, Noun = "beer" },
-        new BuffetNeed { ItemId = "meal:burger:3", Count = 5, Noun = "burgers" },
+        new BuffetNeed { ItemId = "cup_beer:3", Count = 10, NounKey = "buffet.noun.beer" },
+        new BuffetNeed { ItemId = "meal:burger:3", Count = 5, NounKey = "buffet.noun.burgers" },
     };
 
     private static readonly HashSet<string> _buffetStandIds = new HashSet<string>
@@ -671,8 +671,8 @@ internal static class InteractionDetector
                 try { have = MainGame.me.player.data.GetItemsCount(need.ItemId, count_secondary_inventory: true); }
                 catch { }
 
-                var tail = have >= need.Count ? "you have enough" : $"you have {have}";
-                parts.Add($"requires {need.Count} {need.Noun}, golden quality, {tail}");
+                var tail = have >= need.Count ? Loc.Get("buffet.have_enough") : Loc.Fmt("buffet.you_have", have);
+                parts.Add(Loc.Fmt("buffet.requires", need.Count, Loc.Get(need.NounKey), tail));
             }
             var result = $"{label}. {string.Join(". ", parts)}";
             _log?.LogInfo($"[INTERACTION] Buffet requirements announced: {result}");
@@ -706,8 +706,8 @@ internal static class InteractionDetector
             catch { }
 
             return haveHammer
-                ? $"{label}. Hold F to clear it away"
-                : $"{label}. Put a hammer in your toolbelt, then hold F to clear it away";
+                ? Loc.Fmt("cleanup.hold_f", label)
+                : Loc.Fmt("cleanup.need_hammer", label);
         }
         catch
         {
@@ -728,7 +728,7 @@ internal static class InteractionDetector
             if (wgo?.obj_def == null) return label;
             if (wgo.obj_def.interaction_type != ObjectDefinition.InteractionType.None) return label;
             if (!ObjectNavigator.IsBreakableLootProp(wgo)) return label;
-            return $"{label}. Attack it to smash it open";
+            return Loc.Fmt("breakable.attack_hint", label);
         }
         catch
         {
@@ -749,7 +749,7 @@ internal static class InteractionDetector
             if (up == null) return label;
 
             var newName = LocalizedObjectName(up.change_wgo);
-            var into = string.IsNullOrWhiteSpace(newName) ? "" : $" to {newName}";
+            var into = string.IsNullOrWhiteSpace(newName) ? "" : Loc.Fmt("upgrade.into", newName);
 
             var needs = up.needs;
             if (needs == null || needs.Count == 0)
@@ -775,12 +775,12 @@ internal static class InteractionDetector
             }
 
             if (all.Count == 0)
-                return $"{label}. Can be upgraded{into}, press F to upgrade";
+                return Loc.Fmt("upgrade.no_materials", label, into);
 
             var tail = missing.Count > 0
-                ? $"You still need {string.Join(", ", missing)}"
-                : "You have the materials, press F to upgrade";
-            return $"{label}. Can be upgraded{into}, needs {string.Join(", ", all)}. {tail}";
+                ? Loc.Fmt("materials.still_need", string.Join(", ", missing))
+                : Loc.Get("upgrade.have_materials");
+            return Loc.Fmt("upgrade.needs", label, into, string.Join(", ", all), tail);
         }
         catch
         {
@@ -832,12 +832,12 @@ internal static class InteractionDetector
             }
 
             if (all.Count == 0)
-                return $"{label}. Repairable, press F to repair";
+                return Loc.Fmt("repair.no_materials", label);
 
             var tail = missing.Count > 0
-                ? $"You still need {string.Join(", ", missing)}"
-                : "You have the materials, press F to repair";
-            return $"{label}. Repairable, needs {string.Join(", ", all)}. {tail}";
+                ? Loc.Fmt("materials.still_need", string.Join(", ", missing))
+                : Loc.Get("repair.have_materials");
+            return Loc.Fmt("repair.needs", label, string.Join(", ", all), tail);
         }
         catch
         {
@@ -864,7 +864,7 @@ internal static class InteractionDetector
             if (wgo != null && wgo.is_removing)
             {
                 int rpct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
-                return $"{label}. Marked for removal, {rpct} percent torn down. Press F to remove";
+                return Loc.Fmt("craft.marked_for_removal", label, rpct);
             }
 
             var craft = (wgo?.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft : null;
@@ -875,8 +875,8 @@ internal static class InteractionDetector
             {
                 var outName = CraftOutputName(craft.current_craft);
                 int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
-                var what = string.IsNullOrEmpty(outName) ? "something" : outName;
-                label = $"{label}. Making {what}, {pct} percent done";
+                var what = string.IsNullOrEmpty(outName) ? Loc.Get("craft.something") : outName;
+                label = Loc.Fmt("craft.making", label, what, pct);
             }
 
             var contents = StationContents(wgo, craft);
@@ -936,7 +936,7 @@ internal static class InteractionDetector
                 }
             }
 
-            return parts.Count == 0 ? null : "Contains " + string.Join(", ", parts);
+            return parts.Count == 0 ? null : Loc.Fmt("station.contains", string.Join(", ", parts));
         }
         catch
         {
@@ -954,7 +954,7 @@ internal static class InteractionDetector
     {
         switch (resType)
         {
-            case "fire": return "fuel";
+            case "fire": return Loc.Get("resource.fuel");
             default: return LocalizedObjectName(resType);
         }
     }
@@ -971,7 +971,7 @@ internal static class InteractionDetector
             var fence = grave.data?.GetItemOfType(ItemDefinition.ItemType.GraveFence);
             if (fence == null || fence.durability >= 0.999f) return label;
             int pct = Mathf.RoundToInt(Mathf.Clamp01(fence.durability) * 100f);
-            return $"{label}. Worn fence {pct} percent, press E to open the grave and repair it";
+            return Loc.Fmt("fence.worn", label, pct);
         }
         catch
         {
@@ -1102,7 +1102,7 @@ internal static class InteractionDetector
             if (npc == null || npc.is_removed) return;
 
             var label = GetObjectLabel(npc);
-            ScreenReader.Say($"{label} has nothing to say right now", interrupt: false);
+            ScreenReader.Say(Loc.Fmt("npc.nothing_to_say", label), interrupt: false);
             _log?.LogInfo($"[INTERACTION] silent NPC: {npc.obj_id} ({label}). {DescribeNpcTasks(npc.obj_id)}");
         }
         catch (Exception ex)
@@ -1245,11 +1245,11 @@ internal static class InteractionDetector
             int effWhite = white <= 0 ? 1 : white;
             int pct = Mathf.RoundToInt(effWhite / 40f * 100f);
 
-            var value = $"{pct} percent work efficiency, {effWhite} white {(effWhite == 1 ? "skull" : "skulls")}";
+            var value = Loc.Plural("zombie.efficiency", effWhite, pct, effWhite);
             // Red skulls don't slow a worker (only white feed working_k), but they're part of the same
             // corpse value a player might be comparing against, so mention them when present.
             if (red > 0)
-                value += $", {red} red {(red == 1 ? "skull" : "skulls")}";
+                value += ", " + Loc.Plural("zombie.red_skulls", red, red);
 
             // What the zombie is doing: its assigned station, or idle.
             string job = null;
@@ -1260,7 +1260,7 @@ internal static class InteractionDetector
                     job = LocalizedObjectName(bench.obj_id);
             }
             catch { }
-            var tail = string.IsNullOrEmpty(job) ? "not assigned to a station" : $"working at {job}";
+            var tail = string.IsNullOrEmpty(job) ? Loc.Get("zombie.unassigned") : Loc.Fmt("zombie.working_at", job);
 
             return $"{label}. {value}. {tail}";
         }
@@ -1314,8 +1314,8 @@ internal static class InteractionDetector
                 return label;
 
             return wgo.obj_def != null && wgo.obj_def.IsNPC()
-                ? $"{label}, wants to talk"
-                : $"{label}, has something new";
+                ? Loc.Fmt("npc.wants_to_talk", label)
+                : Loc.Fmt("object.has_something_new", label);
         }
         catch
         {
@@ -1369,7 +1369,7 @@ internal static class InteractionDetector
             }
 
             if (tasks.Count == 0) return label;
-            var header = tasks.Count == 1 ? "Has a task" : "Has tasks";
+            var header = Loc.Plural("npc.has_tasks", tasks.Count);
             return $"{label}. {header}: {string.Join(". ", tasks)}";
         }
         catch
@@ -1421,22 +1421,22 @@ internal static class InteractionDetector
                 bool room = false;
                 try { room = wgo.data.CanAddCount(carried.id, true) > 0; } catch { }
                 var here = crateCount == 0
-                    ? "empty pallet"
-                    : $"pallet holds {crateCount} {(crateCount == 1 ? "crate" : "crates")}: {string.Join(", ", parts)}";
-                var verdict = room ? "you can leave your crate here" : "no room for your crate here";
+                    ? Loc.Get("pallet.empty")
+                    : Loc.Plural("pallet.holds", crateCount, crateCount, string.Join(", ", parts));
+                var verdict = Loc.Get(room ? "pallet.room" : "pallet.no_room");
                 return $"{label}. {Capitalize(here)}. {verdict}";
             }
 
             if (crateCount == 0)
-                return $"{label}. Empty pallet";
+                return Loc.Fmt("pallet.label_empty", label);
 
             bool full = false;
             if (firstCrateId != null)
             {
                 try { full = wgo.data.CanAddCount(firstCrateId, true) <= 0; } catch { }
             }
-            var fullNote = full ? ", full" : "";
-            return $"{label}. Pallet, {crateCount} {(crateCount == 1 ? "crate" : "crates")}: {string.Join(", ", parts)}{fullNote}. Press E to take a crate";
+            var fullNote = full ? ", " + Loc.Get("pallet.full") : "";
+            return Loc.Plural("pallet.label", crateCount, label, crateCount, string.Join(", ", parts), fullNote);
         }
         catch
         {
@@ -1464,7 +1464,7 @@ internal static class InteractionDetector
     private static readonly Dictionary<string, string> StationNameOverrides =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["mf_alchemy_survey"] = "Forschungstisch",
+            ["mf_alchemy_survey"] = "station.mf_alchemy_survey",
         };
 
     // Objects the game ships with no translation at all and no craft/alias to borrow a name from,
@@ -1473,8 +1473,8 @@ internal static class InteractionDetector
     private static readonly Dictionary<string, string> UntranslatedObjectNames =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["tavern_broken_bottles"] = "Broken bottles",
-            ["warehouse_broken_barrels"] = "Broken barrels",
+            ["tavern_broken_bottles"] = "cleanup.tavern_broken_bottles",
+            ["warehouse_broken_barrels"] = "cleanup.warehouse_broken_barrels",
         };
 
     /// <summary>
@@ -1544,8 +1544,8 @@ internal static class InteractionDetector
                 // table. Override those with an explicit name. Keep this list to genuinely
                 // ambiguous ids; everything else keeps its real localized name.
                 if (!string.IsNullOrEmpty(wgo.obj_def.id) &&
-                    StationNameOverrides.TryGetValue(wgo.obj_def.id, out var clearName))
-                    return clearName;
+                    StationNameOverrides.TryGetValue(wgo.obj_def.id, out var clearNameKey))
+                    return Loc.Get(clearNameKey);
 
                 // Try to use the object id, localized to a readable name where possible.
                 // Furniture a build desk placed by script is spawned under an id the game never
@@ -1557,8 +1557,8 @@ internal static class InteractionDetector
                     var name = LocalizedObjectName(wgo.obj_def.id);
                     if (!HasTranslation(wgo.obj_def.id))
                     {
-                        if (UntranslatedObjectNames.TryGetValue(wgo.obj_def.id, out var plainName))
-                            return plainName;
+                        if (UntranslatedObjectNames.TryGetValue(wgo.obj_def.id, out var plainNameKey))
+                            return Loc.Get(plainNameKey);
 
                         var catalogId = ObjectNavigator.ScriptPlacedBuildNameId(wgo.obj_def.id);
                         if (!string.IsNullOrEmpty(catalogId) && HasTranslation(catalogId))
@@ -1611,13 +1611,13 @@ internal static class InteractionDetector
             // Two distinct exits per level — keep them apart (see ObjectNavigator label note):
             // "dungeon_exit2" = stairs DOWN (deeper, gated), "dungeon_exit" = the way OUT/up.
             // Check the "2" variant first since it also contains "dungeon_exit".
-            id.Contains("dungeon_exit2") ? "Dungeon stairs down, leads deeper" :
-            id.Contains("dungeon_exit") ? "Dungeon exit, way out" :
-            id.Contains("inside") ? "Door inside" :
-            id.Contains("outside") ? "Door outside" :
-            id.Contains("hatch") ? "Hatch" :
-            id.Contains("stairs") ? "Stairs" :
-            id.Contains("dungeon") ? "Dungeon entrance" :
+            id.Contains("dungeon_exit2") ? Loc.Get("door.dungeon_stairs_down") :
+            id.Contains("dungeon_exit") ? Loc.Get("door.dungeon_exit") :
+            id.Contains("inside") ? Loc.Get("door.inside") :
+            id.Contains("outside") ? Loc.Get("door.outside") :
+            id.Contains("hatch") ? Loc.Get("door.hatch") :
+            id.Contains("stairs") ? Loc.Get("door.stairs") :
+            id.Contains("dungeon") ? Loc.Get("door.dungeon_entrance") :
             "Door";
 
         var place = DoorPlaceFromTag(wgo?.custom_tag);

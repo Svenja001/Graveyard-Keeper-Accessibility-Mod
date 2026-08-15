@@ -51,7 +51,7 @@ internal static class HealthEnergyAnnouncer
             if (!MainGame.game_started || MainGame.me == null
                 || MainGame.me.player == null || MainGame.me.save == null)
             {
-                ScreenReader.Say("No game in progress");
+                ScreenReader.Say(Loc.Get("common.no_game"));
                 return;
             }
 
@@ -63,7 +63,7 @@ internal static class HealthEnergyAnnouncer
             int energy = Mathf.RoundToInt(player.energy);
             int maxEnergy = save.max_energy;
 
-            ScreenReader.Say($"Health {hp} of {maxHp}. Energy {energy} of {maxEnergy}. {DescribeBuffs(save)}");
+            ScreenReader.Say(Loc.Fmt("vitals.summary", hp, maxHp, energy, maxEnergy, DescribeBuffs(save)));
         }
         catch (Exception ex)
         {
@@ -105,7 +105,7 @@ internal static class HealthEnergyAnnouncer
                 }
             }
 
-            return names.Count == 0 ? "No active buffs" : "Buffs: " + string.Join(", ", names);
+            return names.Count == 0 ? Loc.Get("buffs.none") : Loc.Fmt("buffs.list", string.Join(", ", names));
         }
         catch (Exception ex)
         {
@@ -165,10 +165,10 @@ internal static class HealthEnergyAnnouncer
                 return;
 
             var parts = new List<string>(2);
-            if (dEnergy > 0) parts.Add($"Got {dEnergy} energy");
-            else if (dEnergy < 0) parts.Add($"Lost {-dEnergy} energy");
-            if (dHp > 0) parts.Add($"Got {dHp} health");
-            else if (dHp < 0) parts.Add($"Lost {-dHp} health");
+            if (dEnergy > 0) parts.Add(Loc.Fmt("vitals.energy_gained", dEnergy));
+            else if (dEnergy < 0) parts.Add(Loc.Fmt("vitals.energy_lost", -dEnergy));
+            if (dHp > 0) parts.Add(Loc.Fmt("vitals.health_gained", dHp));
+            else if (dHp < 0) parts.Add(Loc.Fmt("vitals.health_lost", -dHp));
 
             if (parts.Count == 0) return;
 

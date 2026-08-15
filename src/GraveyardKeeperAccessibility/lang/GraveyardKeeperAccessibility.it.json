@@ -1,0 +1,16 @@
+{
+  "nav.planning_table": "Tavolo di progettazione",
+  "nav.broken_repair_it": "rotto, da riparare",
+  "nav.vein": "{0} vena",
+  "mine.word.fence": "recinto",
+  "mine.word.bench": "postazione",
+  "mine.word.working": "zombie al lavoro",
+  "mine.word.empty": "vuoto",
+  "resource.diamond": "diamante",
+  "resource.gold": "oro",
+  "resource.silver": "argento",
+  "resource.iron": "ferro",
+  "resource.marble": "marmo",
+  "resource.granite": "granito",
+  "resource.stone": "pietra"
+}

@@ -57,11 +57,11 @@ internal static class AutoConsume
         {
             _cooldown = 0f;
             _healEmptyWarn = _energyEmptyWarn = 0f;
-            ScreenReader.Say("Auto healing on. I will eat food and drink potions when your health or energy runs low.", interrupt: true);
+            ScreenReader.Say(Loc.Get("autoconsume.on"), interrupt: true);
         }
         else
         {
-            ScreenReader.Say("Auto healing off", interrupt: true);
+            ScreenReader.Say(Loc.Get("autoconsume.off"), interrupt: true);
         }
     }
 
@@ -186,7 +186,7 @@ internal static class AutoConsume
         _cooldown = ConsumeCooldown;
         _log?.LogInfo($"[AUTOCONSUME] ate '{name}' for {bar} (gain {bestGain})");
         // The amount ("Got N health/energy") is spoken by HealthEnergyAnnouncer; we just name the item.
-        ScreenReader.Say($"Ate {name}", interrupt: false);
+        ScreenReader.Say(Loc.Fmt("autoconsume.ate", name), interrupt: false);
         return true;
     }
 
@@ -205,13 +205,13 @@ internal static class AutoConsume
         {
             if (Time.unscaledTime - _healEmptyWarn < EmptyWarnInterval) return;
             _healEmptyWarn = Time.unscaledTime;
-            ScreenReader.Say("Low health, no healing items left", interrupt: false);
+            ScreenReader.Say(Loc.Get("autoconsume.no_healing"), interrupt: false);
         }
         else
         {
             if (Time.unscaledTime - _energyEmptyWarn < EmptyWarnInterval) return;
             _energyEmptyWarn = Time.unscaledTime;
-            ScreenReader.Say("Low energy, no food left", interrupt: false);
+            ScreenReader.Say(Loc.Get("autoconsume.no_food"), interrupt: false);
         }
     }
 }

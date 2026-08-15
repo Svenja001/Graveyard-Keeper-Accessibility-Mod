@@ -1,0 +1,16 @@
+{
+  "nav.planning_table": "Стол планирования",
+  "nav.broken_repair_it": "сломан, починить",
+  "nav.vein": "{0} жила",
+  "mine.word.fence": "забор",
+  "mine.word.bench": "рабочее место",
+  "mine.word.working": "зомби работает",
+  "mine.word.empty": "пусто",
+  "resource.diamond": "алмаз",
+  "resource.gold": "золото",
+  "resource.silver": "серебро",
+  "resource.iron": "железо",
+  "resource.marble": "мрамор",
+  "resource.granite": "гранит",
+  "resource.stone": "камень"
+}

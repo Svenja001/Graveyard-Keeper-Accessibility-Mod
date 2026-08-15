@@ -1,0 +1,16 @@
+{
+  "nav.planning_table": "Table de planification",
+  "nav.broken_repair_it": "cassé, à réparer",
+  "nav.vein": "{0} filon",
+  "mine.word.fence": "clôture",
+  "mine.word.bench": "poste",
+  "mine.word.working": "zombie au travail",
+  "mine.word.empty": "vide",
+  "resource.diamond": "diamant",
+  "resource.gold": "or",
+  "resource.silver": "argent",
+  "resource.iron": "fer",
+  "resource.marble": "marbre",
+  "resource.granite": "granite",
+  "resource.stone": "pierre"
+}

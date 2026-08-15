@@ -26,7 +26,7 @@ internal static class CorpseScanner
         {
             if (!MainGame.game_started || MainGame.me == null)
             {
-                ScreenReader.Say("No game in progress");
+                ScreenReader.Say(Loc.Get("common.no_game"));
                 return;
             }
 
@@ -75,18 +75,18 @@ internal static class CorpseScanner
 
                 var pos = (Vector2)drop.transform.position;
                 var dist = Vector2.Distance(playerPos, pos);
-                finds.Add((dist, DescribeBody(res, "on the ground", pos, playerPos)));
+                finds.Add((dist, DescribeBody(res, Loc.Get("corpse.where.ground"), pos, playerPos)));
             }
 
             if (finds.Count == 0)
             {
-                ScreenReader.Say("No corpse anywhere", interrupt: true);
+                ScreenReader.Say(Loc.Get("corpse.none"), interrupt: true);
                 _log?.LogInfo("[CORPSE-SCAN] none found");
                 return;
             }
 
             finds.Sort((a, b) => a.dist.CompareTo(b.dist));
-            var lead = finds.Count == 1 ? "1 corpse" : $"{finds.Count} corpses";
+            var lead = Loc.Plural("corpse.count", finds.Count, finds.Count);
             ScreenReader.Say($"{lead}. {string.Join(". ", finds.ConvertAll(f => f.text))}", interrupt: true);
             _log?.LogInfo($"[CORPSE-SCAN] {finds.Count} found");
         }
@@ -101,26 +101,26 @@ internal static class CorpseScanner
     {
         var id = obj.obj_id ?? "";
         if (id.StartsWith("corpse_bed") || id.StartsWith("corpse_fridge"))
-            return "in morgue storage";
+            return Loc.Get("corpse.where.morgue");
         if (id == "autopsi_table" || id.Contains("mf_preparation"))
-            return "on a preparation table";
+            return Loc.Get("corpse.where.prep_table");
 
         // Graves keep a body in inventory; tell them apart from generic stations.
         try
         {
             if (obj.obj_def != null
                 && obj.obj_def.interaction_type == ObjectDefinition.InteractionType.Grave)
-                return "in a grave";
+                return Loc.Get("corpse.where.grave");
         }
         catch { }
 
         try
         {
             var label = InteractionDetector.GetObjectLabel(obj);
-            if (!string.IsNullOrEmpty(label)) return $"on {label}";
+            if (!string.IsNullOrEmpty(label)) return Loc.Fmt("corpse.where.on_object", label);
         }
         catch { }
-        return "stored";
+        return Loc.Get("corpse.where.stored");
     }
 
     private static string DescribeBody(Item body, string location, Vector2 pos, Vector2 playerPos)
@@ -130,26 +130,26 @@ internal static class CorpseScanner
         var where = string.IsNullOrEmpty(dir) ? location : $"{location}, {dir}";
         var skulls = SkullInfo.Describe(body);
         var skullSuffix = string.IsNullOrEmpty(skulls) ? "" : $", {skulls}";
-        return $"Corpse {where}, {dist / TileSize:F0} meters away{skullSuffix}";
+        return Loc.Fmt("corpse.entry", where, (dist / TileSize).ToString("F0"), skullSuffix);
     }
 
     private static string CompassDirection(Vector2 from, Vector2 to)
     {
         var d = to - from;
-        if (d.sqrMagnitude < 1f) return "here";
+        if (d.sqrMagnitude < 1f) return Loc.Get("compass.here");
 
         float angle = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
         if (angle < 0f) angle += 360f;
         return (Mathf.RoundToInt(angle / 45f) % 8) switch
         {
-            0 => "east",
-            1 => "north-east",
-            2 => "north",
-            3 => "north-west",
-            4 => "west",
-            5 => "south-west",
-            6 => "south",
-            7 => "south-east",
+            0 => Loc.Get("compass.east"),
+            1 => Loc.Get("compass.north_east"),
+            2 => Loc.Get("compass.north"),
+            3 => Loc.Get("compass.north_west"),
+            4 => Loc.Get("compass.west"),
+            5 => Loc.Get("compass.south_west"),
+            6 => Loc.Get("compass.south"),
+            7 => Loc.Get("compass.south_east"),
             _ => "",
         };
     }

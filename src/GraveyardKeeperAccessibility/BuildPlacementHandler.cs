@@ -154,7 +154,7 @@ internal static class BuildPlacementHandler
             _wasActive = false;
             _removables = null;
             RestoreSubZones();
-            ScreenReader.Say(_lastMode == "Removing" ? "Left removal" : "Left placement", interrupt: true);
+            ScreenReader.Say(Loc.Get(_lastMode == "Removing" ? "remove.left_mode" : "build.left_mode"), interrupt: true);
         }
 
         _lastMode = mode;
@@ -183,7 +183,7 @@ internal static class BuildPlacementHandler
     private static void AnnounceEntry()
     {
         var name = CurrentBuildName();
-        var what = string.IsNullOrEmpty(name) ? "Placement" : $"Placing {name}";
+        var what = string.IsNullOrEmpty(name) ? Loc.Get("build.placement") : Loc.Fmt("build.placing", name);
 
         // Wall decorations (Wandleuchter etc.) carry a sub_zone_id and can only sit on the wall
         // mount strips. Those strips ship as inactive GameObjects (zero-size colliders the game's
@@ -197,11 +197,11 @@ internal static class BuildPlacementHandler
         }
 
         var snapHint = string.IsNullOrEmpty(subZoneId)
-            ? "Space snaps to a free spot"
-            : "This is a wall decoration, Space finds a spot on the wall";
+            ? Loc.Get("build.hint.snap_free")
+            : Loc.Get("build.hint.snap_wall");
 
         ScreenReader.Say(
-            $"{what}. Arrow keys move, {snapHint}, R rotates, Enter places, Escape cancels. {Validity()}.{PointsSuffix()}",
+            Loc.Fmt("build.intro.free", what, snapHint, Validity(), PointsSuffix()),
             interrupt: true);
     }
 
@@ -306,7 +306,7 @@ internal static class BuildPlacementHandler
         // MoveCurrentByDir refuses to step off-screen; tell the player instead of going silent.
         if ((after - before).sqrMagnitude < 1f)
         {
-            ScreenReader.Say("Edge of view", interrupt: true);
+            ScreenReader.Say(Loc.Get("build.edge_of_view"), interrupt: true);
             return;
         }
         ScreenReader.Say(Validity(), interrupt: true);
@@ -316,11 +316,11 @@ internal static class BuildPlacementHandler
     {
         if (!FloatingWorldGameObject.IsObjectRotatable())
         {
-            ScreenReader.Say("Cannot rotate this", interrupt: true);
+            ScreenReader.Say(Loc.Get("build.cannot_rotate"), interrupt: true);
             return;
         }
         FloatingWorldGameObject.RotateCurrentFloatingObject(right);
-        ScreenReader.Say($"Rotated {(right ? "right" : "left")}. {Validity()}", interrupt: true);
+        ScreenReader.Say(Loc.Fmt(right ? "build.rotated_right" : "build.rotated_left", Validity()), interrupt: true);
     }
 
     private static void Place()
@@ -330,7 +330,7 @@ internal static class BuildPlacementHandler
 
         if (!FloatingWorldGameObject.can_be_built)
         {
-            ScreenReader.Say("Blocked. Move to a free spot.", interrupt: true);
+            ScreenReader.Say(Loc.Get("build.blocked_move"), interrupt: true);
             return;
         }
 
@@ -340,8 +340,8 @@ internal static class BuildPlacementHandler
             var missing = MissingMaterialsText(cd);
             ScreenReader.Say(
                 string.IsNullOrEmpty(missing)
-                    ? "Not enough materials"
-                    : $"Not enough materials. You still need {missing}",
+                    ? Loc.Get("build.not_enough_materials")
+                    : Loc.Fmt("build.not_enough_materials_missing", missing),
                 interrupt: true);
             return;
         }
@@ -359,7 +359,7 @@ internal static class BuildPlacementHandler
         catch (Exception ex)
         {
             _log?.LogError($"[BUILD] DoPlace failed: {ex.Message}");
-            ScreenReader.Say("Placement failed", interrupt: true);
+            ScreenReader.Say(Loc.Get("build.placement_failed"), interrupt: true);
             return;
         }
         finally
@@ -367,7 +367,7 @@ internal static class BuildPlacementHandler
             _manualPlaceInProgress = false;
         }
 
-        ScreenReader.Say(string.IsNullOrEmpty(name) ? "Placed" : $"{name} placed", interrupt: true);
+        ScreenReader.Say(string.IsNullOrEmpty(name) ? Loc.Get("build.placed") : Loc.Fmt("build.placed_named", name), interrupt: true);
     }
 
     private static void Cancel()
@@ -382,7 +382,7 @@ internal static class BuildPlacementHandler
         {
             _log?.LogError($"[BUILD] CancelPlacing failed: {ex.Message}");
         }
-        ScreenReader.Say("Placement cancelled", interrupt: true);
+        ScreenReader.Say(Loc.Get("build.placement_cancelled"), interrupt: true);
     }
 
     // ---- script-building (fixed-slot interior furniture) ------------------
@@ -396,11 +396,11 @@ internal static class BuildPlacementHandler
     private static void AnnounceScriptEntry()
     {
         var name = CurrentBuildName();
-        var what = string.IsNullOrEmpty(name) ? "Placement" : $"Placing {name}";
+        var what = string.IsNullOrEmpty(name) ? Loc.Get("build.placement") : Loc.Fmt("build.placing", name);
         var cd = CurrentCraft();
-        var style = (cd != null && cd.has_variations) ? " R changes the style." : "";
+        var style = (cd != null && cd.has_variations) ? " " + Loc.Get("build.style_hint") : "";
         ScreenReader.Say(
-            $"{what}. This piece goes to its fixed spot in the room. Enter confirms, Escape cancels.{style}{PointsSuffix()}",
+            Loc.Fmt("build.intro.fixed", what, style, PointsSuffix()),
             interrupt: true);
     }
 
@@ -446,14 +446,14 @@ internal static class BuildPlacementHandler
         catch (Exception ex)
         {
             _log?.LogError($"[BUILD] ConfirmScriptBuild failed: {ex.Message}");
-            ScreenReader.Say("Placement failed", interrupt: true);
+            ScreenReader.Say(Loc.Get("build.placement_failed"), interrupt: true);
             return;
         }
 
         // Suppress the generic "Left placement" transition message on the next frame.
         _wasActive = false;
         _lastMode = null;
-        ScreenReader.Say(string.IsNullOrEmpty(name) ? "Placed" : $"{name} placed", interrupt: true);
+        ScreenReader.Say(string.IsNullOrEmpty(name) ? Loc.Get("build.placed") : Loc.Fmt("build.placed_named", name), interrupt: true);
     }
 
     /// <summary>
@@ -488,7 +488,7 @@ internal static class BuildPlacementHandler
 
         _wasActive = false;
         _lastMode = null;
-        ScreenReader.Say("Placement cancelled", interrupt: true);
+        ScreenReader.Say(Loc.Get("build.placement_cancelled"), interrupt: true);
     }
 
     /// <summary>Cycle a script-built piece's alternative look (only some pieces have variations).</summary>
@@ -497,11 +497,11 @@ internal static class BuildPlacementHandler
         var cd = CurrentCraft();
         if (cd == null || !cd.has_variations)
         {
-            ScreenReader.Say("This has no other styles", interrupt: true);
+            ScreenReader.Say(Loc.Get("build.no_other_styles"), interrupt: true);
             return;
         }
         InvokeScriptEvent(right ? _rotRightEvent : _rotLeftEvent);
-        ScreenReader.Say("Changed style", interrupt: true);
+        ScreenReader.Say(Loc.Get("build.changed_style"), interrupt: true);
     }
 
     // ---- removal crafts ---------------------------------------------------
@@ -601,13 +601,12 @@ internal static class BuildPlacementHandler
 
         if (_removables == null || _removables.Count == 0)
         {
-            ScreenReader.Say("Remove mode. Nothing here can be removed. Escape to go back.", interrupt: true);
+            ScreenReader.Say(Loc.Get("remove.nothing_here"), interrupt: true);
             return;
         }
 
         int n = _removables.Count;
-        var intro = $"Remove mode. {n} object{(n == 1 ? "" : "s")} can be removed. " +
-                    "Up and Down choose, Enter marks for removal, Escape goes back. ";
+        var intro = Loc.Plural("remove.intro", n, n) + " ";
         SelectRemovable(0, intro);
     }
 
@@ -654,7 +653,7 @@ internal static class BuildPlacementHandler
         _removables.RemoveAll(w => w == null);
         if (_removables.Count == 0)
         {
-            ScreenReader.Say("Nothing left to remove. Escape to go back.", interrupt: true);
+            ScreenReader.Say(Loc.Get("remove.nothing_left"), interrupt: true);
             return;
         }
 
@@ -671,8 +670,8 @@ internal static class BuildPlacementHandler
         parts.Add(WgoName(w));
         var dir = DirectionFromPlayer(w.pos);
         if (!string.IsNullOrEmpty(dir)) parts.Add(dir);
-        if (w.is_removing) parts.Add("Already marked for removal");
-        parts.Add($"{_removeIndex + 1} of {n}");
+        if (w.is_removing) parts.Add(Loc.Get("remove.already_marked"));
+        parts.Add(Loc.Fmt("common.x_of_y", _removeIndex + 1, n));
 
         ScreenReader.Say(string.Join(". ", parts), interrupt: true);
     }
@@ -711,7 +710,7 @@ internal static class BuildPlacementHandler
         catch (Exception ex)
         {
             _log?.LogError($"[BUILD] MarkForRemoval failed: {ex.Message}");
-            ScreenReader.Say("Couldn't remove that", interrupt: true);
+            ScreenReader.Say(Loc.Get("remove.failed"), interrupt: true);
             return;
         }
 
@@ -721,15 +720,15 @@ internal static class BuildPlacementHandler
             _removables.RemoveAt(_removeIndex);
             ScreenReader.Say(
                 _removables.Count == 0
-                    ? $"{name} removed. Nothing left to remove. Escape to go back."
-                    : $"{name} removed",
+                    ? Loc.Fmt("remove.removed_last", name)
+                    : Loc.Fmt("remove.removed", name),
                 interrupt: true);
             if (_removables.Count > 0) SelectRemovable(_removeIndex);
             return;
         }
 
         ScreenReader.Say(
-            w.is_removing ? $"{name} marked for removal" : $"{name} removal cancelled",
+            Loc.Fmt(w.is_removing ? "remove.marked" : "remove.unmarked", name),
             interrupt: true);
     }
 
@@ -739,7 +738,7 @@ internal static class BuildPlacementHandler
         var w = _removables[_removeIndex];
         if (w == null) return;
         var dir = DirectionFromPlayer(w.pos);
-        ScreenReader.Say(string.IsNullOrEmpty(dir) ? "On the player" : dir, interrupt: true);
+        ScreenReader.Say(string.IsNullOrEmpty(dir) ? Loc.Get("build.on_the_player") : dir, interrupt: true);
     }
 
     private static void CancelRemove()
@@ -775,9 +774,9 @@ internal static class BuildPlacementHandler
 
         string msg = marked > 0
             ? (marked == 1
-                ? "Left remove mode. 1 object marked for demolition; work on it to tear it down."
-                : $"Left remove mode. {marked} objects marked for demolition; work on them to tear them down.")
-            : "Left remove mode. Nothing marked.";
+                ? Loc.Fmt("remove.left_marked.one", marked)
+                : Loc.Fmt("remove.left_marked.other", marked))
+            : Loc.Get("remove.left_nothing");
         ScreenReader.Say(msg, interrupt: true);
     }
 
@@ -864,7 +863,7 @@ internal static class BuildPlacementHandler
     {
         if (FloatingWorldGameObject.can_be_built)
         {
-            ScreenReader.Say($"Already valid. {Validity()}", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("build.already_valid", Validity()), interrupt: true);
             return;
         }
 
@@ -989,10 +988,10 @@ internal static class BuildPlacementHandler
             if (best.HasValue)
             {
                 MoveFootprintTo(best.Value);
-                var word = string.IsNullOrEmpty(subZoneId) ? "free spot" : "wall spot";
-                var turned = rotations > 0 ? " Rotated it to make it fit." : "";
+                var word = Loc.Get(string.IsNullOrEmpty(subZoneId) ? "build.spot.free" : "build.spot.wall");
+                var turned = rotations > 0 ? " " + Loc.Get("build.rotated_to_fit") : "";
                 _log?.LogInfo($"[BUILD] found spot at {best.Value} after {rotations} rotation(s), variation={CurrentVariation()}");
-                ScreenReader.Say($"Found a {word}.{turned} {DirectionFromPlayer()}. Valid.{PointsSuffix()}", interrupt: true);
+                ScreenReader.Say(Loc.Fmt("build.found_spot", word, turned, DirectionFromPlayer(), PointsSuffix()), interrupt: true);
                 return;
             }
 
@@ -1211,30 +1210,30 @@ internal static class BuildPlacementHandler
             }
 
             bool wall = !string.IsNullOrEmpty(subZoneId);
-            var area = wall ? "the wall mount" : "the build area";
+            var area = Loc.Get(wall ? "build.area.wall_mount" : "build.area.build_area");
 
             var where = DirectionFromPlayer(best);
-            var parts = new List<string> { $"Closest it comes is {where}, with {bestBlocked} of {counted} tiles blocked" };
+            var parts = new List<string> { Loc.Fmt("build.closest", where, bestBlocked, counted) };
             if (bestBusy > 0)
                 parts.Add(blockers.Count > 0
-                    ? $"{bestBusy} taken by {string.Join(", ", blockers.Take(3))}"
-                    : $"{bestBusy} taken by something standing there");
+                    ? Loc.Fmt("build.taken_by", bestBusy, string.Join(", ", blockers.Take(3)))
+                    : Loc.Fmt("build.taken_by_something", bestBusy));
             if (bestOutside > 0)
-                parts.Add($"{bestOutside} outside {area}");
+                parts.Add(Loc.Fmt("build.outside_area", bestOutside, area));
 
             var tail = "";
             // A person standing on the spot is the one blocker that clears itself — worth saying,
             // because the same build succeeds a minute later with no other change.
             if (characters.Count > 0 && bestOutside == 0)
-                tail = $" {string.Join(" and ", characters.Take(2))} standing there blocks it; wait for them to move, or leave and come back, then try again.";
+                tail = " " + Loc.Fmt("build.tail.characters", string.Join(" " + Loc.Get("common.and") + " ", characters.Take(2)));
             else if (bestOutside > 0 && bestBusy == 0)
                 tail = wall
-                    ? " Nothing is in the way; the decoration is simply wider than any mount here."
-                    : " It is not blocked by objects, it simply does not fit inside the build area anywhere.";
+                    ? " " + Loc.Get("build.tail.too_wide_mount")
+                    : " " + Loc.Get("build.tail.too_wide_area");
             else if (bestBusy > 0 && bestOutside == 0 && blockers.Count == 1 && blockers.Contains("the building itself"))
-                tail = " Nothing removable is in the way — the wall structure itself covers those tiles, so this spot cannot be cleared.";
+                tail = " " + Loc.Get("build.tail.wall_structure");
             else if (wall && bestBusy > 0 && bestOutside == 0)
-                tail = " The mount it fits on is already occupied; remove what is on it first.";
+                tail = " " + Loc.Get("build.tail.mount_occupied");
 
             return string.Join(", ", parts) + "." + tail;
         }
@@ -1283,7 +1282,7 @@ internal static class BuildPlacementHandler
                         _log?.LogInfo($"[BUILD]   busy cell at {pos} blocked by unowned collider " +
                                       $"'{HierarchyPath(hit.transform)}' layer={hit.gameObject.layer} " +
                                       $"kind={hit.GetType().Name} bounds={hit.bounds.center}/{hit.bounds.size}");
-                        blockers.Add("the building itself");
+                        blockers.Add(Loc.Get("build.blocker.building_itself"));
                         continue;
                     }
                     var name = WgoName(wgo);
@@ -1394,18 +1393,18 @@ internal static class BuildPlacementHandler
         {
             ScreenReader.Say(
                 matchCount == 0
-                    ? "This is a wall object, but no matching wall zone exists here. The wall it needs may not be built."
+                    ? Loc.Get("build.no_wall_zone")
                     : string.IsNullOrEmpty(closest)
-                        ? "No free wall mount for this decoration."
-                        : $"No free wall mount for this decoration. {closest}",
+                        ? Loc.Get("build.no_wall_mount")
+                        : Loc.Fmt("build.no_wall_mount_closest", closest),
                 interrupt: true);
         }
         else
         {
             ScreenReader.Say(
                 string.IsNullOrEmpty(closest)
-                    ? "No buildable spot anywhere in this build area."
-                    : $"No buildable spot anywhere in this build area. {closest}",
+                    ? Loc.Get("build.no_spot")
+                    : Loc.Fmt("build.no_spot_closest", closest),
                 interrupt: true);
         }
     }
@@ -1418,7 +1417,7 @@ internal static class BuildPlacementHandler
 
     private static void AnnouncePosition()
     {
-        ScreenReader.Say($"{DirectionFromPlayer()}. {Validity()}.{PointsSuffix()}", interrupt: true);
+        ScreenReader.Say(Loc.Fmt("build.position", DirectionFromPlayer(), Validity(), PointsSuffix()), interrupt: true);
     }
 
     /// <summary>
@@ -1451,7 +1450,7 @@ internal static class BuildPlacementHandler
 
             var zone = ZoneLabelFor(w);
             var val = q.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            return zone != null ? $"Gives {val} {zone} points" : $"Gives {val} points";
+            return zone != null ? Loc.Fmt("build.points_zone", val, zone) : Loc.Fmt("build.points", val);
         }
         catch
         {
@@ -1488,9 +1487,9 @@ internal static class BuildPlacementHandler
 
     private static string Validity()
     {
-        if (FloatingWorldGameObject.can_be_built) return "Valid";
+        if (FloatingWorldGameObject.can_be_built) return Loc.Get("build.valid");
         var blocker = BlockingObjectName();
-        return string.IsNullOrEmpty(blocker) ? "Blocked" : $"Blocked by {blocker}";
+        return string.IsNullOrEmpty(blocker) ? Loc.Get("build.blocked") : Loc.Fmt("build.blocked_by", blocker);
     }
 
     /// <summary>
@@ -1553,10 +1552,10 @@ internal static class BuildPlacementHandler
             var dy = delta.y / TileSize;
 
             var parts = new List<string>();
-            if (Mathf.Abs(dy) >= 0.5f) parts.Add($"{Mathf.Abs(dy):F0} {(dy > 0 ? "up" : "down")}");
-            if (Mathf.Abs(dx) >= 0.5f) parts.Add($"{Mathf.Abs(dx):F0} {(dx > 0 ? "right" : "left")}");
+            if (Mathf.Abs(dy) >= 0.5f) parts.Add(Loc.Fmt(dy > 0 ? "build.offset.up" : "build.offset.down", Mathf.Abs(dy).ToString("F0")));
+            if (Mathf.Abs(dx) >= 0.5f) parts.Add(Loc.Fmt(dx > 0 ? "build.offset.right" : "build.offset.left", Mathf.Abs(dx).ToString("F0")));
 
-            return parts.Count == 0 ? "On the player" : string.Join(", ", parts);
+            return parts.Count == 0 ? Loc.Get("build.on_the_player") : string.Join(", ", parts);
         }
         catch
         {
@@ -1604,7 +1603,7 @@ internal static class BuildPlacementHandler
                 var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
                 if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
                 iname += InventoryItemHandler.NeedQualitySuffix(need);
-                parts.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
+                parts.Add(shortfall > 1 ? Loc.Fmt("audit.material", shortfall, iname) : iname);
             }
 
             return parts.Count > 0 ? string.Join(", ", parts) : null;
@@ -1689,7 +1688,7 @@ internal static class BuildPlacementHandler
         try
         {
             if (!_doPlaceWillPlace || _manualPlaceInProgress) return;
-            ScreenReader.Say(string.IsNullOrEmpty(_doPlaceName) ? "Built" : $"{_doPlaceName} built", interrupt: true);
+            ScreenReader.Say(string.IsNullOrEmpty(_doPlaceName) ? Loc.Get("build.built") : Loc.Fmt("build.built_named", _doPlaceName), interrupt: true);
         }
         catch (Exception ex)
         {

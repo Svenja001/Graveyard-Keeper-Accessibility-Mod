@@ -19,9 +19,15 @@ internal static class TimeMachineHandler
     private static FieldInfo _dateLabelField;
     private static FieldInfo _buttonField;
 
+    // Unlocked state per discovered row, so FocusIndex doesn't have to read it back out of a
+    // (translated) label.
+    private static readonly List<bool> RowUnlocked = new();
+
     // One navigable row per memory, in the order the machine shows them (oldest first).
     internal static void Discover(TimeMachineGUI gui, List<GUIElement> elements)
     {
+        RowUnlocked.Clear();
+
         var items = SafeItems(gui);
         if (items == null)
         {
@@ -36,6 +42,7 @@ internal static class TimeMachineHandler
 
             var captured = item;
             var number = i + 1;
+            RowUnlocked.Add(IsUnlocked(captured));
             elements.Add(new GUIElement
             {
                 Go = item.gameObject,
@@ -55,23 +62,23 @@ internal static class TimeMachineHandler
     {
         var items = SafeItems(gui);
         if (items == null || items.Count == 0)
-            return "Time machine. No memories recorded yet.";
+            return Loc.Get("timemachine.intro.empty");
 
         var total = items.Count;
         var unlocked = items.Count(IsUnlocked);
         if (unlocked == 0)
-            return $"Time machine. No memories unlocked yet, {total} still to come.";
+            return Loc.Fmt("timemachine.intro.none_unlocked", total);
 
-        var noun = unlocked == 1 ? "memory" : "memories";
-        return $"Time machine. {unlocked} of {total} {noun} unlocked. Press Enter on one to replay it.";
+        return Loc.Plural("timemachine.intro", unlocked, unlocked, total);
     }
 
     // Land on the newest unlocked memory: it's the one the player is most likely to want back,
     // and everything above it is a step backwards through the story.
     internal static int FocusIndex(List<GUIElement> rows)
     {
-        var last = rows.FindLastIndex(e => e.Label != null && !e.Label.EndsWith("locked", StringComparison.OrdinalIgnoreCase));
-        return last >= 0 ? last : (rows.Count > 0 ? 0 : -1);
+        var last = RowUnlocked.LastIndexOf(true);
+        if (last >= 0 && last < rows.Count) return last;
+        return rows.Count > 0 ? 0 : -1;
     }
 
     private static List<TimeMachineItemGUI> SafeItems(TimeMachineGUI gui)
@@ -98,13 +105,13 @@ internal static class TimeMachineHandler
     private static string RowLabel(TimeMachineItemGUI item, int number)
     {
         if (!IsUnlocked(item))
-            return $"Memory {number}, locked";
+            return Loc.Fmt("timemachine.row.locked", number);
 
         var name = LabelText(ref _nameLabelField, "_scene_name_label", item);
         var date = LabelText(ref _dateLabelField, "_scene_date_label", item);
 
-        if (string.IsNullOrWhiteSpace(name)) name = $"Memory {number}";
-        else name = $"Memory {number}, {name}";
+        if (string.IsNullOrWhiteSpace(name)) name = Loc.Fmt("timemachine.row.unnamed", number);
+        else name = Loc.Fmt("timemachine.row.named", number, name);
 
         return string.IsNullOrWhiteSpace(date) ? name : $"{name}, {date}";
     }
@@ -130,14 +137,14 @@ internal static class TimeMachineHandler
         {
             if (!IsUnlocked(item))
             {
-                ScreenReader.Say($"Memory {number} is still locked.", interrupt: true);
+                ScreenReader.Say(Loc.Fmt("timemachine.still_locked", number), interrupt: true);
                 return;
             }
 
             var name = LabelText(ref _nameLabelField, "_scene_name_label", item);
             ScreenReader.Say(string.IsNullOrWhiteSpace(name)
-                ? $"Replaying memory {number}."
-                : $"Replaying {name}.", interrupt: true);
+                ? Loc.Fmt("timemachine.replaying.unnamed", number)
+                : Loc.Fmt("timemachine.replaying.named", name), interrupt: true);
             item.OnPlayPressed();
         }
         catch (Exception ex)

@@ -42,11 +42,11 @@ internal static class SkullInfo
             body.GetBodySkulls(out int red, out int white, out int whiteAvailable);
             int fresh = Mathf.CeilToInt(body.durability * 100f);
 
-            var core = $"{red} red, {white} white";
+            var core = Loc.Fmt("skulls.red_white", red, white);
             // Decay caps how many white skulls actually count toward grave value.
             if (whiteAvailable < white)
-                core += $", {whiteAvailable} white usable";
-            return $"{core}, {fresh} percent fresh";
+                core += ", " + Loc.Fmt("skulls.white_usable", whiteAvailable);
+            return Loc.Fmt("skulls.freshness", core, fresh);
         }
         catch
         {
@@ -76,11 +76,11 @@ internal static class SkullInfo
         {
             int red = part.GetRedSkullsValue();     // q_minus — bad, lowers grave value
             int white = part.GetWhiteSkullsValue();  // q_plus  — good, raises grave value
-            if (red == 0 && white == 0) return "no skull value";
+            if (red == 0 && white == 0) return Loc.Get("skulls.part.none");
 
             var bits = new List<string>();
-            if (red != 0) bits.Add($"{red} red");
-            if (white != 0) bits.Add($"{white} white");
+            if (red != 0) bits.Add(Loc.Fmt("skulls.red", red));
+            if (white != 0) bits.Add(Loc.Fmt("skulls.white", white));
             return string.Join(", ", bits);
         }
         catch
@@ -113,16 +113,16 @@ internal static class SkullInfo
         {
             int red = part.GetRedSkullsValue();     // q_minus — corpse loses this much red on removal
             int white = part.GetWhiteSkullsValue();  // q_plus  — corpse loses this much white on removal
-            if (red == 0 && white == 0) return "cutting out changes nothing";
+            if (red == 0 && white == 0) return Loc.Get("skulls.cut.nothing");
 
             var bits = new List<string>();
             // Red is bad for the corpse: removing a red-bearing part takes red away (good).
-            if (red > 0) bits.Add($"removes {red} red");
-            else if (red < 0) bits.Add($"adds {-red} red");
+            if (red > 0) bits.Add(Loc.Fmt("skulls.cut.removes_red", red));
+            else if (red < 0) bits.Add(Loc.Fmt("skulls.cut.adds_red", -red));
             // White is good: removing a white-bearing part takes white away (bad).
-            if (white > 0) bits.Add($"loses {white} white");
-            else if (white < 0) bits.Add($"gains {-white} white");
-            return "cutting out " + string.Join(", ", bits);
+            if (white > 0) bits.Add(Loc.Fmt("skulls.cut.loses_white", white));
+            else if (white < 0) bits.Add(Loc.Fmt("skulls.cut.gains_white", -white));
+            return Loc.Fmt("skulls.cut.prefix", string.Join(", ", bits));
         }
         catch
         {
@@ -152,19 +152,19 @@ internal static class SkullInfo
         {
             int red = part.GetRedSkullsValue();     // q_minus — added to the corpse on insertion
             int white = part.GetWhiteSkullsValue();  // q_plus  — added to the corpse on insertion
-            if (red == 0 && white == 0) return "inserting changes nothing";
+            if (red == 0 && white == 0) return Loc.Get("skulls.insert.nothing");
 
             // Inserting adds the part's value to the corpse; a negative value would instead reduce
             // that skull count. Group by direction so it reads naturally ("adds 1 red, 1 white").
             var added = new List<string>();
             var removed = new List<string>();
-            if (red > 0) added.Add($"{red} red"); else if (red < 0) removed.Add($"{-red} red");
-            if (white > 0) added.Add($"{white} white"); else if (white < 0) removed.Add($"{-white} white");
+            if (red > 0) added.Add(Loc.Fmt("skulls.red", red)); else if (red < 0) removed.Add(Loc.Fmt("skulls.red", -red));
+            if (white > 0) added.Add(Loc.Fmt("skulls.white", white)); else if (white < 0) removed.Add(Loc.Fmt("skulls.white", -white));
 
             var parts = new List<string>();
-            if (added.Count > 0) parts.Add("adds " + string.Join(", ", added));
-            if (removed.Count > 0) parts.Add("removes " + string.Join(", ", removed));
-            return "inserting " + string.Join(", ", parts);
+            if (added.Count > 0) parts.Add(Loc.Fmt("skulls.insert.adds", string.Join(", ", added)));
+            if (removed.Count > 0) parts.Add(Loc.Fmt("skulls.insert.removes", string.Join(", ", removed)));
+            return Loc.Fmt("skulls.insert.prefix", string.Join(", ", parts));
         }
         catch
         {

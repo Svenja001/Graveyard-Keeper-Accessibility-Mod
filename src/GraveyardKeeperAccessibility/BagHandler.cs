@@ -144,9 +144,9 @@ internal static class BagHandler
 
     internal static string BagName(Item bag)
     {
-        if (bag == null) return "bag";
+        if (bag == null) return Loc.Get("bag.generic");
         var name = ScreenReader.StripNguiCodes(bag.definition?.GetItemName() ?? bag.id)?.Trim();
-        return string.IsNullOrEmpty(name) ? "bag" : name;
+        return string.IsNullOrEmpty(name) ? Loc.Get("bag.generic") : name;
     }
 
     /// <summary>True when the bag holds nothing.</summary>
@@ -178,9 +178,9 @@ internal static class BagHandler
                 foreach (var it in bag.inventory)
                     if (it != null && !it.IsEmpty()) used++;
 
-            if (used == 0) return $"empty, {size} slots free";
-            if (used >= size) return $"full, {size} of {size} slots used";
-            return $"{used} of {size} slots used";
+            if (used == 0) return Loc.Fmt("bag.capacity.empty", size);
+            if (used >= size) return Loc.Fmt("bag.capacity.full", size);
+            return Loc.Fmt("bag.capacity.used", used, size);
         }
         catch { return null; }
     }
@@ -204,14 +204,14 @@ internal static class BagHandler
             // player has heard it there's no reason to repeat it every time they open their bags.
             if (_saidOpenHint) return null;
             _saidOpenHint = true;
-            return "Press Enter on a bag to open it";
+            return Loc.Get("bag.hint.open");
         }
 
         var capacity = DescribeCapacity(open);
         var intro = string.IsNullOrEmpty(capacity)
-            ? $"{BagName(open)} open"
-            : $"{BagName(open)} open, {capacity}";
-        return $"{intro}. Enter puts an item in or takes it out, Enter on the bag closes it";
+            ? Loc.Fmt("bag.header.open", BagName(open))
+            : Loc.Fmt("bag.header.open_capacity", BagName(open), capacity);
+        return intro + " " + Loc.Get("bag.header.hint");
     }
 
     // ---- activation -------------------------------------------------------------
@@ -246,7 +246,7 @@ internal static class BagHandler
                 if (openBag == item)
                 {
                     gui.CloseBag();
-                    return ($"Closed {name}", false, true);
+                    return (Loc.Fmt("bag.closed", name), false, true);
                 }
 
                 if (openBag != null) gui.CloseBag();
@@ -256,14 +256,14 @@ internal static class BagHandler
                 // refresh that follows, so only say it here when the bag has something in it.
                 var capacity = IsEmpty(item) ? null : DescribeCapacity(item);
                 var summary = string.IsNullOrEmpty(capacity)
-                    ? $"Opened {name}"
-                    : $"Opened {name}, {capacity}";
-                return ($"{summary}. Enter on an item puts it in or takes it out", false, true);
+                    ? Loc.Fmt("bag.opened", name)
+                    : Loc.Fmt("bag.opened_capacity", name, capacity);
+                return (summary + " " + Loc.Get("bag.opened.hint"), false, true);
             }
             catch (Exception ex)
             {
                 Plugin.Log.LogWarning($"[BAG] toggling '{name}' failed: {ex.Message}");
-                return ($"Could not open {name}", false, true);
+                return (Loc.Fmt("bag.open_failed", name), false, true);
             }
         }
 
@@ -281,9 +281,7 @@ internal static class BagHandler
 
         if (opensPicker) return (null, true, true);
 
-        return (move.fromBag
-            ? $"{move.itemName} taken out of the {move.bagName}"
-            : $"{move.itemName} put in the {move.bagName}", false, true);
+        return (Loc.Fmt(move.fromBag ? "bag.taken_out" : "bag.put_in", move.itemName, move.bagName), false, true);
     }
 
     /// <summary>
@@ -325,9 +323,9 @@ internal static class BagHandler
         if (max <= 0)
         {
             if (!fromBag && !item.CanBeInsertedInBag(openBag))
-                reason = $"{itemName} does not fit in the {bagName}";
+                reason = Loc.Fmt("bag.does_not_fit", itemName, bagName);
             else
-                reason = fromBag ? "Your inventory is full" : $"The {bagName} is full";
+                reason = fromBag ? Loc.Get("bag.inventory_full") : Loc.Fmt("bag.bag_full", bagName);
         }
 
         return (fromBag, bagName, itemName, max, reason);

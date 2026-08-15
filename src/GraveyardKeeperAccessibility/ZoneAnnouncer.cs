@@ -19,7 +19,7 @@ internal static class ZoneAnnouncer
     private static ManualLogSource _log;
 
     // Spoken whenever the player leaves a named zone for open ground (the game's "..." banner).
-    private const string WildernessLabel = "Wilderness";
+    private static string WildernessLabel => Loc.Get("zone.wilderness");
 
     // Last text we announced, so the every-0.5s banner refresh doesn't repeat itself.
     private static string _lastSpoken;

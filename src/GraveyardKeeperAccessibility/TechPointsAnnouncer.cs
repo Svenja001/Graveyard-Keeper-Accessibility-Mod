@@ -20,7 +20,7 @@ internal static class TechPointsAnnouncer
         {
             if (!MainGame.game_started || MainGame.me == null || MainGame.me.player == null)
             {
-                ScreenReader.Say("No game in progress");
+                ScreenReader.Say(Loc.Get("common.no_game"));
                 return;
             }
 
@@ -29,7 +29,7 @@ internal static class TechPointsAnnouncer
             int green = Mathf.RoundToInt(player.GetParam("g"));
             int blue = Mathf.RoundToInt(player.GetParam("b"));
 
-            ScreenReader.Say($"Red {red}, green {green}, blue {blue}");
+            ScreenReader.Say(Loc.Fmt("tech.points", red, green, blue));
         }
         catch (Exception ex)
         {

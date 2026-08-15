@@ -167,8 +167,8 @@ internal static class DialogueChoiceHandler
                 var reason = LockReasonOf(opt);
                 _log?.LogInfo($"[DIALOGUE_CHOICE] option #{_selectedIndex} not pickable: {label} ({reason})");
                 ScreenReader.Say(string.IsNullOrEmpty(reason)
-                    ? $"{label} ist nicht verfügbar"
-                    : $"{label} ist nicht verfügbar: {reason}", interrupt: true);
+                    ? Loc.Fmt("dialogue.unavailable", label)
+                    : Loc.Fmt("dialogue.unavailable_reason", label, reason), interrupt: true);
                 return;
             }
 
@@ -177,7 +177,7 @@ internal static class DialogueChoiceHandler
             try { opt.FinishAnimation(); } catch { }
 
             _log?.LogInfo($"[DIALOGUE_CHOICE] choosing #{_selectedIndex}: {label}");
-            ScreenReader.Say($"Gewählt: {label}", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("dialogue.chosen", label), interrupt: true);
 
             // Mirrors a mouse click on the option. This calls back into MultiAnswerGUI.OnChosen,
             // which our OnAnswerChosen postfix catches to clear state.
@@ -251,7 +251,7 @@ internal static class DialogueChoiceHandler
                         GameBalance.me.GetData<ItemDefinition>(lockRes.item.id)?.GetItemName() ?? "").Trim();
                     if (string.IsNullOrEmpty(itemName)) return "";
                     int need = lockRes.item.value;
-                    return need > 1 ? $"braucht {need} {itemName}" : $"braucht {itemName}";
+                    return need > 1 ? Loc.Fmt("dialogue.lock.needs_items", need, itemName) : Loc.Fmt("dialogue.lock.needs_item", itemName);
                 }
 
                 case SmartRes.ResType.GameRes:
@@ -267,13 +267,13 @@ internal static class DialogueChoiceHandler
                         int required = Mathf.RoundToInt(atom.value);
                         int current = 0;
                         try { current = MainGame.me.player.GetParamInt(relParam); } catch { }
-                        return $"braucht Freundschaft {required}, du hast {current}";
+                        return Loc.Fmt("dialogue.lock.friendship", required, current);
                     }
 
                     // Non-relationship GameRes lock (rare in dialogue): tech points, etc. Voice the
                     // raw requirement so it's at least surfaced rather than a silent "not available".
                     int req = Mathf.RoundToInt(atom.value);
-                    return req != 0 ? $"braucht {req} {atom.type}" : "";
+                    return req != 0 ? Loc.Fmt("dialogue.lock.needs_res", req, atom.type) : "";
                 }
             }
         }
@@ -330,7 +330,7 @@ internal static class DialogueChoiceHandler
             var raw = d.icon_price.Length > 2 ? d.icon_price.Substring(2) : "";
             var txt = ScreenReader.StripNguiCodes(raw).Trim();
             if (string.IsNullOrEmpty(txt)) return "";
-            return negative ? "minus " + txt : txt;
+            return negative ? Loc.Fmt("dialogue.price.minus", txt) : txt;
         }
 
         // Item price: icon_price is a sprite name and n_price the count. Resolve the localized item
@@ -345,7 +345,7 @@ internal static class DialogueChoiceHandler
         }
         catch { }
         int n = d.n_price;
-        if (!string.IsNullOrEmpty(itemName)) return n > 1 ? $"{n} {itemName}" : itemName;
+        if (!string.IsNullOrEmpty(itemName)) return n > 1 ? Loc.Fmt("dialogue.price.items", n, itemName) : itemName;
         return n > 1 ? n.ToString() : "";
     }
 
@@ -356,15 +356,15 @@ internal static class DialogueChoiceHandler
         var label = LabelOf(opt);
         var price = PriceOf(opt);
         if (!string.IsNullOrEmpty(price))
-            label = string.IsNullOrEmpty(label) ? $"kostet {price}" : $"{label}, kostet {price}";
+            label = string.IsNullOrEmpty(label) ? Loc.Fmt("dialogue.costs", price) : Loc.Fmt("dialogue.label_costs", label, price);
         if (!string.IsNullOrEmpty(label) && !CanPick(opt))
         {
             // Prefer the concrete reason (e.g. a friendship gate) over the bare "not available",
             // but don't repeat a price we already spoke — a price shortfall has no extra lock.
             var reason = LockReasonOf(opt);
             label += string.IsNullOrEmpty(reason)
-                ? " (nicht verfügbar)"
-                : $" (nicht verfügbar: {reason})";
+                ? " " + Loc.Get("dialogue.suffix.unavailable")
+                : " " + Loc.Fmt("dialogue.suffix.unavailable_reason", reason);
         }
         return label;
     }
@@ -377,16 +377,14 @@ internal static class DialogueChoiceHandler
         // "Leave" (the game filters the rest out silently). Hearing a lone "Gehen." doesn't convey
         // that — say outright that there's nothing to discuss.
         if (_options.Count == 1 && IsLeaveOption(_options[0]))
-            sb.Append("Nichts zu besprechen. ");
+            sb.Append(Loc.Get("dialogue.nothing_to_discuss")).Append(' ');
 
-        sb.Append(_options.Count == 1
-            ? "Eine Antwortmöglichkeit. "
-            : $"{_options.Count} Antwortmöglichkeiten. ");
+        sb.Append(Loc.Plural("dialogue.option_count", _options.Count, _options.Count)).Append(' ');
         for (int i = 0; i < _options.Count; i++)
         {
             var label = OptionPhrase(_options[i]);
             if (string.IsNullOrEmpty(label)) continue;
-            sb.Append($"{i + 1}. {label}. ");
+            sb.Append(Loc.Fmt("dialogue.list_entry", i + 1, label)).Append(' ');
         }
         ScreenReader.Say(sb.ToString().Trim(), interrupt: false);
     }
@@ -406,7 +404,7 @@ internal static class DialogueChoiceHandler
     {
         if (_options == null || _selectedIndex < 0 || _selectedIndex >= _options.Count) return;
         var label = OptionPhrase(_options[_selectedIndex]);
-        ScreenReader.Say($"{_selectedIndex + 1} von {_options.Count}: {label}", interrupt: true);
+        ScreenReader.Say(Loc.Fmt("dialogue.selected", _selectedIndex + 1, _options.Count, label), interrupt: true);
     }
 
     private static void Clear()

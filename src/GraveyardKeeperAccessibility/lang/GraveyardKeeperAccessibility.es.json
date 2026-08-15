@@ -1,0 +1,16 @@
+{
+  "nav.planning_table": "Mesa de planificación",
+  "nav.broken_repair_it": "roto, reparar",
+  "nav.vein": "{0} veta",
+  "mine.word.fence": "valla",
+  "mine.word.bench": "puesto",
+  "mine.word.working": "zombi trabajando",
+  "mine.word.empty": "vacío",
+  "resource.diamond": "diamante",
+  "resource.gold": "oro",
+  "resource.silver": "plata",
+  "resource.iron": "hierro",
+  "resource.marble": "mármol",
+  "resource.granite": "granito",
+  "resource.stone": "piedra"
+}

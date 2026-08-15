@@ -14,6 +14,11 @@ internal class GUIElement
     internal BaseItemCellGUI Cell;
     internal int SortRank;
 
+    // Stable, never-spoken identifier for rows the code has to find again later (the Resurrect
+    // action, the Heal-soul action, the tech-tree / craft category headers). Labels are
+    // translated, so matching on their text would only work in English.
+    internal string Tag;
+
     // Which panel of a multi-panel window this element lives in ("Chest"/"Inventory",
     // "Buy"/"Sell"/"Your offer"/"Vendor offer"). Left/Right jump between these groups so the
     // player can switch sides in one press instead of arrowing past every item on this one.
@@ -100,6 +105,43 @@ internal static class GUIAccessibility
     internal static readonly List<GUIElement> Elements = new();
     internal static int SelectedIndex = -1;
 
+    // GUIElement.Tag values for the rows we look up again after discovery. Never spoken — the
+    // spoken labels are translated, so they can't be used to find a row.
+    internal const string TagResurrect = "resurrect";
+    internal const string TagHealSoul = "heal_soul";
+    internal const string TagCategory = "category";
+
+    /// <summary>
+    /// The spoken name of a window. Windows have no localized title of their own that we can read —
+    /// the announcement used to be the bare C# class name ("MainMenu", "SaveSlotsMenu"), which is
+    /// English wherever the player is. So look the class name up as <c>gui.name.&lt;ClassName&gt;</c>
+    /// in the lang file first.
+    ///
+    /// A window with no entry falls back to its class name with the words split apart
+    /// ("BodyStorage" → "Body Storage"), which at least reads as words rather than one run-on token.
+    /// Add a key for any window whose English name a player would actually notice.
+    /// </summary>
+    private static string GuiDisplayName(BaseGUI gui, string strippedName)
+    {
+        var named = Loc.Find("gui.name." + gui.GetType().Name);
+        return !string.IsNullOrEmpty(named) ? named : SplitCamelCase(strippedName);
+    }
+
+    /// <summary>"SaveSlotsMenu" → "Save Slots Menu". Runs of capitals (HUD, NPC) are kept together.</summary>
+    private static string SplitCamelCase(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return name;
+        var sb = new System.Text.StringBuilder(name.Length + 8);
+        for (int i = 0; i < name.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(name[i])
+                && (!char.IsUpper(name[i - 1]) || (i + 1 < name.Length && char.IsLower(name[i + 1]))))
+                sb.Append(' ');
+            sb.Append(name[i]);
+        }
+        return sb.ToString();
+    }
+
     // The amount/price picker (ItemCountGUI) changes its SmartSlider on Left/Right via the
     // game's own key handling, so stepping it ourselves would double-count. Instead we watch
     // its value each frame and announce changes. _watchedSmart is non-null only while such a
@@ -136,7 +178,10 @@ internal static class GUIAccessibility
 
         DiscoverElements(gui);
 
+        // Two names, deliberately: guiName is the raw class name and drives the type checks below
+        // (Dialog/Subtitle/Caption), so it must never be translated. guiLabel is what we SAY.
         var guiName = gui.GetType().Name.Replace("GUI", "").Replace("Gui", "");
+        var guiLabel = GuiDisplayName(gui, guiName);
         var activeCount = Elements.Count(e => e.Go.activeInHierarchy);
         Plugin.Log.LogInfo($"[GUI OPENED] {guiName}, {activeCount} elements");
 
@@ -211,8 +256,8 @@ internal static class GUIAccessibility
             _watchedPrice = ReadPriceDelegate(countGui);
 
             var item = ScreenReader.StripNguiCodes(countGui.header_label?.text)?.Trim();
-            var msg = string.IsNullOrEmpty(item) ? "Choose amount" : $"{item}, amount {_watchedValue}";
-            ScreenReader.Say($"{msg}{DescribePrice(_watchedValue)}. Left and right to change, Enter to confirm");
+            var msg = string.IsNullOrEmpty(item) ? Loc.Get("amount.choose") : Loc.Fmt("amount.item", item, _watchedValue);
+            ScreenReader.Say(Loc.Fmt("amount.hint", msg, DescribePrice(_watchedValue)));
 
             // Still focus the confirm button so Enter works without arrowing.
             var els = GetActiveElements();
@@ -227,8 +272,8 @@ internal static class GUIAccessibility
         {
             var npcCards = GetActiveElements();
             var npcHeader = npcCards.Count == 1
-                ? "NPCs and quests, 1 character"
-                : $"NPCs and quests, {npcCards.Count} characters";
+                ? Loc.Plural("npcs.header", 1, 1)
+                : Loc.Plural("npcs.header", npcCards.Count, npcCards.Count);
 
             if (npcCards.Count > 0)
             {
@@ -237,7 +282,7 @@ internal static class GUIAccessibility
             }
             else
             {
-                ScreenReader.Say($"{npcHeader}. No characters known yet");
+                ScreenReader.Say(Loc.Fmt("npcs.none_known", npcHeader));
             }
             return;
         }
@@ -251,11 +296,11 @@ internal static class GUIAccessibility
             if (levels.Count > 0)
             {
                 SelectedIndex = 0;
-                ScreenReader.Say($"Dungeon. {DungeonAvailabilitySummary(levels)}. {levels[0].ReadLabel()}");
+                ScreenReader.Say(Loc.Fmt("dungeon.intro", DungeonAvailabilitySummary(levels), levels[0].ReadLabel()));
             }
             else
             {
-                ScreenReader.Say("Dungeon. No levels available");
+                ScreenReader.Say(Loc.Get("dungeon.no_levels"));
             }
             return;
         }
@@ -267,13 +312,13 @@ internal static class GUIAccessibility
         if (gui is MixedCraftGUI || gui is OrganEnhancerGUI)
         {
             var intro = gui is MixedCraftGUI
-                ? "Combine ingredients. Fill the slots, then combine."
-                : "Organ enhancer. Choose an organ, then continue.";
+                ? Loc.Get("combine.intro")
+                : Loc.Get("organ.intro");
             // On the alchemy workbench this table is one tab; tell the player how to get back to
             // the recipe tab(s), which we expose at the end of the list (Up from slot 1 reaches them).
             if (gui is MixedCraftGUI && GUIElements.me != null && GUIElements.me.craft != null
                 && GUIElements.me.craft.is_shown)
-                intro += " Press up to reach the recipe tabs.";
+                intro += " " + Loc.Get("combine.tabs_hint");
             var slots = GetActiveElements();
             if (slots.Count > 0)
             {
@@ -295,9 +340,9 @@ internal static class GUIAccessibility
         {
             var rows = GetActiveElements();
             // Focus the Resurrect action (element index 1: after the status row) when present.
-            int resurrectIdx = rows.FindIndex(e => e.Label != null && e.Label.StartsWith("Resurrect"));
+            int resurrectIdx = rows.FindIndex(e => e.Tag == TagResurrect);
             SelectedIndex = resurrectIdx >= 0 ? resurrectIdx : (rows.Count > 0 ? 0 : -1);
-            ScreenReader.Say($"Resurrection table. {ResurrectStatus(resurrectionGui)}");
+            ScreenReader.Say(Loc.Fmt("resurrect.intro", ResurrectStatus(resurrectionGui)));
             return;
         }
 
@@ -308,7 +353,7 @@ internal static class GUIAccessibility
         {
             var rows = GetActiveElements();
             SelectedIndex = rows.Count > 0 ? SoulHealerFocusIndex(soulHealerGui, rows) : -1;
-            var intro = $"Soul healer. {SoulHealerStatus(soulHealerGui)}";
+            var intro = Loc.Fmt("soulhealer.intro", SoulHealerStatus(soulHealerGui));
             ScreenReader.Say(SelectedIndex >= 0 ? $"{intro} {rows[SelectedIndex].ReadLabel()}" : intro);
             return;
         }
@@ -374,7 +419,7 @@ internal static class GUIAccessibility
             SelectedIndex = GlobalCraftControlHandler.FirstStationIndex(stations);
             ScreenReader.Say(SelectedIndex >= 0
                 ? $"{craftIntro} {stations[SelectedIndex].ReadLabel()}"
-                : $"{craftIntro} No crafting stations in this area.");
+                : Loc.Fmt("remote.no_stations_here", craftIntro));
             return;
         }
 
@@ -384,7 +429,7 @@ internal static class GUIAccessibility
         var active = GetActiveElements();
         SyncGroupCursors(gui, active);
         var cellCount = active.Count(e => e.Type == ElementType.ItemCell);
-        var header = cellCount > 0 ? $"{guiName}, {cellCount} items" : guiName;
+        var header = cellCount > 0 ? Loc.Fmt("gui.header_items", guiLabel, cellCount) : guiLabel;
         if (reopened) header = null;   // coming back from an overlay: no re-introduction
 
         // Survey/study tables look alike but do different jobs — say which one this is up-front
@@ -415,7 +460,7 @@ internal static class GUIAccessibility
         // keyboard stand-in for a sighted player moving the mouse to the other grid.
         var openGroups = ActiveGroups(active);
         if (!reopened && openGroups.Count >= 2)
-            header = Join(header, $"Left and right switch sides, starting at {openGroups[0]}");
+            header = Join(header, Loc.Fmt("gui.sides_hint", openGroups[0]));
 
         // A crafting station (anvil, oven, the buffet, ...) opens its window the instant you press
         // E, which normally cuts off whatever was just spoken — e.g. the object's own approach line
@@ -511,7 +556,7 @@ internal static class GUIAccessibility
         if (_watchedPrice == null) return "";
         try
         {
-            return $", total {MoneyToSpeech(_watchedPrice(amount))}";
+            return ", " + Loc.Fmt("amount.total", MoneyToSpeech(_watchedPrice(amount)));
         }
         catch
         {
@@ -1119,13 +1164,13 @@ internal static class GUIAccessibility
         switch (DungeonLevelState(item))
         {
             case DungeonLevelGUIItem.ButtonState.Selected:
-                return $"Level {n}, current";
+                return Loc.Fmt("dungeon.level_current", n);
             case DungeonLevelGUIItem.ButtonState.Inactive:
-                return $"Level {n}, locked";
+                return Loc.Fmt("dungeon.level_locked", n);
             default:
                 bool completed = false;
                 try { completed = MainGame.me.save.dungeons.GetSavedDungeon(n).is_completed; } catch { }
-                return completed ? $"Level {n}, completed" : $"Level {n}";
+                return completed ? Loc.Fmt("dungeon.level_completed", n) : Loc.Fmt("dungeon.level", n);
         }
     }
 
@@ -1135,8 +1180,8 @@ internal static class GUIAccessibility
     {
         int open = levels.Count(e => !e.Label.EndsWith("locked", StringComparison.OrdinalIgnoreCase));
         int locked = levels.Count - open;
-        var head = open == 1 ? "1 level open" : $"{open} levels open";
-        return locked > 0 ? $"{head}, deeper ones locked" : head;
+        var head = Loc.Plural("dungeon.levels_open", open, open);
+        return locked > 0 ? Loc.Fmt("dungeon.deeper_locked", head) : head;
     }
 
     // Build one navigable row per known NPC shown in the NPCs/quests tab. Each row's label
@@ -1177,7 +1222,7 @@ internal static class GUIAccessibility
         // The relationship is the 0–100 reputation the game draws as a bare number; spell out
         // "out of 100" so it isn't mistaken for a quest counter like "0 of 10".
         if (card.go_relation != null && card.go_relation.activeInHierarchy && !string.IsNullOrWhiteSpace(relation))
-            parts.Add($"{name}, relationship {relation} out of 100");
+            parts.Add(Loc.Fmt("npcs.relationship", name, relation));
         else
             parts.Add(name);
 
@@ -1197,7 +1242,7 @@ internal static class GUIAccessibility
         var npcId = GetLinkedNpcId(card);
         var visitingDay = DayTimeAnnouncer.VisitingDayForNpc(npcId);
         if (gameShowsDay && !string.IsNullOrEmpty(visitingDay))
-            parts.Add($"Zugehöriger Tag: {visitingDay}");
+            parts.Add(Loc.Fmt("npcs.visiting_day", visitingDay));
 
         var descr = ScreenReader.StripNguiCodes(card.npc_descr?.text)?.Trim();
         if (!string.IsNullOrWhiteSpace(descr) && descr.IndexOf('!') < 0)
@@ -1213,7 +1258,7 @@ internal static class GUIAccessibility
                 quests.Add(text);
         }
         if (quests.Count > 0)
-            parts.Add($"Quests: {string.Join(". ", quests)}");
+            parts.Add(Loc.Fmt("npcs.quests", string.Join(". ", quests)));
 
         return string.Join(". ", parts);
     }
@@ -1354,7 +1399,7 @@ internal static class GUIAccessibility
             Elements.Add(new GUIElement
             {
                 Go = close.gameObject,
-                Label = "Schließen",
+                Label = Loc.Get("common.close"),
                 Type = ElementType.Button,
                 OnActivate = () =>
                 {
@@ -1438,7 +1483,7 @@ internal static class GUIAccessibility
         {
             var cost = ScreenReader.StripNguiCodes(gui.label_cost.text)?.Trim();
             if (!string.IsNullOrWhiteSpace(cost))
-                parts.Add($"Cost {cost}");
+                parts.Add(Loc.Fmt("tech.cost", cost));
         }
 
         var body = string.Join(". ", parts);
@@ -1448,7 +1493,7 @@ internal static class GUIAccessibility
         if (active.Count > 0)
             ScreenReader.Say(string.IsNullOrEmpty(body) ? active[0].ReadLabel() : $"{body}. {active[0].ReadLabel()}");
         else
-            ScreenReader.Say(string.IsNullOrEmpty(body) ? "New technology unlocked" : body);
+            ScreenReader.Say(string.IsNullOrEmpty(body) ? Loc.Get("tech.new_unlocked") : body);
     }
 
     // Build navigable rows for a tutorial window. A content pop-up (TutorialGUI) has no real
@@ -1485,7 +1530,7 @@ internal static class GUIAccessibility
         Elements.Add(new GUIElement
         {
             Go = gui.gameObject,
-            Label = "Close",
+            Label = Loc.Get("common.close"),
             Type = ElementType.Button,
             OnActivate = () =>
             {
@@ -1536,9 +1581,9 @@ internal static class GUIAccessibility
     private static string HumanizeReportTokens(string text)
     {
         if (string.IsNullOrEmpty(text) || text.IndexOf('(') < 0) return text;
-        text = text.Replace("(:-))", "guests loved it")
-                   .Replace("(:-|)", "guests were fine with it")
-                   .Replace("(:-()", "guests disliked it");
+        text = text.Replace("(:-))", Loc.Get("report.guests_loved"))
+                   .Replace("(:-|)", Loc.Get("report.guests_fine"))
+                   .Replace("(:-()", Loc.Get("report.guests_disliked"));
         return text.Replace("(s1)", "1 star").Replace("(s2)", "2 stars").Replace("(s3)", "3 stars");
     }
 
@@ -1574,7 +1619,7 @@ internal static class GUIAccessibility
             var active = GetActiveElements();
             SelectedIndex = active.Count > 0 ? 0 : -1;
 
-            var lead = string.IsNullOrWhiteSpace(body) ? "Report" : body;
+            var lead = string.IsNullOrWhiteSpace(body) ? Loc.Get("report.title") : body;
             Plugin.Log.LogInfo($"[{tag}] reading ({parts.Count} rows): {lead}");
 
             // Don't speak the report at open-time. Both reports open inside a burst of other
@@ -1583,14 +1628,14 @@ internal static class GUIAccessibility
             // in that collision (it reached TTS per the log but was never heard). Defer it:
             // re-assert the report as one interrupting line a beat later (FlushPendingReport, run
             // every frame), so it lands as the last, clean thing the player hears.
-            _pendingReport = $"{lead}. Press Enter to close.";
+            _pendingReport = Loc.Fmt("report.press_enter", lead);
             _pendingReportGUI = gui;
             _pendingReportTime = Time.unscaledTime + 0.7f;
         }
         catch (Exception ex)
         {
             Plugin.Log.LogWarning($"[{tag}] read failed: {ex.Message}");
-            ScreenReader.Say("Report. Press Enter to close.");
+            ScreenReader.Say(Loc.Fmt("report.press_enter", Loc.Get("report.title")));
         }
     }
 
@@ -1602,7 +1647,7 @@ internal static class GUIAccessibility
         var active = GetActiveElements();
         SelectedIndex = active.Count > 0 ? 0 : -1;
 
-        var lead = string.IsNullOrEmpty(body) ? "Tutorial" : body;
+        var lead = string.IsNullOrEmpty(body) ? Loc.Get("tutorial.title") : body;
         if (active.Count > 0)
             ScreenReader.Say($"{lead}. {active[SelectedIndex].ReadLabel()}");
         else
@@ -1729,8 +1774,8 @@ internal static class GUIAccessibility
             if (cri.craft_definition?.id == "_remove_")
             {
                 var rname = ScreenReader.StripNguiCodes(cri.label_name?.text)?.Trim();
-                if (string.IsNullOrWhiteSpace(rname)) rname = "Remove object";
-                return $"{rname}. Enter to choose what to demolish";
+                if (string.IsNullOrWhiteSpace(rname)) rname = Loc.Get("build.remove_object");
+                return Loc.Fmt("build.remove_hint", rname);
             }
         }
         catch { }
@@ -1754,7 +1799,7 @@ internal static class GUIAccessibility
             catch { }
         }
 
-        if (string.IsNullOrWhiteSpace(name)) name = "Build option";
+        if (string.IsNullOrWhiteSpace(name)) name = Loc.Get("build.option");
 
         var label = name;
 
@@ -1765,7 +1810,7 @@ internal static class GUIAccessibility
         if (!string.IsNullOrEmpty(points)) label += $". {points}";
 
         var needs = CraftNeedsText(cri);
-        if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
+        if (!string.IsNullOrEmpty(needs)) label += ". " + Loc.Fmt("craft.requires", needs);
 
         if (CanBuild(cri))
         {
@@ -1780,7 +1825,7 @@ internal static class GUIAccessibility
             string missing = null;
             try { missing = MissingNeedsText(cri.craft_definition, MainGame.me?.build_mode_logics?.multi_inventory); }
             catch { }
-            label += missing != null ? $". Missing {missing}" : ". Not enough materials";
+            label += missing != null ? ". " + Loc.Fmt("craft.missing", missing) : ". " + Loc.Get("craft.not_enough_materials");
             try { Plugin.Log.LogInfo($"[BUILD] {cri.craft_definition?.id} unaffordable: {missing ?? "shortfall unknown"}"); }
             catch { }
         }
@@ -1821,7 +1866,7 @@ internal static class GUIAccessibility
             if (Mathf.Abs(num) < 0.05f) return null;
             var val = num.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             var zone = BuildZoneLabel();
-            return zone != null ? $"Gives {val} {zone} points" : $"Gives {val} points";
+            return zone != null ? Loc.Fmt("build.points_zone", val, zone) : Loc.Fmt("build.points", val);
         }
         catch
         {
@@ -2036,8 +2081,8 @@ internal static class GUIAccessibility
 
         string amountPart = infinite
             ? "endless"
-            : (string.IsNullOrEmpty(countText) ? "queued" : $"{countText} queued");
-        return $"Queue: {name}, {amountPart}. Enter for endless, Left or Right to change amount, Delete to remove";
+            : (string.IsNullOrEmpty(countText) ? Loc.Get("queue.queued") : Loc.Fmt("queue.n_queued", countText));
+        return Loc.Fmt("queue.row", name, amountPart);
     }
 
     /// <summary>Whether this station accepts a zombie worker — i.e. selecting a recipe adds it to
@@ -2088,12 +2133,12 @@ internal static class GUIAccessibility
                 if (main.id_empty)
                 {
                     var hint = ResourceHint();
-                    return string.IsNullOrEmpty(hint) ? "Choose item" : $"Choose item. {hint}";
+                    return string.IsNullOrEmpty(hint) ? Loc.Get("combine.choose_item") : Loc.Fmt("combine.choose_item_hint", hint);
                 }
                 var chosen = InventoryItemHandler.DescribeItemCell(main);
                 var baseLabel = string.IsNullOrEmpty(chosen)
-                    ? "Choose item"
-                    : $"Selected {chosen}. Enter to choose a different item";
+                    ? Loc.Get("combine.choose_item")
+                    : Loc.Fmt("combine.selected", chosen);
                 // Append the reward/hint (e.g. the science you'll get from decomposing) so it's
                 // read right after you pick the item, not only while the slot is empty.
                 var sel = ResourceHint();
@@ -2137,8 +2182,8 @@ internal static class GUIAccessibility
                     }
                 }
                 if (string.IsNullOrEmpty(desc)) continue;
-                var shortNote = ing.is_inactive_state ? ", you don't have enough" : "";
-                var label = $"Requires {desc}{shortNote}";
+                var shortNote = ing.is_inactive_state ? ", " + Loc.Get("craft.you_dont_have_enough") : "";
+                var label = Loc.Fmt("craft.requires", desc) + shortNote;
                 Elements.Add(new GUIElement
                 {
                     Go = ing.gameObject,
@@ -2160,7 +2205,7 @@ internal static class GUIAccessibility
                 var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
                 if (string.IsNullOrEmpty(verb)) verb = "Craft";
                 if (CanCraftNow()) return verb;
-                if (main != null && main.id_empty) return $"{verb}, choose an item first";
+                if (main != null && main.id_empty) return Loc.Fmt("combine.choose_first", verb);
                 // Name exactly what's short on the button itself. A blind player who presses the
                 // button and hears only "not enough materials" can't tell whether they're out of
                 // faith, science (Wissenschaft) or a material — and won't necessarily arrow over to
@@ -2168,8 +2213,8 @@ internal static class GUIAccessibility
                 // running out of Wissenschaft is the usual culprit, so spell it out.
                 var missing = MissingNeedsText(gui, main);
                 return string.IsNullOrEmpty(missing)
-                    ? $"{verb}, not enough materials"
-                    : $"{verb}, not enough, you need {missing}";
+                    ? Loc.Fmt("combine.not_enough", verb)
+                    : Loc.Fmt("combine.not_enough_missing", verb, missing);
             }
 
             // Study/decompose crafts (paper -> Wissenschaft, alchemy decompose) are instant and
@@ -2189,13 +2234,13 @@ internal static class GUIAccessibility
                     if (!CanCraftNow())
                     {
                         if (main != null && main.id_empty)
-                            ScreenReader.Say("Choose an item first");
+                            ScreenReader.Say(Loc.Get("combine.choose_an_item_first"));
                         else
                         {
                             var missing = MissingNeedsText(gui, main);
                             ScreenReader.Say(string.IsNullOrEmpty(missing)
-                                ? "Not enough materials"
-                                : $"Not enough, you need {missing}");
+                                ? Loc.Get("craft.not_enough_materials")
+                                : Loc.Fmt("craft.not_enough_you_need", missing));
                         }
                         return;
                     }
@@ -2213,7 +2258,7 @@ internal static class GUIAccessibility
                     else
                     {
                         var verb = ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim();
-                        ScreenReader.Say(string.IsNullOrEmpty(verb) ? "Crafting" : verb);
+                        ScreenReader.Say(string.IsNullOrEmpty(verb) ? Loc.Get("craft.crafting_generic") : verb);
                     }
                     if (_currentGUI is ResourceBasedCraftGUI)
                         RefreshCurrentGUI(SelectedIndex);
@@ -2238,8 +2283,8 @@ internal static class GUIAccessibility
                     var done = StudyDoneWord(gui);
                     var verb = !string.IsNullOrEmpty(done)
                         ? done
-                        : (ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim() ?? "Crafted");
-                    ScreenReader.Say(count > 1 ? $"{verb} {count}" : verb, interrupt: true);
+                        : (ScreenReader.StripNguiCodes(gui.label_craft_btn?.text)?.Trim() ?? Loc.Get("craft.crafted_generic"));
+                    ScreenReader.Say(count > 1 ? Loc.Fmt("craft.verb_count", verb, count) : verb, interrupt: true);
                 };
             }
 
@@ -2252,7 +2297,7 @@ internal static class GUIAccessibility
             Elements.Add(new GUIElement
             {
                 Go = gui.close_btn,
-                Label = "Close",
+                Label = Loc.Get("common.close"),
                 Type = ElementType.Button
             });
         }
@@ -2285,11 +2330,11 @@ internal static class GUIAccessibility
 
                 string SlotLabel()
                 {
-                    var pos = $"Slot {n + 1}";
+                    var pos = Loc.Fmt("combine.slot", n + 1);
                     if (cell.id_empty)
-                        return $"{pos}, empty. Enter to choose an ingredient";
+                        return Loc.Fmt("combine.slot_empty", pos);
                     var d = InventoryItemHandler.DescribeItemCell(cell);
-                    return string.IsNullOrEmpty(d) ? pos : $"{pos}, {d}. Enter to change";
+                    return string.IsNullOrEmpty(d) ? pos : Loc.Fmt("combine.slot_filled", pos, d);
                 }
 
                 Elements.Add(new GUIElement
@@ -2307,8 +2352,8 @@ internal static class GUIAccessibility
         // and the button's UIButton.isEnabled mirrors that, so use it for the label/gate. The
         // station stays open and clears the slots after a combine, so refresh to re-read them.
         AddSlotStationButton(gui, gui.GetComponentInChildren<GamepadSelectableButton>(true),
-            "Combine", "add ingredients to the slots first", () => gui.OnCraftPressed(),
-            refreshDone: "Combined");
+            Loc.Get("combine.button"), Loc.Get("combine.button_hint"), () => gui.OnCraftPressed(),
+            refreshDone: Loc.Get("combine.done"));
 
         AddStationCloseRow(gui, () => gui.OnClosePressed());
 
@@ -2339,9 +2384,9 @@ internal static class GUIAccessibility
             string SlotLabel()
             {
                 if (cell.id_empty)
-                    return "Organ to enhance, empty. Enter to choose an organ";
+                    return Loc.Get("organ.slot_empty");
                 var d = InventoryItemHandler.DescribeItemCell(cell);
-                return string.IsNullOrEmpty(d) ? "Organ to enhance" : $"Organ to enhance, {d}. Enter to change";
+                return string.IsNullOrEmpty(d) ? Loc.Get("organ.slot") : Loc.Fmt("organ.slot_filled", d);
             }
 
             Elements.Add(new GUIElement
@@ -2357,7 +2402,7 @@ internal static class GUIAccessibility
         // Pressing this opens the regular crafting window for the chosen organ, so there's nothing
         // to refresh here — CheckForNewGUI announces the CraftGUI that opens next.
         AddSlotStationButton(gui, gui.GetComponentInChildren<GamepadSelectableButton>(true),
-            "Continue", "choose an organ first", () => gui.OnChooseButtonPress(), refreshDone: null);
+            Loc.Get("organ.continue"), Loc.Get("organ.continue_hint"), () => gui.OnChooseButtonPress(), refreshDone: null);
 
         AddStationCloseRow(gui, () => gui.OnClosePressed());
         Plugin.Log.LogInfo($"[ORGANENHANCER] discovered, {Elements.Count} element(s)");
@@ -2401,13 +2446,13 @@ internal static class GUIAccessibility
 
             var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
             if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
-            all.Add(need.value > 1 ? $"{need.value} {iname}" : iname);
+            all.Add(need.value > 1 ? Loc.Fmt("audit.material", need.value, iname) : iname);
 
             int have = 0;
             try { have = inv != null ? inv.GetTotalCount(need.id) : 0; } catch { }
             int shortfall = need.value - have;
             if (shortfall > 0)
-                missing.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
+                missing.Add(shortfall > 1 ? Loc.Fmt("audit.material", shortfall, iname) : iname);
         }
     }
 
@@ -2432,19 +2477,19 @@ internal static class GUIAccessibility
     {
         var body = GetResurrectBody(gui);
         ResurrectNeeds(GameBalance.me.GetData<CraftDefinition>("zombie_craft"), out var all, out var missing);
-        string needsPhrase = all.Count > 0 ? $"Needs {string.Join(", ", all)}." : "";
+        string needsPhrase = all.Count > 0 ? Loc.Fmt("resurrect.needs", string.Join(", ", all)) : "";
 
         if (body == null)
-            return $"No corpse on the table. Lay a corpse here first. {needsPhrase}".Trim();
+            return Loc.Fmt("resurrect.no_corpse", needsPhrase).Trim();
 
         int cond = Mathf.RoundToInt(Mathf.Clamp01(body.durability) * 100f);
         if (body.durability < 0.9f)
-            return $"Corpse condition {cond} percent, too decayed to resurrect. Needs at least 90 percent. {needsPhrase}".Trim();
+            return Loc.Fmt("resurrect.too_decayed", cond, needsPhrase).Trim();
 
         if (missing.Count > 0)
-            return $"Corpse ready, condition {cond} percent. {needsPhrase} You still need {string.Join(", ", missing)}, check they're in your inventory or a chest nearby.".Trim();
+            return Loc.Fmt("resurrect.missing", cond, needsPhrase, string.Join(", ", missing)).Trim();
 
-        return $"Corpse ready, condition {cond} percent. {needsPhrase} Ready to resurrect, press Enter.".Trim();
+        return Loc.Fmt("resurrect.ready", cond, needsPhrase).Trim();
     }
 
     /// <summary>
@@ -2464,6 +2509,10 @@ internal static class GUIAccessibility
             Type = ElementType.Button
         });
 
+        // The resurrect row's own text: ready to press, or the reason it isn't.
+        string ResurrectRowLabel(ResurrectionGUI g) =>
+            ResurrectReady(g) ? Loc.Get("resurrect.row_ready") : Loc.Fmt("resurrect.row_blocked", ResurrectStatus(g));
+
         // The resurrect action. Anchor it to the always-active GUI root, not resurrect_btn's
         // GameObject: the game sets that button inactive when the corpse is too decayed, which would
         // filter this row out of navigation exactly when the player needs to hear why. Only press
@@ -2472,8 +2521,9 @@ internal static class GUIAccessibility
         Elements.Add(new GUIElement
         {
             Go = gui.gameObject,
-            Label = ResurrectReady(gui) ? "Resurrect, ready. Press Enter" : $"Resurrect. {ResurrectStatus(gui)}",
-            ReadDynamic = () => ResurrectReady(gui) ? "Resurrect, ready. Press Enter" : $"Resurrect. {ResurrectStatus(gui)}",
+            Tag = TagResurrect,
+            Label = ResurrectRowLabel(gui),
+            ReadDynamic = () => ResurrectRowLabel(gui),
             Type = ElementType.Button,
             OnActivate = () =>
             {
@@ -2494,7 +2544,7 @@ internal static class GUIAccessibility
             Elements.Add(new GUIElement
             {
                 Go = gui.gameObject,
-                Label = "Take corpse back",
+                Label = Loc.Get("resurrect.take_corpse_back"),
                 Type = ElementType.Button,
                 OnActivate = () =>
                 {
@@ -2606,7 +2656,8 @@ internal static class GUIAccessibility
         var id = SinItemId(sin.item_type);
         var name = DescribeItemId(id);
         // DescribeItemId echoes the raw id back when there's no definition for it — not speech.
-        if (string.IsNullOrWhiteSpace(name) || name == id) return sin.item_type.ToString();
+        // The enum name ("Gluttony") is English; the lang file names the seven sins instead.
+        if (string.IsNullOrWhiteSpace(name) || name == id) return Loc.Get("sin." + sin.item_type);
         return name;
     }
 
@@ -2628,15 +2679,15 @@ internal static class GUIAccessibility
     private static string SoulSlotLabel(SoulHealerGUI gui)
     {
         var cell = GetSoulSlot(gui);
-        if (cell == null) return "Soul slot";
+        if (cell == null) return Loc.Get("soul.slot");
         var soul = GetInsertedSoul(gui);
         if (soul == null)
-            return "Soul slot, empty. Enter to insert a soul";
+            return Loc.Get("soul.slot_empty");
 
         var desc = InventoryItemHandler.DescribeItemCell(cell);
         if (string.IsNullOrEmpty(desc)) desc = DescribeItemId(soul.id);
         int quality = Mathf.RoundToInt(Mathf.Clamp01(soul.durability) * 100f);
-        return $"Soul slot, {desc}, quality {quality} percent. Enter to take it back";
+        return Loc.Fmt("soul.slot_filled", desc, quality);
     }
 
     /// <summary>
@@ -2651,33 +2702,33 @@ internal static class GUIAccessibility
         bool needed = SinIsInSoul(sin, soul);
 
         if (soul == null)
-            parts.Add("insert a soul first to see whether this sin needs treating");
+            parts.Add(Loc.Get("soul.sin.insert_first"));
         else if (!needed)
-            parts.Add("not in this soul, no organ needed");
+            parts.Add(Loc.Get("soul.sin.not_present"));
         else
         {
             var bar = GetSinSkullBar(sin);
             if (bar != null)
-                parts.Add($"needs {bar.red_skulls_sin} red and {bar.green_skulls_sin} white skulls");
+                parts.Add(Loc.Fmt("soul.sin.needs", bar.red_skulls_sin, bar.green_skulls_sin));
         }
 
         var organName = DescribeItemId(SinItem.GetOrganIdBySin(sin));
         if (!SinSlotFilled(sin))
         {
             parts.Add(string.IsNullOrEmpty(organName)
-                ? "slot empty. Enter to choose an organ"
-                : $"slot empty, takes {organName}. Enter to choose one");
+                ? Loc.Get("soul.organ.empty")
+                : Loc.Fmt("soul.organ.empty_takes", organName));
         }
         else
         {
             var desc = InventoryItemHandler.DescribeItemCell(sin.item_cell_gui);
-            parts.Add(string.IsNullOrEmpty(desc) ? "organ inserted" : desc);
+            parts.Add(string.IsNullOrEmpty(desc) ? Loc.Get("soul.organ.inserted") : desc);
             var bar = GetSinSkullBar(sin);
             if (bar != null)
-                parts.Add($"supplies {bar.red_skulls_organ} red and {bar.green_skulls_organ} white");
+                parts.Add(Loc.Fmt("soul.organ.supplies", bar.red_skulls_organ, bar.green_skulls_organ));
             if (needed)
-                parts.Add($"match {Mathf.RoundToInt(Mathf.Clamp01(sin.GetHealRate()) * 100f)} percent");
-            parts.Add("Enter to take it back");
+                parts.Add(Loc.Fmt("soul.organ.match", Mathf.RoundToInt(Mathf.Clamp01(sin.GetHealRate()) * 100f)));
+            parts.Add(Loc.Get("soul.organ.take_back_hint"));
         }
 
         return string.Join(", ", parts);
@@ -2694,7 +2745,7 @@ internal static class GUIAccessibility
         var soul = GetInsertedSoul(gui);
         if (soul == null)
         {
-            blocker = "No soul in the slot yet";
+            blocker = Loc.Get("soul.blocker.no_soul");
             return false;
         }
 
@@ -2709,12 +2760,12 @@ internal static class GUIAccessibility
             var organ = DescribeItemId(SinItem.GetOrganIdBySin(sin));
             missing.Add(string.IsNullOrEmpty(organ)
                 ? SinDisplayName(sin)
-                : $"{SinDisplayName(sin)} needs {organ}");
+                : Loc.Fmt("soul.blocker.sin_needs", SinDisplayName(sin), organ));
         }
 
         if (missing.Count > 0)
         {
-            blocker = $"Still missing: {string.Join("; ", missing)}";
+            blocker = Loc.Fmt("soul.blocker.missing", string.Join("; ", missing));
             return false;
         }
 
@@ -2726,7 +2777,7 @@ internal static class GUIAccessibility
             catch { }
             if (craft == null)
             {
-                blocker = "This soul can't be healed at this station";
+                blocker = Loc.Get("soul.blocker.cannot_heal");
                 return false;
             }
         }
@@ -2743,7 +2794,7 @@ internal static class GUIAccessibility
     {
         var soul = GetInsertedSoul(gui);
         if (soul == null)
-            return "No soul inserted. Put a soul in the soul slot, then fill each sin slot with the organ it asks for.";
+            return Loc.Get("soul.status.no_soul");
 
         int quality = Mathf.RoundToInt(Mathf.Clamp01(soul.durability) * 100f);
         float rate = GetSoulHealRate(gui);
@@ -2752,10 +2803,9 @@ internal static class GUIAccessibility
         int matched = Mathf.RoundToInt(Mathf.Clamp01(rate < 0f ? 1f : rate) * 100f);
         int end = Mathf.Clamp(Mathf.RoundToInt((Mathf.Clamp01(soul.durability) - loss) * 100f), 0, 100);
 
-        var text = $"Soul quality {quality} percent, sins covered {matched} percent, "
-                 + $"healed soul would come out at {end} percent.";
+        var text = Loc.Fmt("soul.status.summary", quality, matched, end);
 
-        return SoulHealReady(gui, out var blocker) ? $"{text} Ready to heal." : $"{text} {blocker}.";
+        return SoulHealReady(gui, out var blocker) ? Loc.Fmt("soul.status.ready", text) : $"{text} {blocker}.";
     }
 
     /// <summary>
@@ -2787,7 +2837,7 @@ internal static class GUIAccessibility
                 ReadDynamic = () => SoulSlotLabel(gui),
                 Type = ElementType.ItemCell,
                 Cell = soulCell,
-                OnActivate = () => PressSoulHealerCell(gui, soulCell, "Soul taken back")
+                OnActivate = () => PressSoulHealerCell(gui, soulCell, Loc.Get("soul.taken_back"))
             });
         }
 
@@ -2804,7 +2854,7 @@ internal static class GUIAccessibility
                 ReadDynamic = () => SoulHealerSinLabel(gui, captured),
                 Type = ElementType.ItemCell,
                 Cell = captured.item_cell_gui,
-                OnActivate = () => PressSoulHealerCell(gui, captured.item_cell_gui, "Organ taken back")
+                OnActivate = () => PressSoulHealerCell(gui, captured.item_cell_gui, Loc.Get("soul.organ_taken_back"))
             });
         }
 
@@ -2814,13 +2864,14 @@ internal static class GUIAccessibility
         string HealLabel()
         {
             return SoulHealReady(gui, out var why)
-                ? "Heal soul, ready. Press Enter"
-                : $"Heal soul. {why}";
+                ? Loc.Get("soul.heal_ready")
+                : Loc.Fmt("soul.heal_blocked", why);
         }
 
         Elements.Add(new GUIElement
         {
             Go = gui.gameObject,
+            Tag = TagHealSoul,
             Label = HealLabel(),
             ReadDynamic = HealLabel,
             Type = ElementType.Button,
@@ -2835,7 +2886,7 @@ internal static class GUIAccessibility
                 {
                     // Starts the craft and hides the window; the pickup announcer voices the result.
                     gui.soul_healing_widget.OnStartHealButtonPressed();
-                    ScreenReader.Say("Healing the soul");
+                    ScreenReader.Say(Loc.Get("soul.healing"));
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning($"[SOULHEALER] heal failed: {ex.Message}"); }
             }
@@ -2868,7 +2919,7 @@ internal static class GUIAccessibility
             if (i >= 0) return i;
         }
 
-        int heal = rows.FindIndex(e => e.Label != null && e.Label.StartsWith("Heal soul"));
+        int heal = rows.FindIndex(e => e.Tag == TagHealSoul);
         return heal >= 0 ? heal : 0;
     }
 
@@ -2906,7 +2957,7 @@ internal static class GUIAccessibility
             var t = ScreenReader.StripNguiCodes(btn.ui_button?.GetComponentInChildren<UILabel>(true)?.text)?.Trim();
             return string.IsNullOrEmpty(t) ? defaultVerb : t;
         }
-        string Label() => CanPress() ? Verb() : $"{Verb()}, {disabledHint}";
+        string Label() => CanPress() ? Verb() : Loc.Fmt("craft.verb_hint", Verb(), disabledHint);
 
         Elements.Add(new GUIElement
         {
@@ -2942,7 +2993,7 @@ internal static class GUIAccessibility
         Elements.Add(new GUIElement
         {
             Go = gui.gameObject,
-            Label = "Close",
+            Label = Loc.Get("common.close"),
             Type = ElementType.Button,
             OnActivate = () => { try { onClose(); } catch (Exception ex) { Plugin.Log.LogWarning($"[SLOTCRAFT] close failed: {ex.Message}"); } }
         });
@@ -2970,15 +3021,15 @@ internal static class GUIAccessibility
             {
                 Go = go,
                 Type = switchable ? ElementType.Switcher : ElementType.Button,
-                Label = "Ingredient",
+                Label = Loc.Get("craft.ingredient"),
                 ReadDynamic = () => IngredientLabel(cri, idx, cell, switchable)
             };
             if (switchable)
             {
                 // CraftItemGUI.OnChangeIngredient uses step +1 = "previous", -1 = "next"; map
                 // Right -> next, Left -> previous so the order feels natural, and re-announce.
-                elem.OnAdjustRight = () => { if (ChangeIngredient(cri, idx, -1)) AnnounceFocused(); else ScreenReader.Say("No higher quality option"); };
-                elem.OnAdjustLeft = () => { if (ChangeIngredient(cri, idx, 1)) AnnounceFocused(); else ScreenReader.Say("No lower quality option"); };
+                elem.OnAdjustRight = () => { if (ChangeIngredient(cri, idx, -1)) AnnounceFocused(); else ScreenReader.Say(Loc.Get("craft.no_higher_quality")); };
+                elem.OnAdjustLeft = () => { if (ChangeIngredient(cri, idx, 1)) AnnounceFocused(); else ScreenReader.Say(Loc.Get("craft.no_lower_quality")); };
             }
             Elements.Add(elem);
         }
@@ -2987,7 +3038,7 @@ internal static class GUIAccessibility
         {
             Go = cri.gameObject,
             Type = ElementType.Button,
-            Label = "Predicted quality",
+            Label = Loc.Get("craft.predicted_quality"),
             ReadDynamic = () => PredictedQualityLabel(cri),
             OnActivate = () => ScreenReader.Say(PredictedQualityLabel(cri))
         });
@@ -2996,7 +3047,7 @@ internal static class GUIAccessibility
         {
             Go = cri.gameObject,
             Type = ElementType.Button,
-            Label = $"Craft {OutputName(cri)}" + (CanCraftRecipe(cri) ? "" : $", {CraftUnavailableReason(cri).ToLowerInvariant()}"),
+            Label = Loc.Fmt("craft.craft_output", OutputName(cri)) + (CanCraftRecipe(cri) ? "" : $", {CraftUnavailableReason(cri).ToLowerInvariant()}"),
             OnActivate = () => CraftMultiquality(craftGui, cri)
         });
 
@@ -3004,7 +3055,7 @@ internal static class GUIAccessibility
         {
             Go = cri.gameObject,
             Type = ElementType.Button,
-            Label = "Back to recipe list",
+            Label = Loc.Get("craft.back_to_list"),
             OnActivate = () => CollapseDetailedView(craftGui, cri)
         });
 
@@ -3029,7 +3080,7 @@ internal static class GUIAccessibility
 
         var active = GetActiveElements();
         SelectedIndex = active.Count > 0 ? 0 : -1;
-        var lead = $"Choosing quality for {OutputName(cri)}";
+        var lead = Loc.Fmt("craft.choosing_quality", OutputName(cri));
         ScreenReader.Say(active.Count > 0 ? $"{lead}. {active[0].ReadLabel()}" : lead);
     }
 
@@ -3046,7 +3097,7 @@ internal static class GUIAccessibility
         var idx = active.FindIndex(e => e.Go == cri.gameObject);
         SelectedIndex = idx >= 0 ? idx : (active.Count > 0 ? 0 : -1);
         if (SelectedIndex >= 0)
-            ScreenReader.Say($"Recipe list. {active[SelectedIndex].ReadLabel()}");
+            ScreenReader.Say(Loc.Fmt("craft.recipe_list", active[SelectedIndex].ReadLabel()));
     }
 
     /// <summary>Craft the expanded recipe at the chosen ingredient qualities.</summary>
@@ -3071,7 +3122,7 @@ internal static class GUIAccessibility
         DiscoverElements(craftGui);
         var active = GetActiveElements();
         SelectedIndex = Mathf.Clamp(SelectedIndex, 0, Mathf.Max(0, active.Count - 1));
-        ScreenReader.Say($"Crafting {OutputName(cri)}");
+        ScreenReader.Say(Loc.Fmt("craft.crafting", OutputName(cri)));
     }
 
     // --- Multiquality reflection helpers (CraftItemGUI internals) ---
@@ -3180,7 +3231,7 @@ internal static class GUIAccessibility
         }
         catch { }
 
-        return switchable ? $"{desc}. Left or right to change quality" : desc;
+        return switchable ? Loc.Fmt("craft.switch_quality_hint", desc) : desc;
     }
 
     /// <summary>Resolve an item id to "name" or "name, tier quality" (for star items).</summary>
@@ -3213,11 +3264,11 @@ internal static class GUIAccessibility
                 int bronze = Mathf.RoundToInt(p[0] * 100f);
                 int silver = Mathf.RoundToInt(p[1] * 100f);
                 int gold = Mathf.RoundToInt(p[2] * 100f);
-                return $"Predicted quality: bronze {bronze} percent, silver {silver} percent, gold {gold} percent";
+                return Loc.Fmt("craft.predicted_quality_values", bronze, silver, gold);
             }
         }
         catch (Exception ex) { Plugin.Log.LogWarning($"[CRAFT] predicted quality failed: {ex.Message}"); }
-        return "Predicted quality unavailable";
+        return Loc.Get("craft.predicted_quality_unavailable");
     }
 
     private static string OutputName(CraftItemGUI cri)
@@ -3253,7 +3304,8 @@ internal static class GUIAccessibility
             Elements.Add(new GUIElement
             {
                 Go = tab.gameObject,
-                Label = $"Category: {CraftTabLabel(tab)}",
+                Tag = TagCategory,
+                Label = Loc.Fmt("craft.category", CraftTabLabel(tab)),
                 Type = ElementType.Button,
                 OnActivate = () => SwitchCraftTab(craftGui, captured)
             });
@@ -3274,7 +3326,7 @@ internal static class GUIAccessibility
         if (active.Count == 0)
         {
             SelectedIndex = -1;
-            ScreenReader.Say($"{name}. Empty");
+            ScreenReader.Say(Loc.Fmt("gui.name_empty", name));
             return;
         }
 
@@ -3295,7 +3347,7 @@ internal static class GUIAccessibility
     {
         var id = tab?.tab_id ?? "";
         if (id.StartsWith("?")) id = id.Substring(1);
-        if (string.IsNullOrEmpty(id)) return "Other";
+        if (string.IsNullOrEmpty(id)) return Loc.Get("common.other");
         try
         {
             var loc = ScreenReader.StripNguiCodes(GJL.L("tab_" + id) ?? "").Trim();
@@ -3335,7 +3387,7 @@ internal static class GUIAccessibility
         {
             var cd = cri.current_craft;
             if (cd != null && !string.IsNullOrEmpty(cd.change_wgo) && cd.GetFirstRealOutput() == null)
-                label = $"Repair: {name}";
+                label = Loc.Fmt("craft.repair", name);
 
             // The grave-part window (OpenAsGrave) builds two synthetic crafts whose ids don't
             // localize: a "fix_grave_craft_<part>" repair and a "_remove_" removal. Name them.
@@ -3344,16 +3396,16 @@ internal static class GUIAccessibility
                 if (!string.IsNullOrEmpty(cd.id) && cd.id.StartsWith("fix_grave_craft_"))
                     label = cd.id.EndsWith("cross") ? "Repair cross" : "Repair fence";
                 else if (cd.custom_name == "_remove_")
-                    label = "Remove part";
+                    label = Loc.Get("craft.remove_part");
             }
         }
         catch { }
 
         var needs = CraftNeedsText(cri);
-        if (!string.IsNullOrEmpty(needs)) label += $". Requires {needs}";
+        if (!string.IsNullOrEmpty(needs)) label += ". " + Loc.Fmt("craft.requires", needs);
         label += CanCraftRecipe(cri) ? ". Ready" : $". {CraftUnavailableReason(cri)}";
         // Star-quality recipes open a quality picker on Enter rather than crafting directly.
-        if (IsMultiquality(cri)) label += ". Enter to choose quality";
+        if (IsMultiquality(cri)) label += ". " + Loc.Get("craft.choose_quality_hint");
         return label;
     }
 
@@ -3392,7 +3444,7 @@ internal static class GUIAccessibility
     private static string CraftAmountSuffix(CraftItemGUI cri)
     {
         int amount = GetCraftAmount(cri);
-        return $". Amount {amount}, press Left or Right to change";
+        return ". " + Loc.Fmt("craft.amount_hint", amount);
     }
 
     /// <summary>Just the recipe's display name (no "Requires…/Ready" tail), or null.</summary>
@@ -3423,7 +3475,7 @@ internal static class GUIAccessibility
     private static string CraftStartedMessage(CraftGUI craftGui, CraftDefinition craft, string recipeName, int amount = 1)
     {
         // When several were queued, say so up front so the player knows their batch took.
-        string countPrefix = amount > 1 ? $"{amount} queued. " : "";
+        string countPrefix = amount > 1 ? Loc.Fmt("queue.count_prefix", amount) + " " : "";
 
         // Remote crafting (Better Save Soul) has no start button at all: picking the recipe
         // enqueues it and the station immediately begins working it off by itself, paying
@@ -3433,7 +3485,7 @@ internal static class GUIAccessibility
         try
         {
             if (GlobalCraftControlGUI.is_global_control_active)
-                remoteSuffix = $". It runs on its own, slowly. {Mathf.RoundToInt(MainGame.me.player.gratitude_points)} gratitude points left";
+                remoteSuffix = ". " + Loc.Fmt("remote.runs_on_its_own", Mathf.RoundToInt(MainGame.me.player.gratitude_points));
         }
         catch { }
 
@@ -3448,8 +3500,8 @@ internal static class GUIAccessibility
                 catch { }
                 if (string.IsNullOrWhiteSpace(outName)) outName = recipeName;
                 int pct = Mathf.RoundToInt(Mathf.Clamp01(wgo.progress) * 100f);
-                if (string.IsNullOrWhiteSpace(outName)) return countPrefix + "Crafting started" + remoteSuffix;
-                return countPrefix + (pct >= 1 ? $"Crafting {outName}, {pct} percent done" : $"Started crafting {outName}") + remoteSuffix;
+                if (string.IsNullOrWhiteSpace(outName)) return countPrefix + Loc.Get("craft.started") + remoteSuffix;
+                return countPrefix + (pct >= 1 ? Loc.Fmt("craft.crafting_pct", outName, pct) : Loc.Fmt("craft.started_named", outName)) + remoteSuffix;
             }
         }
         catch { }
@@ -3467,8 +3519,8 @@ internal static class GUIAccessibility
         try { dropsItem = craft?.GetFirstRealOutput() != null; } catch { }
         if (string.IsNullOrWhiteSpace(recipeName)) return countPrefix + "Crafted";
         return dropsItem
-            ? $"{countPrefix}{recipeName} crafted. It dropped on the ground, press E to pick it up"
-            : $"{countPrefix}{recipeName} crafted";
+            ? countPrefix + Loc.Fmt("craft.crafted_dropped", recipeName)
+            : countPrefix + Loc.Fmt("craft.crafted", recipeName);
     }
 
     /// <summary>
@@ -3510,7 +3562,7 @@ internal static class GUIAccessibility
                     var inv = MainGame.me?.player?.GetMultiInventoryForInteraction();
                     bool materialsOk = inv == null
                         || inv.IsEnoughItems(craft.needs, MultiInventory.DestinationType.AllFromFirst, null, 1);
-                    if (materialsOk) return "No fuel";
+                    if (materialsOk) return Loc.Get("craft.no_fuel");
                 }
             }
 
@@ -3518,10 +3570,10 @@ internal static class GUIAccessibility
             // whose only missing piece is an odd pseudo-item (a free refugee tent place, a
             // reputation star) otherwise reads as unaffordable for no visible reason.
             var missing = MissingNeedsText(cri?.current_craft, MainGame.me?.player?.GetMultiInventoryForInteraction());
-            if (missing != null) return $"Missing {missing}";
+            if (missing != null) return Loc.Fmt("craft.missing", missing);
         }
         catch { }
-        return "Not enough materials";
+        return Loc.Get("craft.not_enough_materials");
     }
 
     /// <summary>
@@ -3555,7 +3607,7 @@ internal static class GUIAccessibility
 
                 var iname = ResolveNeedItemName(need) ?? SpecialNeedName(need.id) ?? need.id;
                 if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
-                parts.Add($"{iname}, have {have} of {need.value}");
+                parts.Add(Loc.Fmt("craft.have_of", iname, have, need.value));
             }
 
             return parts.Count > 0 ? string.Join("; ", parts) : null;
@@ -3601,7 +3653,7 @@ internal static class GUIAccessibility
                             ?? need.id;
                 if (string.IsNullOrWhiteSpace(iname)) continue;
                 iname += InventoryItemHandler.NeedQualitySuffix(need, picksQuality);
-                parts.Add(amt > 1 ? $"{amt} {iname}" : iname);
+                parts.Add(amt > 1 ? Loc.Fmt("audit.material", amt, iname) : iname);
             }
             return parts.Count > 0 ? string.Join(", ", parts) : null;
         }
@@ -3618,12 +3670,12 @@ internal static class GUIAccessibility
     {
         switch (id)
         {
-            case "faith": return "faith";
-            case "r": return "red points";
-            case "g": return "green points";
-            case "b": return "blue points";
-            case "v": return "violet points";
-            case "gratitude_points": return "gratitude points";
+            case "faith": return Loc.Get("perk.faith");
+            case "r": return Loc.Get("points.red");
+            case "g": return Loc.Get("points.green");
+            case "b": return Loc.Get("points.blue");
+            case "v": return Loc.Get("points.violet");
+            case "gratitude_points": return Loc.Get("points.gratitude");
             default: return null;
         }
     }
@@ -3771,8 +3823,8 @@ internal static class GUIAccessibility
             // Same physical table (mf_alchemy_survey), different mode — describe the mode, but keep
             // the "Forschungstisch" name consistent with the approach-time label so they don't
             // contradict. Science decompose (paper/notes/books -> Wissenschaft) vs surveying an item.
-            if (hasScienceSurvey) return "Forschungstisch, Gegenstände für Wissenschaftspunkte zerlegen";
-            if (hasAlchemy) return "Forschungstisch, Gegenstände untersuchen";
+            if (hasScienceSurvey) return Loc.Get("station.survey.science");
+            if (hasAlchemy) return Loc.Get("station.survey.study");
         }
         catch { }
         return null;
@@ -3790,8 +3842,8 @@ internal static class GUIAccessibility
         if (craft == null) return null;
         switch (craft.craft_type)
         {
-            case CraftDefinition.CraftType.Survey: return "Studied";
-            case CraftDefinition.CraftType.AlchemyDecompose: return "Decomposed";
+            case CraftDefinition.CraftType.Survey: return Loc.Get("craft.studied");
+            case CraftDefinition.CraftType.AlchemyDecompose: return Loc.Get("craft.decomposed");
             default: return null;
         }
     }
@@ -3866,7 +3918,7 @@ internal static class GUIAccessibility
             var objName = InteractionDetector.LocalizedObjectName(wgo.obj_id);
             var crafts = (wgo.obj_def != null && wgo.obj_def.has_craft) ? wgo.components?.craft?.crafts : null;
             if (crafts == null || crafts.Count == 0)
-                return $"{objName}. Nothing to make here";
+                return Loc.Fmt("station.nothing_to_make", objName);
 
             // A craft that swaps the object for another (change_wgo) is its repair/upgrade.
             CraftDefinition repair = null;
@@ -3882,15 +3934,15 @@ internal static class GUIAccessibility
             {
                 var needs = CraftDefNeedsText(repair);
                 var msg = repair.IsLocked()
-                    ? $"{objName}. Repair is locked, research it in the technology tree first"
-                    : $"{objName}. Repairable";
-                if (!string.IsNullOrEmpty(needs)) msg += $". Repair needs {needs}";
+                    ? Loc.Fmt("station.repair_locked", objName)
+                    : Loc.Fmt("station.repairable", objName);
+                if (!string.IsNullOrEmpty(needs)) msg += ". " + Loc.Fmt("station.repair_needs", needs);
                 return msg;
             }
 
             return anyLocked
-                ? $"{objName}. No recipes available yet, research them in the technology tree"
-                : $"{objName}. Nothing to make here";
+                ? Loc.Fmt("station.no_recipes_yet", objName)
+                : Loc.Fmt("station.nothing_to_make", objName);
         }
         catch
         {
@@ -3929,10 +3981,11 @@ internal static class GUIAccessibility
 
             int captured = j;
             var name = TechBranchName(j);
-            var label = j == branch ? $"Category: {name}, current" : $"Category: {name}";
+            var label = j == branch ? Loc.Fmt("tech.branch_current", name) : Loc.Fmt("craft.category", name);
             Elements.Add(new GUIElement
             {
                 Go = techTree.gameObject,
+                Tag = TagCategory,
                 Label = label,
                 Type = ElementType.Button,
                 OnActivate = () => SwitchTechBranch(techTree, captured)
@@ -3979,7 +4032,7 @@ internal static class GUIAccessibility
             if (!string.IsNullOrWhiteSpace(loc) && !loc.Contains("!")) return loc;
         }
         catch { }
-        return $"Branch {branchId}";
+        return Loc.Fmt("tech.branch", branchId);
     }
 
     /// <summary>
@@ -3998,7 +4051,7 @@ internal static class GUIAccessibility
 
         // Hidden techs show only as a question mark in-game — don't leak their contents.
         if (state == TechDefinition.TechState.Hidden)
-            return "Not yet revealed. Locked technology";
+            return Loc.Get("tech.not_revealed_full");
 
         var parts = new List<string>();
 
@@ -4010,7 +4063,7 @@ internal static class GUIAccessibility
 
         var cost = TechPriceText(tech);
         if (state != TechDefinition.TechState.Purchased && !string.IsNullOrEmpty(cost))
-            parts.Add($"costs {cost}");
+            parts.Add(Loc.Fmt("tech.costs", cost));
 
         if (state == TechDefinition.TechState.Unavailable)
         {
@@ -4019,7 +4072,7 @@ internal static class GUIAccessibility
         }
 
         var unlocks = TechUnlocksText(tech);
-        if (!string.IsNullOrEmpty(unlocks)) parts.Add($"Unlocks {unlocks}");
+        if (!string.IsNullOrEmpty(unlocks)) parts.Add(Loc.Fmt("tech.unlocks", unlocks));
 
         return string.Join(". ", parts);
     }
@@ -4029,10 +4082,10 @@ internal static class GUIAccessibility
     {
         switch (state)
         {
-            case TechDefinition.TechState.Purchased: return "Already unlocked";
-            case TechDefinition.TechState.AvailableForPurchase: return "Can buy now";
-            case TechDefinition.TechState.Hidden: return "Not yet revealed";
-            default: return "Locked";
+            case TechDefinition.TechState.Purchased: return Loc.Get("tech.state.purchased");
+            case TechDefinition.TechState.AvailableForPurchase: return Loc.Get("tech.state.available");
+            case TechDefinition.TechState.Hidden: return Loc.Get("tech.state.hidden");
+            default: return Loc.Get("tech.state.locked");
         }
     }
 
@@ -4060,10 +4113,10 @@ internal static class GUIAccessibility
                     missing.Add(pn);
                 }
             }
-            if (missing.Count > 0) reasons.Add($"needs {string.Join(", ", missing)} first");
+            if (missing.Count > 0) reasons.Add(Loc.Fmt("tech.needs_first", string.Join(", ", missing)));
 
             if (!MainGame.me.player.data.IsEnoughParams(tech.price))
-                reasons.Add("not enough points");
+                reasons.Add(Loc.Get("tech.not_enough_points"));
         }
         catch { }
 
@@ -4165,7 +4218,7 @@ internal static class GUIAccessibility
         var parts = new List<string>(4);
 
         var needs = CraftDefNeedsText(craft);
-        if (!string.IsNullOrEmpty(needs)) parts.Add($"made from {needs}");
+        if (!string.IsNullOrEmpty(needs)) parts.Add(Loc.Fmt("tech.made_from", needs));
 
         var station = CraftedAtText(product);
         if (!string.IsNullOrEmpty(station)) parts.Add(station);
@@ -4221,7 +4274,7 @@ internal static class GUIAccessibility
                 if (string.IsNullOrWhiteSpace(n) || n == obj.id || n.Contains("!")) continue;
                 if (!names.Contains(n)) names.Add(n);
             }
-            return names.Count > 0 ? $"made at {string.Join(", ", names)}" : null;
+            return names.Count > 0 ? Loc.Fmt("tech.made_at", string.Join(", ", names)) : null;
         }
         catch { return null; }
     }
@@ -4241,7 +4294,7 @@ internal static class GUIAccessibility
             if (def.alch_type != ItemDefinition.AlchemyType.None)
             {
                 var kind = AlchemyTypeName(def.alch_type);
-                return kind == null ? null : $"alchemy {kind} for mixing potions";
+                return kind == null ? null : Loc.Fmt("tech.alchemy_kind", kind);
             }
 
             var decomposes = def.GetItemDetails()?.alchemy?.decomposes;
@@ -4253,7 +4306,7 @@ internal static class GUIAccessibility
                 var kind = AlchemyTypeName((ItemDefinition.AlchemyType)d);
                 if (kind != null && !kinds.Contains(kind)) kinds.Add(kind);
             }
-            return kinds.Count > 0 ? $"can be processed into {string.Join(", ", kinds)}" : null;
+            return kinds.Count > 0 ? Loc.Fmt("tech.processed_into", string.Join(", ", kinds)) : null;
         }
         catch { return null; }
     }
@@ -4262,10 +4315,10 @@ internal static class GUIAccessibility
     {
         switch (type)
         {
-            case ItemDefinition.AlchemyType.Powder: return "powder";
-            case ItemDefinition.AlchemyType.Fluid: return "solution";
-            case ItemDefinition.AlchemyType.Essence: return "essence";
-            case ItemDefinition.AlchemyType.Universal: return "universal ingredient";
+            case ItemDefinition.AlchemyType.Powder: return Loc.Get("alchemy.powder");
+            case ItemDefinition.AlchemyType.Fluid: return Loc.Get("alchemy.solution");
+            case ItemDefinition.AlchemyType.Essence: return Loc.Get("alchemy.essence");
+            case ItemDefinition.AlchemyType.Universal: return Loc.Get("alchemy.universal_ingredient");
             default: return null;
         }
     }
@@ -4306,9 +4359,9 @@ internal static class GUIAccessibility
                 parts.Add($"{(v > 0 ? "+" : "-")}{Mathf.Abs(v)} {GameResName(type)}");
             }
             if (Mathf.Abs(res.hp) >= 1f)
-                parts.Insert(0, $"{(res.hp > 0 ? "+" : "-")}{Mathf.RoundToInt(Mathf.Abs(res.hp))} health");
+                parts.Insert(0, $"{(res.hp > 0 ? "+" : "-")}{Mathf.RoundToInt(Mathf.Abs(res.hp))} " + Loc.Get("perk.health"));
 
-            return parts.Count > 0 ? $"gives {string.Join(", ", parts)}" : null;
+            return parts.Count > 0 ? Loc.Fmt("tech.gives", string.Join(", ", parts)) : null;
         }
         catch { return null; }
     }
@@ -4318,10 +4371,10 @@ internal static class GUIAccessibility
     {
         switch (type)
         {
-            case "hp": return "health";
-            case "energy": return "energy";
-            case "sanity": return "sanity";
-            case "faith": return "faith";
+            case "hp": return Loc.Get("perk.health");
+            case "energy": return Loc.Get("perk.energy");
+            case "sanity": return Loc.Get("perk.sanity");
+            case "faith": return Loc.Get("perk.faith");
         }
 
         var special = SpecialNeedName(type);
@@ -4358,7 +4411,7 @@ internal static class GUIAccessibility
                 names.Add(n);
                 if (names.Count == 3) break;
             }
-            return names.Count > 0 ? $"lets you work on {string.Join(", ", names)}" : null;
+            return names.Count > 0 ? Loc.Fmt("tech.lets_you_work_on", string.Join(", ", names)) : null;
         }
         catch { return null; }
     }
@@ -4389,11 +4442,11 @@ internal static class GUIAccessibility
     {
         switch (type)
         {
-            case "r": return "red points";
-            case "g": return "green points";
-            case "b": return "blue points";
-            case "v": return "violet points";
-            case "gratitude_points": return "gratitude points";
+            case "r": return Loc.Get("points.red");
+            case "g": return Loc.Get("points.green");
+            case "b": return Loc.Get("points.blue");
+            case "v": return Loc.Get("points.violet");
+            case "gratitude_points": return Loc.Get("points.gratitude");
             default: return type;
         }
     }
@@ -4416,7 +4469,7 @@ internal static class GUIAccessibility
 
         ScreenReader.Say(idx >= 0
             ? $"{zoneName}. {active[idx].ReadLabel()}"
-            : $"{zoneName}. No crafting stations in this area");
+            : Loc.Fmt("remote.no_stations_here", zoneName));
     }
 
     /// <summary>Switch the tech tree to a branch, then re-list and announce its techs.</summary>
@@ -4433,14 +4486,14 @@ internal static class GUIAccessibility
 
         // Land on the first tech in the branch (skip past the category rows) so the player hears
         // the branch's contents straight away.
-        var idx = active.FindIndex(e => e.OnActivate != null && !e.Label.StartsWith("Category:"));
+        var idx = active.FindIndex(e => e.OnActivate != null && e.Tag != TagCategory);
         if (idx < 0) idx = active.Count > 0 ? 0 : -1;
         SelectedIndex = idx;
 
         if (idx >= 0)
             ScreenReader.Say($"{name}. {active[idx].ReadLabel()}");
         else
-            ScreenReader.Say($"{name}. Empty");
+            ScreenReader.Say(Loc.Fmt("gui.name_empty", name));
     }
 
     /// <summary>
@@ -4531,24 +4584,24 @@ internal static class GUIAccessibility
         try
         {
             var wgo = _graveWgoField?.GetValue(grave) as WorldGameObject;
-            if (wgo == null) return "Grave rating unknown";
+            if (wgo == null) return Loc.Get("grave.rating_unknown");
 
             float q = wgo.quality;
             var val = q.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
 
             var body = _graveBodyField?.GetValue(grave) as Item;
             if (body == null || body.IsEmpty())
-                return $"Grave rating: {val} points. Bury a body to raise it";
+                return Loc.Fmt("grave.rating_bury", val);
 
             body.GetBodySkulls(out int negative, out _, out int positive);
-            var text = $"Grave rating: {val} of {positive} possible points";
+            var text = Loc.Fmt("grave.rating", val, positive);
             if (negative > 0)
-                text += $", {negative} red skull{(negative == 1 ? "" : "s")} reduce it";
+                text += ", " + Loc.Plural("grave.rating_red", negative, negative);
             return text;
         }
         catch
         {
-            return "Grave rating unknown";
+            return Loc.Get("grave.rating_unknown");
         }
     }
 
@@ -4592,23 +4645,23 @@ internal static class GUIAccessibility
 
             bool canExhume = grave.btn_body_extract != null && grave.btn_body_extract.isEnabled;
             if (canExhume)
-                return $"Body: {itemName}, press Enter to exhume";
+                return Loc.Fmt("grave.body_exhume", itemName);
 
             var fence = _graveFenceField?.GetValue(grave) as Item;
             var cross = _graveCrossField?.GetValue(grave) as Item;
             bool hasFence = fence != null && !fence.IsEmpty();
             bool hasCross = cross != null && !cross.IsEmpty();
             if (hasFence && hasCross)
-                return $"Body: {itemName}. Remove the fence and cross first to exhume";
+                return Loc.Fmt("grave.body_need_both", itemName);
             if (hasFence)
-                return $"Body: {itemName}. Remove the fence first to exhume";
+                return Loc.Fmt("grave.body_need_fence", itemName);
             if (hasCross)
-                return $"Body: {itemName}. Remove the cross first to exhume";
-            return $"Body: {itemName}, can't exhume right now";
+                return Loc.Fmt("grave.body_need_cross", itemName);
+            return Loc.Fmt("grave.body_blocked", itemName);
         }
         catch
         {
-            return "Body";
+            return Loc.Get("grave.body");
         }
     }
 
@@ -4646,7 +4699,7 @@ internal static class GUIAccessibility
         {
             var item = field?.GetValue(grave) as Item;
             if (item == null || item.IsEmpty())
-                return $"No {name.ToLowerInvariant()}, press Enter to add";
+                return Loc.Fmt("grave.slot_empty", name.ToLowerInvariant());
 
             int pct = Mathf.RoundToInt(Mathf.Clamp01(item.durability) * 100f);
             var itemName = ScreenReader.StripNguiCodes(item.definition?.GetItemName() ?? name)?.Trim();
@@ -4655,8 +4708,8 @@ internal static class GUIAccessibility
             // The part's own quality is what it feeds into the grave rating; sighted players see it
             // as "(wr)N" on the cell. Surface it so the player can judge whether a better one helps.
             int worth = Mathf.RoundToInt(item.GetItemQuality());
-            var worthText = worth > 0 ? $", worth {worth} rating" : "";
-            return $"{name}: {itemName}, condition {pct} percent{worthText}. Press Enter to repair";
+            var worthText = worth > 0 ? ", " + Loc.Fmt("grave.worth_rating", worth) : "";
+            return Loc.Fmt("grave.slot_filled", name, itemName, pct, worthText);
         }
         catch
         {
@@ -4689,8 +4742,8 @@ internal static class GUIAccessibility
         // btn/spr children: FinishOffer accepts the assembled deal, ResetOrderAndRedraw
         // returns the offered items. The buttons' own onClick wiring proved unreliable
         // through our SendMessage path, and these public methods are unambiguous.
-        AddVendorButton(vendor.btn_confirm, "Confirm trade", () => ConfirmVendorTrade(vendor));
-        AddVendorButton(vendor.btn_cancel, "Cancel offer", () => CancelVendorOffer(vendor));
+        AddVendorButton(vendor.btn_confirm, Loc.Get("vendor.confirm_trade"), () => ConfirmVendorTrade(vendor));
+        AddVendorButton(vendor.btn_cancel, Loc.Get("vendor.cancel_offer"), () => CancelVendorOffer(vendor));
 
         // The vendor's purse is shown on-screen but never voices. Put it first so it's spoken
         // when the trade screen opens (the open flow auto-reads the first row) and is reachable
@@ -4716,7 +4769,7 @@ internal static class GUIAccessibility
         {
             Go = vendor.gameObject,
             Type = ElementType.Button,
-            Label = "Vendor money",
+            Label = Loc.Get("vendor.money_row"),
             ReadDynamic = () => DescribeVendorMoney(vendor),
             // No real action — re-speak the live value rather than fall through to the generic
             // button SendMessage path (which would poke the vendor GUI's own components).
@@ -4739,7 +4792,7 @@ internal static class GUIAccessibility
         {
             Go = anchor,
             Type = ElementType.Button,
-            Label = "Vendor level",
+            Label = Loc.Get("vendor.level_row"),
             ReadDynamic = () => DescribeVendorLevel(vendor),
             OnActivate = () => ScreenReader.Say(DescribeVendorLevel(vendor))
         });
@@ -4753,10 +4806,10 @@ internal static class GUIAccessibility
         try
         {
             var trader = vendor?.trading?.trader;
-            if (trader == null) return "Vendor level unknown";
+            if (trader == null) return Loc.Get("vendor.level_unknown");
 
             int tier = trader.cur_tier;
-            if (tier >= 3) return $"Vendor level {tier} of 3, maximum level reached";
+            if (tier >= 3) return Loc.Fmt("vendor.level_max", tier);
 
             float progress = -1f;
             var inv = trader.drawing_inventory;
@@ -4773,14 +4826,14 @@ internal static class GUIAccessibility
             }
 
             if (progress < 0f)
-                return $"Vendor level {tier} of 3";
+                return Loc.Fmt("vendor.level", tier);
 
             int percent = Mathf.Clamp(Mathf.RoundToInt(progress * 100f), 0, 100);
-            return $"Vendor level {tier} of 3, {percent} percent toward level {tier + 1}";
+            return Loc.Fmt("vendor.level_progress", tier, percent, tier + 1);
         }
         catch
         {
-            return "Vendor level unknown";
+            return Loc.Get("vendor.level_unknown");
         }
     }
 
@@ -4790,12 +4843,12 @@ internal static class GUIAccessibility
         try
         {
             var trader = vendor?.trading?.trader;
-            if (trader == null) return "Vendor money unknown";
-            return $"Vendor has {MoneyToSpeech(trader.cur_money)}";
+            if (trader == null) return Loc.Get("vendor.money_unknown");
+            return Loc.Fmt("vendor.has_money", MoneyToSpeech(trader.cur_money));
         }
         catch
         {
-            return "Vendor money unknown";
+            return Loc.Get("vendor.money_unknown");
         }
     }
 
@@ -4830,19 +4883,19 @@ internal static class GUIAccessibility
         try
         {
             if (!trading.player_inventory.CanAddItems(trading.trader.cur_offer.inventory, include_bags: true))
-                return "Your inventory is full";
+                return Loc.Get("vendor.reject.inventory_full");
             if (!trading.trader.inventory.CanAddItems(trading.player_offer.inventory))
-                return "The vendor can't carry these items";
+                return Loc.Get("vendor.reject.vendor_full");
             float balance = trading.GetTotalBalance();
             if (trading.player_money + balance < 0f)
-                return "You don't have enough money";
+                return Loc.Get("vendor.reject.player_money");
             if (trading.trader.cur_money - balance < 0f)
-                return "The vendor doesn't have enough money";
+                return Loc.Get("vendor.reject.vendor_money");
         }
         catch { }
 
         var loc = ScreenReader.StripNguiCodes(GJL.L("cant_accept_offer") ?? "").Trim();
-        return string.IsNullOrEmpty(loc) ? "Trade not possible" : loc;
+        return string.IsNullOrEmpty(loc) ? Loc.Get("vendor.reject.generic") : loc;
     }
 
     // Return all offered items to their owners and re-announce the cleared state.
@@ -4851,7 +4904,7 @@ internal static class GUIAccessibility
         try
         {
             vendor.ResetOrderAndRedraw();
-            AnnounceVendorState(vendor, "Offer cancelled");
+            AnnounceVendorState(vendor, Loc.Get("vendor.offer_cancelled"));
         }
         catch (Exception ex)
         {
@@ -5074,7 +5127,7 @@ internal static class GUIAccessibility
         if (active.Count == 0)
         {
             SelectedIndex = -1;
-            ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? "Empty" : emptyDesc));
+            ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? Loc.Get("common.empty") : emptyDesc));
             return;
         }
 
@@ -5176,7 +5229,7 @@ internal static class GUIAccessibility
         if (active.Count == 0)
         {
             SelectedIndex = -1;
-            ScreenReader.Say(balance ?? "Empty");
+            ScreenReader.Say(balance ?? Loc.Get("common.empty"));
             return;
         }
 
@@ -5189,9 +5242,9 @@ internal static class GUIAccessibility
     // positive means the player gains money (selling), negative means they pay (buying).
     private static string DescribeBalance(float balance)
     {
-        if (Mathf.Abs(balance) < 0.005f) return "Even trade";
+        if (Mathf.Abs(balance) < 0.005f) return Loc.Get("vendor.even_trade");
         var amount = MoneyToSpeech(Mathf.Abs(balance));
-        return balance > 0f ? $"You receive {amount}" : $"You pay {amount}";
+        return Loc.Fmt(balance > 0f ? "vendor.you_receive" : "vendor.you_pay", amount);
     }
 
     // Decompose a money value into spoken gold/silver/bronze, matching Trading.FormatMoney's
@@ -5205,10 +5258,10 @@ internal static class GUIAccessibility
         int bronze = Mathf.RoundToInt((value - gold * 100f - silver) * 100f);
 
         var parts = new List<string>();
-        if (gold > 0) parts.Add($"{gold} gold");
-        if (silver > 0) parts.Add($"{silver} silver");
-        if (bronze > 0) parts.Add($"{bronze} bronze");
-        return parts.Count > 0 ? string.Join(", ", parts) : "nothing";
+        if (gold > 0) parts.Add(Loc.Fmt("money.gold", gold));
+        if (silver > 0) parts.Add(Loc.Fmt("money.silver", silver));
+        if (bronze > 0) parts.Add(Loc.Fmt("money.bronze", bronze));
+        return parts.Count > 0 ? string.Join(", ", parts) : Loc.Get("money.nothing");
     }
 
     // Hold-to-repeat state for the resource-craft "zerlegen"/study button. A session starts on the
@@ -5335,7 +5388,7 @@ internal static class GUIAccessibility
         // vendor won't buy) has its press disabled, so pressing it would silently do nothing.
         if (_currentGUI is VendorGUI && elem.Cell.is_inactive_state)
         {
-            ScreenReader.Say("Not available to trade");
+            ScreenReader.Say(Loc.Get("vendor.not_tradeable"));
             return true;
         }
 
@@ -5373,8 +5426,8 @@ internal static class GUIAccessibility
         int moved = before - after;
 
         var summary = moved > 0
-            ? $"{moved} {itemName} moved"
-            : "Nothing moved, no room on the other side";
+            ? Loc.Fmt("inventory.moved", moved, itemName)
+            : Loc.Get("inventory.nothing_moved");
 
         if (_currentGUI is VendorGUI vendor)
             RefreshVendorAfterMove(vendor, prevIndex, summary);
@@ -5520,7 +5573,7 @@ internal static class GUIAccessibility
             // trade". Say why instead and stop.
             if (_currentGUI is VendorGUI && elem.Cell != null && elem.Cell.is_inactive_state)
             {
-                ScreenReader.Say("Not available to trade");
+                ScreenReader.Say(Loc.Get("vendor.not_tradeable"));
                 return;
             }
 
@@ -5575,7 +5628,7 @@ internal static class GUIAccessibility
                     // A zombie station enqueues the craft instead of making it on the spot. Say so
                     // (otherwise pressing a recipe seems to do nothing) — the new queue row is now
                     // discoverable below, where the amount / endless / remove controls live.
-                    RefreshCurrentGUI(prevIndex, $"{pressedRecipeName} added to queue");
+                    RefreshCurrentGUI(prevIndex, Loc.Fmt("queue.added", pressedRecipeName));
                 else
                     RefreshCurrentGUI(prevIndex);
             }

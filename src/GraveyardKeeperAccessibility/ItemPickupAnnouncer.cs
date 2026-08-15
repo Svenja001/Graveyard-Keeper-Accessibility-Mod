@@ -65,9 +65,9 @@ internal static class ItemPickupAnnouncer
     {
         try
         {
-            Accumulate("red tech points", r);
-            Accumulate("green tech points", g);
-            Accumulate("blue tech points", b);
+            Accumulate(Loc.Get("pickup.tech.red"), r);
+            Accumulate(Loc.Get("pickup.tech.green"), g);
+            Accumulate(Loc.Get("pickup.tech.blue"), b);
         }
         catch (Exception ex)
         {
@@ -101,9 +101,9 @@ internal static class ItemPickupAnnouncer
         {
             var parts = new List<string>(_pending.Count);
             foreach (var kv in _pending)
-                parts.Add($"{kv.Value} {kv.Key}");
+                parts.Add(Loc.Fmt("pickup.entry", kv.Value, kv.Key));
 
-            var spoken = "Got " + string.Join(", ", parts);
+            var spoken = Loc.Fmt("pickup.got", string.Join(", ", parts));
             _log?.LogInfo($"[PICKUP] {spoken}");
             ScreenReader.Say(spoken, interrupt: false);
         }
@@ -147,11 +147,11 @@ internal static class ItemPickupAnnouncer
         int stars = Mathf.FloorToInt(def.quality);
         switch (stars)
         {
-            case 1: return "bronze quality";
-            case 2: return "silver quality";
-            case 3: return "gold quality";
+            case 1: return Loc.Get("quality.bronze");
+            case 2: return Loc.Get("quality.silver");
+            case 3: return Loc.Get("quality.gold");
             case <= 0: return null;
-            default: return $"{stars} stars";
+            default: return Loc.Fmt("quality.stars", stars);
         }
     }
 }

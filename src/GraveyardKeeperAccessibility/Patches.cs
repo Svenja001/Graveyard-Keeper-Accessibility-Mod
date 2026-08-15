@@ -2,11 +2,29 @@ namespace GraveyardKeeperAccessibility;
 
 internal static class Patches
 {
-    // Dialogue often names a calendar day ("ich komme an Tag 6"). A sighted player can look
+    // Dialogue often names a calendar day ("I'll come on day 6"). A sighted player can look
     // up the day-of-week; a blind player can't, so we append the weekday/profession name
-    // when speaking, e.g. "Tag 6 (Astrologe)". Only the spoken string is changed.
-    private static readonly Regex DayMentionRegex =
-        new Regex(@"\bTag\s+(\d+)\b", RegexOptions.IgnoreCase);
+    // when speaking, e.g. "day 6 (Day of Sloth)". Only the spoken string is changed.
+    //
+    // Both the word to look for and the pattern come from the lang file, because the dialogue we
+    // are scanning is in the game's language ("Tag 6" on a German install). Cached until the
+    // pattern itself changes, so switching language mid-session still picks up the new one.
+    private static Regex _dayMentionRegex;
+    private static string _dayMentionPattern;
+
+    private static Regex DayMentionRegex
+    {
+        get
+        {
+            var pattern = Loc.Get("daytime.day_mention_pattern");
+            if (_dayMentionRegex == null || pattern != _dayMentionPattern)
+            {
+                _dayMentionPattern = pattern;
+                _dayMentionRegex = new Regex(pattern, RegexOptions.IgnoreCase);
+            }
+            return _dayMentionRegex;
+        }
+    }
 
     // Tasks we've already read aloud this session, so re-issued SetTaskState calls
     // (e.g. the same objective set Visible again) don't repeat the announcement.
@@ -16,7 +34,8 @@ internal static class Patches
     {
         try
         {
-            if (string.IsNullOrEmpty(text) || text.IndexOf("Tag", StringComparison.OrdinalIgnoreCase) < 0)
+            if (string.IsNullOrEmpty(text)
+                || text.IndexOf(Loc.Get("daytime.day_word"), StringComparison.OrdinalIgnoreCase) < 0)
                 return text;
 
             return DayMentionRegex.Replace(text, m =>
@@ -253,7 +272,7 @@ internal static class Patches
 
             if (!_saveInProgress) return;
             _saveInProgress = false;
-            ScreenReader.Say("Game saved", interrupt: false);
+            ScreenReader.Say(Loc.Get("save.done"), interrupt: false);
         }
         catch (Exception ex)
         {
@@ -279,7 +298,7 @@ internal static class Patches
             if (string.IsNullOrEmpty(id)) return;
             if (!_announcedAchievements.Add(id)) return;
 
-            ScreenReader.Say($"Achievement unlocked: {GetAchievementName(id)}", interrupt: false);
+            ScreenReader.Say(Loc.Fmt("achievement.unlocked", GetAchievementName(id)), interrupt: false);
         }
         catch (Exception ex)
         {
@@ -366,7 +385,7 @@ internal static class Patches
             string part = null;
             try { part = __1?.definition?.GetItemName(); } catch { }
 
-            var spoken = string.IsNullOrEmpty(part) ? $"Now {desc}" : $"Removed {part}, now {desc}";
+            var spoken = string.IsNullOrEmpty(part) ? Loc.Fmt("autopsy.now", desc) : Loc.Fmt("autopsy.removed", part, desc);
             Plugin.Log.LogInfo($"[AUTOPSY] {spoken}");
             ScreenReader.Say(spoken, interrupt: false);
         }
@@ -412,7 +431,7 @@ internal static class Patches
             catch { empty = false; }
             if (empty)
             {
-                ScreenReader.Say("No offer to confirm");
+                ScreenReader.Say(Loc.Get("vendor.no_offer"));
                 return false;
             }
 
@@ -438,7 +457,7 @@ internal static class Patches
         {
             var trading = __instance.trading;
             if (trading != null)
-                GUIAccessibility.AnnounceVendorState(__instance, $"Trade complete. You have {GUIAccessibility.MoneyToSpeech(trading.player_money)}");
+                GUIAccessibility.AnnounceVendorState(__instance, Loc.Fmt("vendor.trade_complete", GUIAccessibility.MoneyToSpeech(trading.player_money)));
         }
         catch (Exception ex)
         {
@@ -461,7 +480,7 @@ internal static class Patches
             if (string.IsNullOrEmpty(text)) return;
 
             Plugin.Log.LogInfo($"[TASK] New task {__1}: {text}");
-            ScreenReader.Say($"Neue Aufgabe: {text}", interrupt: false);
+            ScreenReader.Say(Loc.Fmt("task.new", text), interrupt: false);
         }
         catch (Exception ex)
         {

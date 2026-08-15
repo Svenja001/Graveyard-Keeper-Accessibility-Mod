@@ -95,16 +95,16 @@ internal static class CombatAssist
             if (!ctrl && Input.GetKeyDown(KeyCode.B))
             {
                 _enabled = !_enabled;
-                ScreenReader.Say(_enabled ? "Combat assist on" : "Combat assist off");
+                ScreenReader.Say(Loc.Get(_enabled ? "combat.assist.on" : "combat.assist.off"));
             }
 
             if (!ctrl && Input.GetKeyDown(KeyCode.X))
             {
                 _autoAttack = !_autoAttack;
                 if (!_autoAttack) ClearApproach();
-                ScreenReader.Say(_autoAttack
-                    ? "Auto attack on. I'll walk you to enemies and swing when in reach; press a movement key to take over."
-                    : "Auto attack off");
+                ScreenReader.Say(Loc.Get(_autoAttack
+                    ? "combat.autoattack.on"
+                    : "combat.autoattack.off"));
             }
 
             var enemies = FindEnemies(player.pos);
@@ -168,7 +168,7 @@ internal static class CombatAssist
         {
             if (player.GetEquippedWeaponType() != ItemDefinition.ItemType.Sword)
             {
-                ScreenReader.Say("Equip a sword to attack", interrupt: true);
+                ScreenReader.Say(Loc.Get("combat.need_sword"), interrupt: true);
                 return;
             }
 
@@ -179,7 +179,7 @@ internal static class CombatAssist
             bool enemyInReach = nearest != null && Vector2.Distance(player.pos, nearest.pos) <= AttackRange;
             if (enemyInReach)
             {
-                if (!HasEnergyToAttack(player)) { ScreenReader.Say("Too tired to attack", interrupt: true); return; }
+                if (!HasEnergyToAttack(player)) { ScreenReader.Say(Loc.Get("combat.too_tired"), interrupt: true); return; }
                 PerformSwing(player, character, nearest);
                 return;
             }
@@ -189,7 +189,7 @@ internal static class CombatAssist
             {
                 // Loot props are destroyed directly (BreakProp) — one blow, no energy — so no
                 // energy gate here, unlike the enemy path above.
-                ScreenReader.Say($"Smashing {EnemyName(nearestBreakable)}", interrupt: true);
+                ScreenReader.Say(Loc.Fmt("combat.smashing", EnemyName(nearestBreakable)), interrupt: true);
                 BreakProp(nearestBreakable);
                 return;
             }
@@ -197,13 +197,13 @@ internal static class CombatAssist
             // Neither an enemy nor a prop is in reach.
             if (nearest == null && nearestBreakable == null)
             {
-                ScreenReader.Say("No enemies nearby", interrupt: true);
+                ScreenReader.Say(Loc.Get("combat.no_enemies_nearby"), interrupt: true);
                 return;
             }
 
             // Something exists but is out of range — point the player at the closest of the two.
             var target = Nearest(new List<WorldGameObject> { nearest, nearestBreakable }, player.pos);
-            ScreenReader.Say($"Too far, move closer. {CompassDirection(player.pos, target.pos)}", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("combat.too_far", CompassDirection(player.pos, target.pos)), interrupt: true);
         }
         catch (Exception ex)
         {
@@ -304,7 +304,7 @@ internal static class CombatAssist
             if (Time.time - _lastApproachSpeak >= 4f)
             {
                 _lastApproachSpeak = Time.time;
-                ScreenReader.Say($"Closing in, {CompassDirection(player.pos, enemy.pos)}", interrupt: false);
+                ScreenReader.Say(Loc.Fmt("combat.closing_in", CompassDirection(player.pos, enemy.pos)), interrupt: false);
             }
         }
     }
@@ -396,7 +396,7 @@ internal static class CombatAssist
             try
             {
                 if (auto) OnAutoSwingResult(success);
-                else if (!success) ScreenReader.Say("Missed, get closer", interrupt: false);
+                else if (!success) ScreenReader.Say(Loc.Get("combat.missed"), interrupt: false);
             }
             catch { }
             character.OnPlayersAttackPerformed(success);
@@ -495,19 +495,19 @@ internal static class CombatAssist
 
         if (enemies.Count == 0)
         {
-            ScreenReader.Say($"No enemies. Health {hp} of {maxHp}, energy {energy}", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("combat.scan.no_enemies", hp, maxHp, energy), interrupt: true);
             return;
         }
 
         float dist = Vector2.Distance(player.pos, nearest.pos);
         string name = EnemyName(nearest);
         string ehp = EnemyHealthText(nearest);
-        string weapon = player.GetEquippedWeaponType() == ItemDefinition.ItemType.Sword ? "" : ". No sword equipped";
+        string weapon = player.GetEquippedWeaponType() == ItemDefinition.ItemType.Sword ? "" : " " + Loc.Get("combat.scan.no_sword");
 
         ScreenReader.Say(
-            $"{enemies.Count} {(enemies.Count == 1 ? "enemy" : "enemies")}. " +
-            $"Nearest {name}, {CompassDirection(player.pos, nearest.pos)}, {Meters(dist)}{ehp}. " +
-            $"Your health {hp} of {maxHp}, energy {energy}{weapon}",
+            Loc.Plural("combat.scan.count", enemies.Count, enemies.Count) + " " +
+            Loc.Fmt("combat.scan.nearest", name, CompassDirection(player.pos, nearest.pos), Meters(dist), ehp) + " " +
+            Loc.Fmt("combat.scan.vitals", hp, maxHp, energy) + weapon,
             interrupt: true);
     }
 
@@ -519,7 +519,7 @@ internal static class CombatAssist
         float php = player.hp;
         if (_lastPlayerHp < 0f) _lastPlayerHp = php;
         if (php < _lastPlayerHp - 0.5f)
-            ScreenReader.Say($"Hurt. Health {Mathf.RoundToInt(php)} of {MainGame.me.save.max_hp}", interrupt: true);
+            ScreenReader.Say(Loc.Fmt("combat.hurt", Mathf.RoundToInt(php), MainGame.me.save.max_hp), interrupt: true);
         _lastPlayerHp = php;
 
         var currentIds = new HashSet<int>();
@@ -535,7 +535,7 @@ internal static class CombatAssist
             {
                 _enemyMaxHp[id] = hp;
                 _enemyLastHp[id] = hp;
-                ScreenReader.Say($"Enemy approaching. {EnemyName(e)}, {CompassDirection(player.pos, e.pos)}, {Meters(Vector2.Distance(player.pos, e.pos))}", interrupt: false);
+                ScreenReader.Say(Loc.Fmt("combat.approaching", EnemyName(e), CompassDirection(player.pos, e.pos), Meters(Vector2.Distance(player.pos, e.pos))), interrupt: false);
                 continue;
             }
 
@@ -546,7 +546,7 @@ internal static class CombatAssist
             // Our swing landed: HP dropped. Throttle so a multi-hit flurry isn't a wall of speech.
             if (hp < last - 0.5f && _hitCooldown <= 0f)
             {
-                ScreenReader.Say($"Hit. {EnemyHealthText(e).TrimStart(',', ' ')}", interrupt: false);
+                ScreenReader.Say(Loc.Fmt("combat.hit", EnemyHealthText(e).TrimStart(',', ' ')), interrupt: false);
                 _hitCooldown = 0.5f;
             }
             _enemyLastHp[id] = hp;
@@ -575,7 +575,7 @@ internal static class CombatAssist
             try { striking = nearest.components?.character?.attack?.performing_attack ?? false; } catch { }
             if (striking)
             {
-                ScreenReader.Say("Enemy striking", interrupt: true);
+                ScreenReader.Say(Loc.Get("combat.enemy_striking"), interrupt: true);
                 _strikeCooldown = 1.2f;
             }
         }
@@ -665,7 +665,7 @@ internal static class CombatAssist
             }
         }
         catch { }
-        return "Enemy";
+        return Loc.Get("combat.enemy");
     }
 
     private static string EnemyHealthText(WorldGameObject e)
@@ -676,34 +676,34 @@ internal static class CombatAssist
             float max = _enemyMaxHp.TryGetValue(id, out var mx) ? mx : e.hp;
             if (max <= 0f) return "";
             int pct = Mathf.Clamp(Mathf.RoundToInt(e.hp / max * 100f), 0, 100);
-            return $", enemy health {pct} percent";
+            return ", " + Loc.Fmt("combat.enemy_health", pct);
         }
         catch { return ""; }
     }
 
     private static string Meters(float worldDistance)
     {
-        return $"{worldDistance / TileSize:F0} meters";
+        return Loc.Fmt("common.meters", (worldDistance / TileSize).ToString("F0"));
     }
 
     // Eight-point compass bearing, matching ObjectNavigator's convention (+x east, +y north).
     private static string CompassDirection(Vector2 from, Vector2 to)
     {
         var d = to - from;
-        if (d.sqrMagnitude < 1f) return "right here";
+        if (d.sqrMagnitude < 1f) return Loc.Get("compass.right_here");
         float angle = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
         if (angle < 0f) angle += 360f;
         int sector = Mathf.RoundToInt(angle / 45f) % 8;
         return sector switch
         {
-            0 => "to the east",
-            1 => "to the north-east",
-            2 => "to the north",
-            3 => "to the north-west",
-            4 => "to the west",
-            5 => "to the south-west",
-            6 => "to the south",
-            7 => "to the south-east",
+            0 => Loc.Get("compass.to.east"),
+            1 => Loc.Get("compass.to.north_east"),
+            2 => Loc.Get("compass.to.north"),
+            3 => Loc.Get("compass.to.north_west"),
+            4 => Loc.Get("compass.to.west"),
+            5 => Loc.Get("compass.to.south_west"),
+            6 => Loc.Get("compass.to.south"),
+            7 => Loc.Get("compass.to.south_east"),
             _ => "",
         };
     }

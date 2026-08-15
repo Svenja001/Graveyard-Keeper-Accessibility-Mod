@@ -20,12 +20,12 @@ internal static class MoneyAnnouncer
         {
             if (!MainGame.game_started || MainGame.me == null || MainGame.me.player == null)
             {
-                ScreenReader.Say("No game in progress");
+                ScreenReader.Say(Loc.Get("common.no_game"));
                 return;
             }
 
             float money = MainGame.me.player.data.GetParam("money");
-            ScreenReader.Say($"You have {MoneyToSpeech(money)}");
+            ScreenReader.Say(Loc.Fmt("money.you_have", MoneyToSpeech(money)));
         }
         catch (Exception ex)
         {
@@ -42,9 +42,9 @@ internal static class MoneyAnnouncer
         int bronze = Mathf.RoundToInt((value - gold * 100f - silver) * 100f);
 
         var parts = new List<string>();
-        if (gold > 0) parts.Add($"{gold} gold");
-        if (silver > 0) parts.Add($"{silver} silver");
-        if (bronze > 0) parts.Add($"{bronze} bronze");
-        return parts.Count > 0 ? string.Join(", ", parts) : "no money";
+        if (gold > 0) parts.Add(Loc.Fmt("money.gold", gold));
+        if (silver > 0) parts.Add(Loc.Fmt("money.silver", silver));
+        if (bronze > 0) parts.Add(Loc.Fmt("money.bronze", bronze));
+        return parts.Count > 0 ? string.Join(", ", parts) : Loc.Get("money.none");
     }
 }

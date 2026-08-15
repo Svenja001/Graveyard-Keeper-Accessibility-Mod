@@ -47,14 +47,14 @@ internal static class BuildZoneAudit
         {
             if (!MainGame.game_started || MainGame.me == null)
             {
-                ScreenReader.Say("No game in progress");
+                ScreenReader.Say(Loc.Get("common.no_game"));
                 return;
             }
 
             var zone = CurrentZone();
             if (zone == null)
             {
-                ScreenReader.Say("You are not standing in a zone that gets a rating. Step into the area you want to check.");
+                ScreenReader.Say(Loc.Get("audit.no_zone"));
                 return;
             }
 
@@ -70,28 +70,28 @@ internal static class BuildZoneAudit
 
             var lines = new List<string>
             {
-                $"{zoneName} rating {Fmt(total)}."
+                Loc.Fmt("audit.header", zoneName, Fmt(total))
             };
 
             // 1. What is standing there now.
             if (built.Count == 0)
             {
-                lines.Add("Nothing in this area scores points.");
+                lines.Add(Loc.Get("audit.nothing_scores"));
             }
             else
             {
                 var sb = new List<string>();
                 foreach (var b in built)
                     sb.Add(b.Count > 1
-                        ? $"{b.Count} times {b.Name}, {Fmt(b.Each)} points each"
-                        : $"{b.Name}, {Fmt(b.Each)} points");
-                lines.Add($"{built.Count} kind{(built.Count == 1 ? "" : "s")} of scoring object, {Fmt(counted)} points in total: {string.Join("; ", sb)}.");
+                        ? Loc.Fmt("audit.built.multiple", b.Count, b.Name, Fmt(b.Each))
+                        : Loc.Fmt("audit.built.single", b.Name, Fmt(b.Each)));
+                lines.Add(Loc.Plural("audit.built.summary", built.Count, built.Count, Fmt(counted), string.Join("; ", sb)));
             }
 
             // 2. Demolition.
             lines.Add(removableCount == 0
-                ? "Nothing here can be demolished: none of these objects has a removal craft, so remove mode will come up empty."
-                : $"{removableCount} object{(removableCount == 1 ? " can" : "s can")} be demolished in remove mode.");
+                ? Loc.Get("audit.demolish.none")
+                : Loc.Plural("audit.demolish.count", removableCount, removableCount));
 
             // 3. What is still placeable, and the headroom that gives.
             float headroom = 0f;
@@ -105,16 +105,16 @@ internal static class BuildZoneAudit
 
             if (options.Count == 0)
             {
-                lines.Add("This area has no build desk, so nothing can be added here.");
+                lines.Add(Loc.Get("audit.no_desk"));
             }
             else
             {
                 lines.Add(buildable.Count > 0
-                    ? $"Still buildable: {string.Join("; ", buildable)}."
-                    : "Nothing on the build desk can be placed here any more.");
+                    ? Loc.Fmt("audit.buildable", string.Join("; ", buildable))
+                    : Loc.Get("audit.nothing_buildable"));
 
                 if (blocked.Count > 0)
-                    lines.Add($"Not placeable: {string.Join("; ", blocked)}.");
+                    lines.Add(Loc.Fmt("audit.not_placeable", string.Join("; ", blocked)));
             }
 
             // 4. The verdict — the number the player actually cares about.
@@ -122,11 +122,11 @@ internal static class BuildZoneAudit
             {
                 bool unlimited = options.Any(o => o.FreePlacement && !o.Locked);
                 if (unlimited)
-                    lines.Add($"At least {Fmt(headroom)} more points are reachable, and the free standing objects above can be repeated as often as you have materials, so the rating is not capped.");
+                    lines.Add(Loc.Fmt("audit.verdict.uncapped", Fmt(headroom)));
                 else if (headroom > 0f)
-                    lines.Add($"Every remaining spot together is worth {Fmt(headroom)} more points, for a maximum of {Fmt(total + headroom)}.");
+                    lines.Add(Loc.Fmt("audit.verdict.headroom", Fmt(headroom), Fmt(total + headroom)));
                 else
-                    lines.Add("There is no free spot left for anything this desk builds; the rating cannot go higher here.");
+                    lines.Add(Loc.Get("audit.verdict.capped"));
             }
 
             var text = string.Join(" ", lines);
@@ -136,7 +136,7 @@ internal static class BuildZoneAudit
         catch (Exception ex)
         {
             _log?.LogError($"BuildZoneAudit error: {ex.Message}\n{ex.StackTrace}");
-            ScreenReader.Say("Could not audit this area");
+            ScreenReader.Say(Loc.Get("audit.failed"));
         }
     }
 
@@ -320,31 +320,31 @@ internal static class BuildZoneAudit
     /// <summary>Spoken state of one catalog entry; adds its reachable points to <paramref name="headroom"/>.</summary>
     private static string OptionState(Option o, ref float headroom)
     {
-        var pts = $"{Fmt(o.Points)} point{(Mathf.Abs(o.Points - 1f) < 0.05f ? "" : "s")}";
+        var pts = Loc.Plural("audit.points", Mathf.Abs(o.Points - 1f) < 0.05f ? 1 : 2, Fmt(o.Points));
 
         if (o.Locked)
-            return $"{o.Name}, {pts}, still locked";
+            return Loc.Fmt("audit.option.locked", o.Name, pts);
 
         if (o.FreePlacement)
         {
             headroom += o.Points;
-            var note = o.BuiltInZone > 0 ? $", {o.BuiltInZone} already here" : "";
+            var note = o.BuiltInZone > 0 ? Loc.Fmt("audit.option.already_here", o.BuiltInZone) : "";
             return o.Missing == null
-                ? $"{o.Name}, {pts}, free placement, materials ready{note}"
-                : $"{o.Name}, {pts}, free placement, missing {o.Missing}{note}";
+                ? Loc.Fmt("audit.option.free_ready", o.Name, pts, note)
+                : Loc.Fmt("audit.option.free_missing", o.Name, pts, o.Missing, note);
         }
 
         if (o.Mounts == 0)
-            return $"{o.Name}, {pts}, no mounting spot exists in this area at all";
+            return Loc.Fmt("audit.option.no_mount", o.Name, pts);
 
         if (o.FreeSlots == 0)
-            return $"{o.Name}, {pts}, all {o.Mounts} spot{(o.Mounts == 1 ? "" : "s")} already used";
+            return Loc.Plural("audit.option.all_used", o.Mounts, o.Name, pts, o.Mounts);
 
         headroom += o.Points * o.FreeSlots;
-        var slots = $"{o.FreeSlots} of {o.Mounts} spot{(o.Mounts == 1 ? "" : "s")} free";
+        var slots = Loc.Plural("audit.option.slots_free", o.Mounts, o.FreeSlots, o.Mounts);
         return o.Missing == null
-            ? $"{o.Name}, {pts}, {slots}, materials ready"
-            : $"{o.Name}, {pts}, {slots}, missing {o.Missing}";
+            ? Loc.Fmt("audit.option.ready", o.Name, pts, slots)
+            : Loc.Fmt("audit.option.missing", o.Name, pts, slots, o.Missing);
     }
 
     /// <summary>
@@ -433,7 +433,7 @@ internal static class BuildZoneAudit
 
                 var iname = ScreenReader.StripNguiCodes(need.definition?.GetItemName() ?? need.id)?.Trim();
                 if (string.IsNullOrWhiteSpace(iname)) iname = need.id;
-                parts.Add(shortfall > 1 ? $"{shortfall} {iname}" : iname);
+                parts.Add(shortfall > 1 ? Loc.Fmt("audit.material", shortfall, iname) : iname);
             }
             return parts.Count > 0 ? string.Join(", ", parts) : null;
         }
@@ -487,7 +487,7 @@ internal static class BuildZoneAudit
 
     private static string ObjName(string objId)
     {
-        if (string.IsNullOrEmpty(objId)) return "Object";
+        if (string.IsNullOrEmpty(objId)) return Loc.Get("common.object");
         var id = objId.EndsWith("_place") ? objId.Substring(0, objId.Length - "_place".Length) : objId;
         return InteractionDetector.LocalizedObjectName(id);
     }
@@ -501,7 +501,7 @@ internal static class BuildZoneAudit
             if (!string.IsNullOrEmpty(loc) && loc != key) return loc;
         }
         catch { }
-        return string.IsNullOrEmpty(id) ? "This area" : char.ToUpperInvariant(id[0]) + id.Substring(1);
+        return string.IsNullOrEmpty(id) ? Loc.Get("audit.this_area") : char.ToUpperInvariant(id[0]) + id.Substring(1);
     }
 
     private static string Fmt(float v) =>

@@ -33,7 +33,7 @@ internal static class QuestAnnouncer
         {
             if (!MainGame.game_started || MainGame.me?.save == null)
             {
-                ScreenReader.Say("No game in progress");
+                ScreenReader.Say(Loc.Get("common.no_game"));
                 return;
             }
 
@@ -42,14 +42,14 @@ internal static class QuestAnnouncer
             if (_items.Count == 0)
             {
                 _active = false;
-                ScreenReader.Say("No active tasks");
+                ScreenReader.Say(Loc.Get("quests.none"));
                 return;
             }
 
             _active = true;
             _index = 0;
-            var header = _items.Count == 1 ? "1 active task" : $"{_items.Count} active tasks";
-            ScreenReader.Say($"{header}. {_index + 1}: {_items[_index]}");
+            var header = Loc.Plural("quests.count", _items.Count, _items.Count);
+            ScreenReader.Say(Loc.Fmt("quests.opened", header, _index + 1, _items[_index]));
         }
         catch (Exception ex)
         {
@@ -102,7 +102,7 @@ internal static class QuestAnnouncer
     private static void AnnounceCurrent()
     {
         if (_items == null || _index < 0 || _index >= _items.Count) return;
-        ScreenReader.Say($"{_index + 1} of {_items.Count}: {_items[_index]}", interrupt: true);
+        ScreenReader.Say(Loc.Fmt("quests.entry", _index + 1, _items.Count, _items[_index]), interrupt: true);
     }
 
     private static void Close(bool silent)
@@ -110,7 +110,7 @@ internal static class QuestAnnouncer
         _active = false;
         _items = null;
         _index = 0;
-        if (!silent) ScreenReader.Say("Quest list closed");
+        if (!silent) ScreenReader.Say(Loc.Get("quests.closed"));
     }
 
     /// <summary>Merge story quests and visible NPC tasks into one de-duplicated list of texts.</summary>

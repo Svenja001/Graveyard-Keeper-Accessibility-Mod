@@ -11,14 +11,14 @@ internal class ConfigItem
     internal string ReadLabel()
     {
         var val = Entry?.BoxedValue?.ToString() ?? "?";
-        return $"{Name}: {val}";
+        return Loc.Fmt("config.row.label", Name, val);
     }
 
     internal string ReadFull()
     {
         var val = Entry?.BoxedValue?.ToString() ?? "?";
         var desc = !string.IsNullOrWhiteSpace(Description) ? ". " + Description : "";
-        return $"{PluginName}, {Section}, {Name}: {val}{desc}";
+        return Loc.Fmt("config.row.full", PluginName, Section, Name, val, desc);
     }
 }
 
@@ -91,7 +91,7 @@ internal static class ConfigManagerAccessibility
         Items.Clear();
         BuildSettingsList();
         Plugin.Log.LogInfo($"ConfigManager opened, {Items.Count} settings");
-        ScreenReader.Say($"Configuration Manager, {Items.Count} settings");
+        ScreenReader.Say(Loc.Fmt("config.opened", Items.Count));
     }
 
     private static void Close()
@@ -184,7 +184,7 @@ internal static class ConfigManagerAccessibility
         }
         else if (type == typeof(KeyboardShortcut))
         {
-            ScreenReader.Say("Keybind, press Enter to hear details");
+            ScreenReader.Say(Loc.Get("config.keybind"));
             return;
         }
 
