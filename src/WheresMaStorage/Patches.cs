@@ -720,15 +720,6 @@ public static class Patches
     }
 
 
-    [HarmonyPrefix]
-    [HarmonyPatch(typeof(CraftResourcesSelectGUI), nameof(CraftResourcesSelectGUI.Open), typeof(WorldGameObject),
-        typeof(InventoryWidget.ItemFilterDelegate), typeof(CraftResourcesSelectGUI.ResourceSelectResultDelegate),
-        typeof(bool))]
-    public static void CraftResourcesSelectGUI_Open(ref bool force_ignore_toolbelt)
-    {
-        force_ignore_toolbelt = true;
-    }
-
     [HarmonyPostfix]
     [HarmonyPatch(typeof(InventoryPanelGUI), nameof(InventoryPanelGUI.Redraw))]
     public static void InventoryPanelGUI_Redraw(InventoryPanelGUI __instance)

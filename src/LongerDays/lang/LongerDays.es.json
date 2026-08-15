@@ -3,6 +3,9 @@
   "cfg.section.updates": "Actualizaciones",
   "cfg.day_length.name": "Duración del día",
   "cfg.day_length.desc": "Define la duración de un día.",
+  "cfg.section.advanced": "Avanzado",
+  "cfg.debug_logging.name": "Registro de depuración",
+  "cfg.debug_logging.desc": "Escribe diagnósticos del ciclo de día en la consola de BepInEx: el número de día y la probabilidad de entrega de cadáveres cada día. Útil para informar problemas de entrega. Déjalo desactivado para el juego normal.",
   "cfg.check_for_updates.name": "Buscar actualizaciones",
   "cfg.check_for_updates.desc": "Muestra un aviso en el menú principal cuando hay una versión más nueva de este mod en NexusMods. Haz clic en el aviso para abrir la página del mod."
 }

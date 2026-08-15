@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "使用手柄时自动将焦点放在制作按钮上。",
   "cfg.force_multi_craft.name": "强制启用多重制作",
   "cfg.force_multi_craft.desc": "让几乎所有可制作物品都可以排队。",
+  "cfg.allow_multiquality_multicraft.name": "允许品质物品批量制作",
+  "cfg.allow_multiquality_multicraft.desc": "默认关闭。品质物品（钢凿、雕刻半身像、品质食物等）无法在制作队列中保留你所选的星级，因此排入多个并不可靠。保持关闭时你可以逐个制作，这总能正常工作。仅当你接受排队的品质制作可能做出错误星级、或错误提示“物品不足”时才开启。",
+  "mqmc.warning.title": "Queue Everything：有风险的设置",
+  "mqmc.warning.body": "品质物品批量制作现已开启。\n\n游戏的制作队列无法保存你选择的星级，因此当你排入多个品质制作（钢凿、雕刻半身像、品质食物等）时，多余的可能做出错误星级，或即使你有材料游戏也会错误提示物品不足。\n\n单个制作不受影响。若结果异常，请重新关闭此项。",
   "cfg.check_for_updates.name": "检查更新",
   "cfg.check_for_updates.desc": "当 NexusMods 上有此模组的更新版本时，在主菜单显示提示。点击提示可打开模组页面。"
 }

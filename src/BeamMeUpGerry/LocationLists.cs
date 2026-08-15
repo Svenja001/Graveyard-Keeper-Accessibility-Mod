@@ -124,7 +124,7 @@ public static class LocationLists
         }
 
 
-        if (MainGame.me && MainGame.me.save != null)
+        if (MainGame.game_started)
         {
             locations = locations.Where(a => !Helpers.RemoveZone(a)).ToList();
         }

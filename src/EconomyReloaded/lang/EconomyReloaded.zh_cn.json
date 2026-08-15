@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "开启后库存增加卖价会下降。关闭则始终按基础卖价。",
   "cfg.sell_price_multiplier.name": "卖价倍率",
   "cfg.sell_price_multiplier.desc": "最终倍率。0.75 与原版一致。",
+  "cfg.aggressive_vendor_restock.name": "商人激进补货",
+  "cfg.aggressive_vendor_restock.desc": "开启后，商店会在每天结束时将库存和资金完全恢复到正常水平，而不是逐步回升。这样你就能日复一日地把同样的大宗货物（如煤炭）卖给同一个商人。",
   "cfg.check_for_updates.name": "检查更新",
   "cfg.check_for_updates.desc": "当 NexusMods 上有此模组的更新版本时，在主菜单显示提示。点击提示可打开模组页面。"
 }

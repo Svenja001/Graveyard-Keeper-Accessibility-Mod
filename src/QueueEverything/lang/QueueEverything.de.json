@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "Fokussiert die Craft-Taste automatisch, wenn ein Controller verwendet wird.",
   "cfg.force_multi_craft.name": "Mehrfach-Craft erzwingen",
   "cfg.force_multi_craft.desc": "Macht fast jeden herstellbaren Gegenstand warteschlangenfähig.",
+  "cfg.allow_multiquality_multicraft.name": "Multi-Qualitäts-Mehrfachherstellung erlauben",
+  "cfg.allow_multiquality_multicraft.desc": "Standardmäßig aus. Qualitätswaren (Stahlmeißel, geschnitzte Büsten, Qualitätsessen usw.) können ihre gewählte Sternstufe nicht durch die Warteschlange tragen, daher ist das Einreihen mehrerer unzuverlässig. Aus gelassen, stellst du sie einzeln her, was immer funktioniert. Nur aktivieren, wenn du akzeptierst, dass eingereihte Qualitätscrafts in der falschen Sternstufe herauskommen oder fälschlich 'nicht genug Gegenstände' melden können.",
+  "mqmc.warning.title": "Queue Everything: riskante Einstellung",
+  "mqmc.warning.body": "Multi-Qualitäts-Mehrfachherstellung ist jetzt an.\n\nDie Warteschlange des Spiels kann nicht speichern, welche Sternqualität du gewählt hast. Wenn du mehr als einen Qualitätscraft einreihst (Stahlmeißel, geschnitzte Büsten, Qualitätsessen und Ähnliches), können die zusätzlichen in der falschen Sternstufe herauskommen, oder das Spiel meldet fälschlich, dass dir Gegenstände fehlen.\n\nEinzelherstellungen sind nicht betroffen. Wenn du seltsame Ergebnisse siehst, schalte dies wieder aus.",
   "cfg.check_for_updates.name": "Auf Updates prüfen",
   "cfg.check_for_updates.desc": "Zeigt im Hauptmenü einen Hinweis an, wenn auf NexusMods eine neuere Version dieses Mods verfügbar ist. Klicke auf den Hinweis, um die Modseite zu öffnen."
 }

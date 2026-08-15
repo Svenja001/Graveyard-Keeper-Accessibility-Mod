@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "켜짐: 상점에 물건이 많아질수록 물건을 팔 때 받는 돈이 줄어듭니다. 꺼짐: 언제나 똑같은 가격으로 팔 수 있습니다.",
   "cfg.sell_price_multiplier.name": "판매 가격 배율",
   "cfg.sell_price_multiplier.desc": "판매 가격에 적용되는 최종 비율입니다. 0.75는 게임 기본값과 같습니다.",
+  "cfg.aggressive_vendor_restock.name": "적극적인 상인 재고 보충",
+  "cfg.aggressive_vendor_restock.desc": "켜면 상점이 매일 하루가 끝날 때 재고와 자금을 조금씩 회복하는 대신 완전히 원래 수준으로 되돌립니다. 덕분에 석탄 같은 대량 물품을 매일 상인에게 반복해서 팔 수 있습니다.",
   "cfg.check_for_updates.name": "업데이트 확인",
   "cfg.check_for_updates.desc": "넥서스모드에 이 모드의 최신 버전이 나오면 메인 메뉴에 알림을 띄웁니다. 알림을 누르면 모드 페이지가 열립니다."
 }

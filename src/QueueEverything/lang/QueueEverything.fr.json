@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "Met automatiquement le focus sur le bouton de fabrication à la manette.",
   "cfg.force_multi_craft.name": "Forcer la fabrication multiple",
   "cfg.force_multi_craft.desc": "Rend presque tous les objets fabricables encolables.",
+  "cfg.allow_multiquality_multicraft.name": "Autoriser la fabrication multiple de qualité",
+  "cfg.allow_multiquality_multicraft.desc": "Désactivé par défaut. Les objets de qualité (ciseaux en acier, bustes sculptés, nourriture de qualité, etc.) ne peuvent pas conserver le niveau d'étoile choisi dans la file de fabrication, donc en mettre plusieurs en file est peu fiable. Laissé désactivé, vous les fabriquez un par un, ce qui marche toujours. Ne l'activez que si vous acceptez que les fabrications de qualité en file puissent sortir avec la mauvaise étoile ou afficher un faux message 'objets insuffisants'.",
+  "mqmc.warning.title": "Queue Everything : réglage risqué",
+  "mqmc.warning.body": "La fabrication multiple de qualité est maintenant activée.\n\nLa file de fabrication du jeu ne peut pas mémoriser la qualité d'étoile que vous avez choisie ; en mettant plusieurs objets de qualité en file (ciseaux en acier, bustes sculptés, nourriture de qualité et similaires), les objets supplémentaires peuvent sortir avec la mauvaise étoile, ou le jeu peut dire à tort que vous n'avez pas les objets.\n\nLes fabrications uniques ne sont pas affectées. Si vous voyez des résultats étranges, désactivez-le à nouveau.",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",
   "cfg.check_for_updates.desc": "Affiche un avis dans le menu principal lorsqu'une nouvelle version de ce mod est disponible sur NexusMods. Clique sur l'avis pour ouvrir la page du mod."
 }

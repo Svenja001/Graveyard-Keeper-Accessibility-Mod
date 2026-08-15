@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "Se attivo, i prezzi scendono quando le scorte aumentano. Se disattivato, sempre prezzo base.",
   "cfg.sell_price_multiplier.name": "Moltiplicatore del prezzo di vendita",
   "cfg.sell_price_multiplier.desc": "Moltiplicatore finale. 0,75 corrisponde al gioco base.",
+  "cfg.aggressive_vendor_restock.name": "Rifornimento aggressivo dei mercanti",
+  "cfg.aggressive_vendor_restock.desc": "Quando attivo, i negozi riequilibrano completamente le loro scorte e il denaro alla fine di ogni giorno invece di recuperare gradualmente. Questo rende possibile vendere le stesse merci in grandi quantità (come il carbone) a un mercante giorno dopo giorno.",
   "cfg.check_for_updates.name": "Controlla aggiornamenti",
   "cfg.check_for_updates.desc": "Mostra un avviso nel menu principale quando è disponibile una nuova versione di questo mod su NexusMods. Clicca sull'avviso per aprire la pagina del mod."
 }

@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "Wenn aktiviert, sinken Verkaufspreise bei vollen Beständen. Wenn deaktiviert, immer der Grundpreis.",
   "cfg.sell_price_multiplier.name": "Verkaufspreis-Multiplikator",
   "cfg.sell_price_multiplier.desc": "Endgültiger Multiplikator. 0,75 entspricht dem Grundspiel.",
+  "cfg.aggressive_vendor_restock.name": "Aggressives Händler-Auffüllen",
+  "cfg.aggressive_vendor_restock.desc": "Wenn aktiviert, gleichen Händler ihren Bestand und ihr Geld am Ende jedes Tages vollständig aus, statt sich nur langsam zu erholen. So lässt sich dieselbe Massenware (etwa Kohle) Tag für Tag an einen Händler verkaufen.",
   "cfg.check_for_updates.name": "Auf Updates prüfen",
   "cfg.check_for_updates.desc": "Zeigt im Hauptmenü einen Hinweis an, wenn auf NexusMods eine neuere Version dieses Mods verfügbar ist. Klicke auf den Hinweis, um die Modseite zu öffnen."
 }

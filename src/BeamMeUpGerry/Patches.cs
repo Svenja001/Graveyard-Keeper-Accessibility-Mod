@@ -142,6 +142,19 @@ public static class Patches
         if (!Plugin.EnableListExpansion.Value) return true;
         if (__instance is not {id: Constants.Hearthstone}) return true;
 
+        // Block teleport inside dungeons no matter how the item was triggered
+        // (keybind or clicking the hearthstone directly in the toolbar).
+        if (DungeonState.IsInDungeon)
+        {
+            Helpers.SpawnGerry(Lang.Get("runtime.cant_use_here"), Vector3.zero);
+            __result = new GameRes();
+            return false;
+        }
+
+        // Rebuild the list against the current save before showing it, so both
+        // entry points reflect what the player has actually discovered.
+        LocationLists.CreatePages();
+
         if (__instance.definition.cooldown.has_expression)
         {
             if (__instance.GetGrayedCooldownPercent() != 0)
@@ -223,11 +236,6 @@ public static class Patches
             }
             else
             {
-                if (Plugin.EnableListExpansion.Value)
-                {
-                    LocationLists.CreatePages();
-                }
-
                 Plugin.CachedHearthstone.UseItem(MainGame.me.player);
             }
         }

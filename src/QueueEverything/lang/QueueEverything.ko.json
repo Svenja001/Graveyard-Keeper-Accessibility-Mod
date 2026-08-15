@@ -45,6 +45,10 @@
   "cfg.auto_select_craft_button_with_controller.desc": "컨트롤러 사용 시 자동으로 제작 버튼에 초점을 맞춥니다.",
   "cfg.force_multi_craft.name": "강제 다중 제작",
   "cfg.force_multi_craft.desc": "거의 모든 제작 가능 아이템을 대기열(큐)에 추가할 수 있도록 합니다.",
+  "cfg.allow_multiquality_multicraft.name": "고품질 아이템 다중 제작 허용",
+  "cfg.allow_multiquality_multicraft.desc": "기본값은 꺼짐. 품질이 있는 아이템(강철 끌, 조각 흉상, 품질 음식 등)은 선택한 별 등급을 제작 대기열에 담아둘 수 없어서 여러 개를 대기열에 넣으면 불안정합니다. 꺼 두면 하나씩 제작하며, 이는 항상 정상 작동합니다. 대기열에 넣은 품질 제작이 잘못된 별로 나오거나 '아이템이 부족하다'는 잘못된 메시지가 뜰 수 있음을 감수할 때만 켜세요.",
+  "mqmc.warning.title": "Queue Everything: 위험한 설정",
+  "mqmc.warning.body": "고품질 아이템 다중 제작이 켜졌습니다.\n\n게임의 제작 대기열은 선택한 별 등급을 저장할 수 없어서, 품질 제작(강철 끌, 조각 흉상, 품질 음식 등)을 여러 개 대기열에 넣으면 추가분이 잘못된 별로 나오거나, 아이템이 있는데도 없다고 잘못 표시될 수 있습니다.\n\n단일 제작은 영향받지 않습니다. 이상한 결과가 보이면 다시 끄세요.",
   "cfg.check_for_updates.name": "업데이트 확인",
   "cfg.check_for_updates.desc": "넥서스모드에 이 모드의 최신 버전이 나오면 메인 메뉴에 알림을 띄웁니다. 알림을 누르면 모드 페이지가 열립니다."
 }

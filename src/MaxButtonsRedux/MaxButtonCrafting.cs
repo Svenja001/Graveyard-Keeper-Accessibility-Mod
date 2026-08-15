@@ -50,6 +50,16 @@ public static class MaxButtonCrafting
         minMaxButton.name = minMaxButtonName;
         minMaxButton.transform.localPosition = localPos;
 
+        // The vanilla arrow fires OnAmountPlus/Minus from UIEventTrigger.onPress (down), and that
+        // wiring rides along on the clone. Drop it so a press can't nudge the amount by one before
+        // our Min/Max click sets it.
+        var trigger = minMaxButton.GetComponent<UIEventTrigger>();
+        if (trigger != null)
+        {
+            trigger.onPress.Clear();
+            trigger.onClick.Clear();
+        }
+
         var minMaxButtonUI = minMaxButton.GetComponent<UIButton>();
         minMaxButtonUI.normalSprite2D = sourceUi.normalSprite2D;
         minMaxButtonUI.hoverSprite2D = sourceUi.hoverSprite2D;

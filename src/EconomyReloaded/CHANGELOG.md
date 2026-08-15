@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 | 18 July 2026
+
+- Added optional Aggressive Vendor Restock: shops refill their goods and money fully each day, so you can resell bulk goods like coal to the same vendor daily
+
 ## 1.3.12 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

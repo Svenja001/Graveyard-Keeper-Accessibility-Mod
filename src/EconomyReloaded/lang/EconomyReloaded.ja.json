@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "オンの場合、店の在庫が増えると販売価格が下がります。オフの場合、常に基本価格です。",
   "cfg.sell_price_multiplier.name": "販売価格倍率",
   "cfg.sell_price_multiplier.desc": "最終倍率。0.75 はバニラと同じ。",
+  "cfg.aggressive_vendor_restock.name": "商人の積極的な在庫補充",
+  "cfg.aggressive_vendor_restock.desc": "オンにすると、店は在庫と所持金を少しずつ回復する代わりに、毎日終わりに完全に元の水準へ戻します。これにより、石炭などの同じ大量の品を毎日商人に売り続けられます。",
   "cfg.check_for_updates.name": "アップデートを確認",
   "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。"
 }

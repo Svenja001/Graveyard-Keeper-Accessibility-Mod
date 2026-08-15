@@ -9,6 +9,8 @@
   "cfg.dynamic_sell_pricing.desc": "When on, sell prices drop as shops fill up. When off, every sale pays the flat sell price.",
   "cfg.sell_price_multiplier.name": "Sell Price Multiplier",
   "cfg.sell_price_multiplier.desc": "Final multiplier on every sell price. 0.75 matches base game.",
+  "cfg.aggressive_vendor_restock.name": "Aggressive Vendor Restock",
+  "cfg.aggressive_vendor_restock.desc": "When on, shops rebalance their stock and money fully at the end of each day instead of recovering gradually. This makes it viable to sell the same bulk goods (like coal) to a vendor day after day.",
   "cfg.check_for_updates.name": "Check for Updates",
   "cfg.check_for_updates.desc": "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page."
 }

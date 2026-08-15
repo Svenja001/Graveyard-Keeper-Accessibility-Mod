@@ -3,6 +3,9 @@
   "cfg.section.updates": "アップデート",
   "cfg.day_length.name": "1 日の長さ",
   "cfg.day_length.desc": "1 日の長さを設定します。",
+  "cfg.section.advanced": "詳細設定",
+  "cfg.debug_logging.name": "デバッグログ",
+  "cfg.debug_logging.desc": "日周期の診断を BepInEx コンソールに出力します：日数と、毎日の死体配達の確率。配達の問題を報告するのに便利です。通常プレイではオフのままにしてください。",
   "cfg.check_for_updates.name": "アップデートを確認",
   "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。"
 }

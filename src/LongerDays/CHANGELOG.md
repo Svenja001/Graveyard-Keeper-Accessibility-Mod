@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0 | 18 July 2026
+
+- Added an optional Debug Logging setting to help diagnose corpse-delivery reports
+
 ## 1.6.13 | 27 May 2026
 
 - Fixed timed buffs and debuffs lasting longer than their timer showed at higher day-length settings

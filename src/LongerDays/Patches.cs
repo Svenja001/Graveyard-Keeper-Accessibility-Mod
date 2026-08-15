@@ -115,4 +115,18 @@ public static class Patches
             __result = (1f - __instance.GetTimeK() + 0.15f) * Plugin.Seconds;
         }
     }
+
+    // Diagnostic only: at each day rollover, log the day and the corpse-delivery
+    // chance so a report can show whether the roll actually climbs at longer day
+    // lengths. Off unless Debug Logging is on. Changes nothing.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(EnvironmentEngine), nameof(EnvironmentEngine.OnEndOfDay))]
+    public static void EnvironmentEngine_OnEndOfDay()
+    {
+        if (!Plugin.DebugEnabled) return;
+        var player = MainGame.me?.player;
+        if (player == null || MainGame.me.save == null) return;
+        var chance = player.GetParam("donkey_coming_chance");
+        Plugin.Log.LogInfo($"[LongerDays] End of day {MainGame.me.save.day} (x{GetTimeMulti()} length): donkey_coming_chance={chance:0.###}");
+    }
 }

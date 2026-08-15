@@ -3,6 +3,9 @@
   "cfg.section.updates": "Updates",
   "cfg.day_length.name": "Day Length",
   "cfg.day_length.desc": "Set the length of a day.",
+  "cfg.section.advanced": "Advanced",
+  "cfg.debug_logging.name": "Debug Logging",
+  "cfg.debug_logging.desc": "Write day-cycle diagnostics to the BepInEx console: the day number and the corpse-delivery chance each day. Useful for reporting delivery issues. Leave off for normal play.",
   "cfg.check_for_updates.name": "Check for Updates",
   "cfg.check_for_updates.desc": "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page."
 }

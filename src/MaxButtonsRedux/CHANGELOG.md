@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 | 18 July 2026
+
+- Tidied up the expanded-view Min and Max buttons so a click can't briefly count an extra craft
+
 ## 1.3.14 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations
