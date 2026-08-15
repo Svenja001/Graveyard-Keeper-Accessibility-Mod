@@ -35,6 +35,7 @@ internal enum NavCategory
     Graves,
     EmptyGraves,
     ExhumableGraves,
+    DiggableGraves,
     People,
     Enemies,
     Vendors,
@@ -84,6 +85,7 @@ internal static class ObjectNavigator
         NavCategory.Graves,
         NavCategory.EmptyGraves,
         NavCategory.ExhumableGraves,
+        NavCategory.DiggableGraves,
         NavCategory.People,
         NavCategory.Enemies,
         NavCategory.Vendors,
@@ -910,6 +912,7 @@ internal static class ObjectNavigator
         NavCategory.Graves => "Graves",
         NavCategory.EmptyGraves => "Empty graves",
         NavCategory.ExhumableGraves => "Exhumable graves",
+        NavCategory.DiggableGraves => "Diggable graves",
         NavCategory.People => "People",
         NavCategory.Enemies => "Enemies",
         NavCategory.Vendors => "Vendors",
@@ -2854,7 +2857,11 @@ internal static class ObjectNavigator
                 // the seconds it costs). Grave state (body, cross, fence) lives in the serialized
                 // obj.data, which stays valid while the object is culled, so the mirrored Empty /
                 // Exhumable / Decorate / Fence lists below are correct for culled graves too.
-                bool graveCategory = category == NavCategory.Graves;
+                // Marked-but-undug grave plots belong to the same group: they sit in the graveyard,
+                // never move, and are looked for precisely when they're off-camera — you plan a
+                // grave at the build desk, then have to walk to the plot you just marked.
+                bool graveCategory = category == NavCategory.Graves ||
+                                     category == NavCategory.DiggableGraves;
 
                 bool keepIfCulled =
                     ((farReach || builtCategory || graveCategory) && !interiorSightBlocked) ||
@@ -3908,17 +3915,34 @@ internal static class ObjectNavigator
     }
 
     /// <summary>
-    /// True for a grave that can take the body you're carrying: a REAL grave (it carries the Grave
-    /// interaction, i.e. E opens the grave menu — the obj_id-matched grave scenery that also lists
-    /// under Graves has no menu and nothing to bury in) that currently holds no body. Reads the
-    /// serialized inventory, so it is correct for culled graves too.
+    /// A dug-out grave plot: the open hole you get by digging a marked plot (grave_empty), and the
+    /// grave ground it becomes (grave_ground). Both take a body and neither has the Grave
+    /// interaction, so they're recognised the way the GAME recognises them — by exact obj id.
+    /// WorldGameObject.CanInsertItem hard-codes these two ids to accept an ItemType.Body, and
+    /// CustomDrawers.OnObjectRedraw hard-codes the same pair to draw as a grave; there is no
+    /// structural flag to test instead. Exact equality, so the marked-but-undug placeholder
+    /// grave_empty_place (a shovel node, listed under Diggable graves) is not swept in.
+    /// </summary>
+    private static bool IsGravePlot(WorldGameObject obj, ObjectDefinition def)
+    {
+        var id = def?.id ?? obj?.obj_id;
+        return id == "grave_empty" || id == "grave_ground";
+    }
+
+    /// <summary>
+    /// True for a grave that can take the body you're carrying: a real grave — one with the Grave
+    /// interaction (E opens the grave menu) or a dug-out plot (see <see cref="IsGravePlot"/>), as
+    /// opposed to the obj_id-matched grave scenery that also lists under Graves and has nothing to
+    /// bury in — that currently holds no body. Reads the serialized inventory, so it is correct for
+    /// culled graves too.
     /// </summary>
     private static bool IsEmptyGrave(WorldGameObject obj)
     {
         try
         {
-            if (obj.obj_def == null ||
-                obj.obj_def.interaction_type != ObjectDefinition.InteractionType.Grave)
+            if (obj.obj_def == null) return false;
+            if (obj.obj_def.interaction_type != ObjectDefinition.InteractionType.Grave &&
+                !IsGravePlot(obj, obj.obj_def))
                 return false;
             return !HoldsBody(obj);
         }
@@ -3929,6 +3953,13 @@ internal static class ObjectNavigator
     {
         try
         {
+            // Exhuming runs through the grave menu, so a grave without the Grave interaction (a
+            // dug-out plot that has just been filled) has no Exhume button to press — listing it
+            // would send the player to a grave they can't open.
+            if (obj?.obj_def == null ||
+                obj.obj_def.interaction_type != ObjectDefinition.InteractionType.Grave)
+                return false;
+
             var body = obj.GetBodyFromInventory();
             if (body == null || body.definition == null
                 || body.definition.type != ItemDefinition.ItemType.Body
@@ -4088,6 +4119,19 @@ internal static class ObjectNavigator
         // handled below. The greedy substring catch is kept only as a default fallback so
         // non-interactive grave fixtures still list under Graves.
         if (def.interaction_type == ObjectDefinition.InteractionType.Grave)
+        {
+            category = NavCategory.Graves;
+            return true;
+        }
+
+        // A dug-out grave plot (grave_empty / grave_ground) — the hole left after digging a marked
+        // plot open, which is exactly where the corpse you're carrying goes. It is a real grave but
+        // carries NO Grave interaction (there's no grave menu until something is buried), so the
+        // rule above passes it over and its demolish craft dropped it into the catch-all
+        // Built-objects list, between beds and lamps. File it under Graves so the Empty-graves
+        // mirror below can pick it up: after digging a grave the player needs to find it again
+        // carrying a body, and that list is the one that answers "where can this corpse go".
+        if (IsGravePlot(obj, def))
         {
             category = NavCategory.Graves;
             return true;
@@ -4894,6 +4938,26 @@ internal static class ObjectNavigator
             // Note: smashable loot props (barrels/crates/vases/urns/dungeon smashables) are handled
             // by IsBreakableLootProp in TryClassify's default branch BEFORE this method is called, so
             // they never reach the Axe→Trees rule below.
+
+            // A grave plot marked out at the graveyard build desk (grave_empty_place) is a shovel
+            // node, not a resource: you dig it and it becomes a real empty grave (the game runs
+            // ReplaceWithObject grave_empty_place → grave_empty). Because it carries no Grave
+            // interaction yet, TryClassify's grave rules pass it over and the shovel action dropped
+            // it into the catch-all Gatherables, buried among mushrooms and branches — so after
+            // planning a grave the player had no way to find the spot they just marked. Give the
+            // marked-but-undug plots their own bucket, next to the other grave lists. Checked first
+            // so no later keyword rule can claim one.
+            //
+            // Matched on a grave-PREFIXED id plus the shovel, not a loose "grave" substring: the
+            // graveyard's paving tiles are road_stone_small_graveyard_* (that substring plus the
+            // "stone" keyword) and the enclosure is graveyard_fence_* / graveyard_gate — the prefix
+            // rules the roads out, and requiring the dig/gather tool rules out anything you work
+            // with an axe or pickaxe rather than dig open.
+            if ((shovel || hand) && id.StartsWith("grave", StringComparison.OrdinalIgnoreCase))
+            {
+                category = NavCategory.DiggableGraves;
+                return true;
+            }
             if (id.IndexOf("bush", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 category = NavCategory.Bushes;
@@ -5323,6 +5387,28 @@ internal static class ObjectNavigator
                 obj.obj_def.interaction_type == ObjectDefinition.InteractionType.None &&
                 IsBreakableLootProp(obj))
                 return $"{InteractionDetector.GetObjectLabel(obj)}, attack to smash";
+
+            // The three stages of a self-built grave share one id family, and the generic grave
+            // relabel below would read them out as "Grave grave empty place" / "Grave grave empty"
+            // — the raw id with a word bolted on, which says nothing about which stage it is or
+            // what to do there. Name the stage instead. The dug-out plot borrows the game's OWN
+            // header for it (grave_empty_hdr / grave_body_hdr, what the HUD shows when you stand at
+            // one), so it stays localized; the marked plot has no such string, so it falls back to
+            // plain wording plus the tool, the way the hammer/attack hints above do.
+            var graveStageId = obj?.obj_def?.id ?? obj?.obj_id;
+            if (graveStageId == "grave_empty_place")
+            {
+                return InteractionDetector.HasTranslation(graveStageId)
+                    ? $"{InteractionDetector.LocalizedObjectName(graveStageId)}, dig it out"
+                    : "Marked grave plot, dig it out";
+            }
+            if (graveStageId == "grave_empty" || graveStageId == "grave_ground")
+            {
+                var hdr = HoldsBody(obj) ? "grave_body_hdr" : "grave_empty_hdr";
+                if (InteractionDetector.HasTranslation(hdr))
+                    return InteractionDetector.LocalizedObjectName(hdr);
+                return HoldsBody(obj) ? "Grave with a body" : "Empty grave";
+            }
 
             // Special handling for graves by checking obj_id. Skip build/craft/chest
             // stations whose id merely embeds "grave" (e.g. the graveyard build desk):
