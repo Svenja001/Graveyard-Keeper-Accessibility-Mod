@@ -77,16 +77,35 @@ internal static class ScreenReader
     /// </summary>
     internal static float LastSpokenAt { get; private set; }
 
+    /// <summary>
+    /// True when output also reaches a braille display. Only the Prism screen reader backends
+    /// can do this — the SAPI fallback is speech-only.
+    /// </summary>
+    internal static bool SupportsBraille => _prismAvailable && PrismWrapper.SupportsBraille;
+
     internal static bool Say(string text, bool interrupt = true)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
 
         LastSpokenAt = Time.unscaledTime;
 
+        // Prism routes this to speech *and* braille in one call when the screen reader supports
+        // both, so everything the mod says is readable on a display without a second call site.
         if (_prismAvailable)
             return PrismWrapper.Speak(text, interrupt);
 
         return SapiSpeak(text);
+    }
+
+    /// <summary>
+    /// Writes to the braille display only, leaving speech alone. Use this for text that is worth
+    /// reading but not worth interrupting speech for — a status line the player can pan over at
+    /// their own pace. No-op when there is no braille-capable backend.
+    /// </summary>
+    internal static bool Braille(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !_prismAvailable) return false;
+        return PrismWrapper.Braille(text);
     }
 
     private static bool SapiSpeak(string text)

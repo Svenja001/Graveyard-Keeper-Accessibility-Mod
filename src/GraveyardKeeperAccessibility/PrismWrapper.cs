@@ -30,7 +30,13 @@ internal static class PrismWrapper
     private static extern int prism_backend_initialize(IntPtr backend);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern ulong prism_backend_get_features(IntPtr backend);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int prism_backend_speak(IntPtr backend, [MarshalAs(UnmanagedType.LPStr)] string text, [MarshalAs(UnmanagedType.Bool)] bool interrupt);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int prism_backend_braille(IntPtr backend, [MarshalAs(UnmanagedType.LPStr)] string text);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int prism_backend_output(IntPtr backend, [MarshalAs(UnmanagedType.LPStr)] string text, [MarshalAs(UnmanagedType.Bool)] bool interrupt);
@@ -44,9 +50,27 @@ internal static class PrismWrapper
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr prism_error_string(int error);
 
+    // PrismBackendFeature bits (see include/prism.h). Only the ones we act on are listed.
+    private const ulong FeatureSupportsBraille = 1UL << 4;
+    private const ulong FeatureSupportsOutput = 1UL << 5;
+
     private static IntPtr _context = IntPtr.Zero;
     private static IntPtr _backend = IntPtr.Zero;
     private static ManualLogSource _log;
+
+    /// <summary>
+    /// True when the backend can drive a braille display. Screen reader backends (NVDA, JAWS,
+    /// System Access, ZDSR, PC-Talker, Window-Eyes) implement this; plain TTS backends
+    /// (SAPI, OneCore) do not. Says nothing about whether a display is actually plugged in —
+    /// Prism explicitly documents that the return value can't be used to detect that.
+    /// </summary>
+    internal static bool SupportsBraille { get; private set; }
+
+    /// <summary>
+    /// True when the backend implements <c>prism_backend_output</c>, which sends one string to
+    /// speech and braille in a single call — the way Prism wants combined output done.
+    /// </summary>
+    private static bool _supportsOutput;
 
     internal static bool Init(ManualLogSource log)
     {
@@ -83,7 +107,10 @@ internal static class PrismWrapper
             }
 
             var backendName = Marshal.PtrToStringAnsi(prism_backend_name(_backend));
-            _log.LogInfo($"Prism initialized with backend: {backendName}");
+            var features = prism_backend_get_features(_backend);
+            SupportsBraille = (features & FeatureSupportsBraille) != 0;
+            _supportsOutput = (features & FeatureSupportsOutput) != 0;
+            _log.LogInfo($"Prism initialized with backend: {backendName} (braille: {SupportsBraille}, combined output: {_supportsOutput})");
             return true;
         }
         catch (Exception ex)
@@ -93,26 +120,60 @@ internal static class PrismWrapper
         }
     }
 
+    /// <summary>
+    /// Sends text to every modality the backend has. On a screen reader that means speech and
+    /// the braille display at once; on a TTS-only backend it degrades to plain speech.
+    /// </summary>
     internal static bool Speak(string text, bool interrupt = true)
     {
         if (_backend == IntPtr.Zero || string.IsNullOrWhiteSpace(text))
             return false;
 
+        if (_supportsOutput)
+        {
+            var outResult = Call(() => prism_backend_output(_backend, text, interrupt), "output");
+            // NOT_IMPLEMENTED means the feature bit lied; drop to speech for the rest of the session.
+            if (outResult != ErrorNotImplemented)
+                return outResult == 0;
+            _supportsOutput = false;
+        }
+
+        return Call(() => prism_backend_speak(_backend, text, interrupt), "speak") == 0;
+    }
+
+    /// <summary>
+    /// Puts text on the braille display without speaking it. Braille output is independent of
+    /// speech: it neither interrupts speech in progress nor is cleared by later speech, and it
+    /// stays on the display until the next braille write (or until the screen reader overwrites
+    /// it with whatever the user focuses).
+    /// </summary>
+    internal static bool Braille(string text)
+    {
+        if (_backend == IntPtr.Zero || !SupportsBraille || string.IsNullOrWhiteSpace(text))
+            return false;
+
+        return Call(() => prism_backend_braille(_backend, text), "braille") == 0;
+    }
+
+    private const int ErrorNotImplemented = 3; // PRISM_ERROR_NOT_IMPLEMENTED
+
+    /// <summary>Runs a Prism call, logs anything that isn't PRISM_OK, and returns the error code.</summary>
+    private static int Call(Func<int> call, string what)
+    {
         try
         {
-            var result = prism_backend_speak(_backend, text, interrupt);
+            var result = call();
             if (result != 0)
             {
                 var errMsg = Marshal.PtrToStringAnsi(prism_error_string(result));
-                _log?.LogWarning($"Prism speak failed: {errMsg}");
-                return false;
+                _log?.LogWarning($"Prism {what} failed: {errMsg}");
             }
-            return true;
+            return result;
         }
         catch (Exception ex)
         {
-            _log?.LogWarning($"Prism speak error: {ex.Message}");
-            return false;
+            _log?.LogWarning($"Prism {what} error: {ex.Message}");
+            return -1;
         }
     }
 
@@ -129,5 +190,8 @@ internal static class PrismWrapper
             prism_shutdown(_context);
             _context = IntPtr.Zero;
         }
+
+        SupportsBraille = false;
+        _supportsOutput = false;
     }
 }
