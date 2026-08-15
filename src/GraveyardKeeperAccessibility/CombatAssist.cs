@@ -553,26 +553,12 @@ internal static class CombatAssist
         }
 
         // Anything known last frame that's no longer in the scan list either died or the player
-        // ran out of range. FindEnemies drops both cases, so distinguish them via the kept object:
-        // announce a defeat only if the enemy is actually dead — otherwise it just fled, stay quiet.
+        // ran out of range. Kills aren't announced — the loot drop already tells the player — so
+        // both cases just drop their HP tracking.
         foreach (var kv in _knownEnemies)
         {
             int id = kv.Key;
             if (currentIds.Contains(id)) continue;
-
-            var obj = kv.Value;
-            bool defeated;
-            try
-            {
-                // A killed mob has is_dead set / hp<=0 (it's still a valid object on the death
-                // frame). A Unity-destroyed reference (obj == null) also means it's gone for good,
-                // which only happens on death here, not on running away.
-                defeated = obj == null || obj.is_dead || obj.hp <= 0f;
-            }
-            catch { defeated = false; }
-
-            if (defeated)
-                ScreenReader.Say("Enemy defeated", interrupt: false);
 
             _enemyMaxHp.Remove(id);
             _enemyLastHp.Remove(id);
