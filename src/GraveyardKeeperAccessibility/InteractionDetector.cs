@@ -9,15 +9,32 @@ internal static class InteractionDetector
     // the outcome even after a repair replaces the object out from under us (change_wgo).
     private static bool _craftPending = false;
     private static WorldGameObject _craftStation = null;
+    private static Vector2 _craftStationPos = Vector2.zero;
     private static bool _craftIsFixing = false;
     private static bool _craftIsRemoving = false;
     private static string _craftOutputName = null;
+    private static CraftOutputDest _craftOutputDest = CraftOutputDest.Ground;
     private static WorldGameObject _lastWorkHighlight = null;
     private static bool _wasWorking = false;
     private static float _workAnnounceAccum = 0f;
     private static ManualLogSource _log;
     private static bool _initialized = false;
     private const float InteractionRange = 300f;
+    // How close the player must still be when a remembered craft ends for the completion cue to
+    // be worth speaking. A zombie-worked station keeps crafting after you leave, and a culled
+    // station reads as "no longer crafting" — without this gate both fire a completion line
+    // (and a bogus "on the ground nearby") from the other side of the map. ~6 tiles: far enough
+    // that stepping off the dock still reports, close enough that the result is findable.
+    private const float CraftCompletionRange = 6f * 96f;
+
+    // Where CraftComponent.ProcessFinishedCraft actually sends a craft's output. Only the Ground
+    // case may be described as lying next to the station.
+    private enum CraftOutputDest
+    {
+        Ground,     // wgo.DropItems(...) — items land beside the station
+        Storage,    // PutToAllPossibleInventories — linked chests/pallets/warehouse
+        Delivered,  // hard-coded receiver (tavern barman, refugee camp depot/well)
+    }
     // NPC whose interaction fired with no dialogue yet, and when we give up waiting for one.
     private static WorldGameObject _silentNpc = null;
     private static float _silentNpcDeadline = 0f;
@@ -253,15 +270,26 @@ internal static class InteractionDetector
                 // whatever we're removing.
                 _craftPending = true;
                 _craftStation = nearby;
+                _craftStationPos = nearby.pos;   // kept separately: the WGO may be gone by the end
                 _craftIsRemoving = removing;
                 _craftIsFixing = !removing && station.current_craft.craft_type == CraftDefinition.CraftType.Fixing;
                 _craftOutputName = (removing || _craftIsFixing) ? null : CraftOutputName(station.current_craft);
+                _craftOutputDest = (removing || _craftIsFixing) ? CraftOutputDest.Ground
+                                                                : CraftOutputDestination(nearby, station);
+            }
+            else if (_craftPending && !IsPlayerNearRememberedCraft())
+            {
+                // We walked off. A worker-run craft carries on without us and a culled station
+                // stops reporting is_crafting at all, so anything that happens from here on is
+                // something the player can't see, reach, or act on — forget it rather than
+                // narrate it (and never claim an item is on the ground next to us when it isn't).
+                ClearPendingCraft();
             }
             else if (_craftPending && !IsStationStillCrafting(_craftStation) && !IsBeingRemoved(_craftStation))
             {
                 // The remembered craft is no longer running: it finished, or its object was
                 // swapped for the repaired version, or the demolition completed and destroyed it
-                // (the old WGO now reads as destroyed/null).
+                // (the old WGO now reads as destroyed/null). We're still standing next to it.
                 if (_craftIsRemoving)
                     ScreenReader.Say("Removed", interrupt: false);
                 else if (_craftIsFixing)
@@ -269,14 +297,17 @@ internal static class InteractionDetector
                 else if (string.IsNullOrEmpty(_craftOutputName))
                     ScreenReader.Say("Finished", interrupt: false);
                 else
-                    // A station craft drops its output on the ground beside the station — a
-                    // sighted player sees it land, a blind one needs telling where it went.
-                    ScreenReader.Say($"{_craftOutputName} crafted, on the ground nearby", interrupt: false);
-                _craftPending = false;
-                _craftStation = null;
-                _craftIsFixing = false;
-                _craftIsRemoving = false;
-                _craftOutputName = null;
+                    // Say where the output went, because that differs per station and a blind
+                    // player has no way to check: a craft the player worked drops it beside the
+                    // station, a zombie-worked or gratitude craft files it into the linked
+                    // storage, and a few stations hand it straight to an NPC.
+                    ScreenReader.Say(_craftOutputDest switch
+                    {
+                        CraftOutputDest.Storage => $"{_craftOutputName} crafted, put into storage",
+                        CraftOutputDest.Delivered => $"{_craftOutputName} crafted, delivered",
+                        _ => $"{_craftOutputName} crafted, on the ground nearby",
+                    }, interrupt: false);
+                ClearPendingCraft();
             }
         }
         catch (Exception ex)
@@ -355,6 +386,77 @@ internal static class InteractionDetector
     {
         try { return wgo != null && wgo.is_removing; }
         catch { return false; }
+    }
+
+    // True while the player is still close enough to the remembered craft for its outcome to
+    // matter. Uses the position captured while it was running, since the object itself may have
+    // been culled, replaced (repair) or destroyed (demolition) by now.
+    private static bool IsPlayerNearRememberedCraft()
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null) return false;
+            return Vector2.Distance(player.pos, _craftStationPos) <= CraftCompletionRange;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ClearPendingCraft()
+    {
+        _craftPending = false;
+        _craftStation = null;
+        _craftStationPos = Vector2.zero;
+        _craftIsFixing = false;
+        _craftIsRemoving = false;
+        _craftOutputName = null;
+        _craftOutputDest = CraftOutputDest.Ground;
+    }
+
+    // Mirrors the branching in CraftComponent.ProcessFinishedCraft, which decides where a
+    // finished craft's items go. Only the player working a station themselves (or an is_auto
+    // craft) drops them on the ground; a station run by a docked zombie, or run remotely on
+    // gratitude points, files them into the linked inventories instead — which is why crates
+    // from the crate factory turn up in the cellar rather than at your feet.
+    private static CraftOutputDest CraftOutputDestination(WorldGameObject wgo, CraftComponent craft)
+    {
+        try
+        {
+            var def = craft.current_craft;
+
+            // A few stations hand their output to a fixed receiver regardless of who worked them.
+            switch (wgo.obj_id)
+            {
+                case "tavern_kitchen":
+                case "tavern_oven":                     // → npc_tavern_barman
+                case "refugee_camp_cooking_table":
+                case "refugee_camp_cooking_table_2":
+                case "refugee_camp_hive":
+                case "refugee_camp_well":               // → refugee camp depot / well
+                    return CraftOutputDest.Delivered;
+            }
+
+            // Autopsy-style extraction drops the parts at the table (unless it's a souls craft).
+            if (def != null && def.IsBodyPartExtractionCraft() && craft.current_item != null)
+                return wgo.is_current_craft_gratitude ? CraftOutputDest.Storage : CraftOutputDest.Ground;
+
+            var worker = craft.GetOtherObj();
+            bool playerWorked = (worker != null && worker.is_player) || (def != null && def.is_auto);
+            if (playerWorked)
+                return wgo.is_current_craft_gratitude ? CraftOutputDest.Storage : CraftOutputDest.Ground;
+
+            // Worker- or gratitude-driven: PutToAllPossibleInventories, i.e. the linked chests,
+            // pallets and warehouse — anything that doesn't fit spills onto the ground, but the
+            // storage is the honest headline.
+            return CraftOutputDest.Storage;
+        }
+        catch
+        {
+            return CraftOutputDest.Ground;
+        }
     }
 
     // Readable name of a craft's main output, for the "X crafted" completion cue. Null when the
