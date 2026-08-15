@@ -3201,23 +3201,25 @@ internal static class ObjectNavigator
 
     // Named-NPC landmarks: key shops/services that are world objects rather than zones,
     // resolved by obj_id map-wide.
-    private static readonly (string objId, string label)[] NpcLandmarks =
+    private static readonly (string objId, string labelKey)[] NpcLandmarks =
     {
-        ("npc_merchant", "Merchant"),
+        ("npc_merchant", "landmark.merchant"),
     };
 
     // Building landmarks anchored on their EXTERIOR entrance door (a teleport WGO), not an interior
     // NPC/zone — interiors are separate, navmesh-disconnected regions auto-walk can't reach. The
     // door's place comes from its custom_tag (InteractionDetector.DoorPlaceFromTag). (place, label).
-    private static readonly (string doorPlace, string label)[] DoorLandmarks =
+    private static readonly (string doorPlace, string labelKey, string zoneId)[] DoorLandmarks =
     {
-        ("Tavern", "Tavern"),
-        ("House", "Home"),
+        // doorPlace is the RAW tag word matched by FindEntranceDoor — never translate it.
+        // zoneId is the world zone this door supersedes, so the zone isn't listed twice.
+        ("Tavern", "landmark.tavern", "tavern"),
+        ("House", "landmark.home", "home"),
         // The church IS a separate teleport interior (place tag "Church", a "teleport_outside"
         // door at the graveyard). Its zone members (pulpit, candles) are staged far away inside,
         // so the generic zone anchor sent auto-walk indoors — anchor on the real outdoor door
         // instead, exactly like the Tavern/Home (the Doors category's "Door outside: Church").
-        ("Church", "Church"),
+        ("Church", "landmark.church", "church"),
     };
 
     // World-zone ids NOT to add as landmarks — superseded by a door landmark above (the zone's
@@ -3510,30 +3512,32 @@ internal static class ObjectNavigator
             var list = _byCategory[NavCategory.Landmarks];
 
             // Key NPC-anchored destinations.
-            foreach (var (objId, label) in NpcLandmarks)
+            foreach (var (objId, labelKey) in NpcLandmarks)
             {
                 var wgo = WorldMap.GetWorldGameObjectByObjId(objId, ignore_not_found_error: true);
                 if (wgo == null || wgo.is_removed || !wgo.gameObject.activeInHierarchy) continue;
                 list.Add(new NavigationTarget
                 {
                     Object = wgo,
-                    Label = label,
+                    Label = Loc.Get(labelKey),
                     Position = wgo.pos,
                     Distance = Vector2.Distance(wgo.pos, playerPos)
                 });
             }
 
             // Building entrances (Tavern, Home), anchored on the exterior door you press E on.
-            var doorLandmarkLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (doorPlace, label) in DoorLandmarks)
+            // Zone ids superseded by a door landmark we actually resolved. Keyed by ID, not by
+            // spoken label: labels are translated, so comparing them only ever worked in English.
+            var doorLandmarkZoneIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (doorPlace, labelKey, zoneId) in DoorLandmarks)
             {
                 var door = FindEntranceDoor(allObjects, doorPlace, playerPos);
-                if (door == null) continue;
-                doorLandmarkLabels.Add(label);
+                if (door == null) continue;   // no door found: leave the zone landmark in place
+                if (!string.IsNullOrEmpty(zoneId)) doorLandmarkZoneIds.Add(zoneId);
                 list.Add(new NavigationTarget
                 {
                     Object = door,
-                    Label = label,
+                    Label = Loc.Get(labelKey),
                     Position = door.pos,
                     Distance = Vector2.Distance(door.pos, playerPos)
                 });
@@ -3557,7 +3561,7 @@ internal static class ObjectNavigator
                 // the Tavern door). The door anchors on the real outdoor entrance; the zone would
                 // anchor on whatever member object is nearest — often the interior staging — giving a
                 // second, wrong "Tavern" at a different distance.
-                if (doorLandmarkLabels.Contains(ZoneLabel(zone.id))) continue;
+                if (doorLandmarkZoneIds.Contains(zone.id)) continue;
 
                 // Anchor on an actual object in the zone (closest to the player), NOT the
                 // geometric centre: a zone centre often falls inside a building (the church in
@@ -3714,14 +3718,39 @@ internal static class ObjectNavigator
         return 1;
     }
 
+    // Zone ids we've already reported as unnamed, so the log gets one line each rather than one
+    // per refresh.
+    private static readonly HashSet<string> _unnamedZonesLogged = new();
+
     private static string ZoneLabel(string zoneId)
     {
+        // 1. Our own curated name, where we want something friendlier than the game's.
         if (ZoneLabelOverrides.TryGetValue(zoneId, out var niceKey))
             return Loc.Get(niceKey);
 
-        // Prettify the raw id: "flat_under_waterflow_3" -> "Flat under waterflow 3".
+        // 2. The game's own zone name — the same token the HUD banner shows. This was missing,
+        //    so landmarks spoke the raw id ("Beegarden") even where the game had a translation.
+        //    ZoneScoreAnnouncer and BuildZoneAudit already resolved zones this way.
+        try
+        {
+            var key = "zone_" + zoneId;
+            var loc = ScreenReader.StripNguiCodes(GJL.L(key) ?? "").Trim();
+            if (!string.IsNullOrEmpty(loc) && loc != key && loc.IndexOf('!') < 0)
+                return loc;
+        }
+        catch { }
+
+        // 3. Keyword rules for zones the game leaves unnamed.
+        var described = DescriptiveNames.ForZone(zoneId);
+        if (!string.IsNullOrEmpty(described)) return described;
+
+        // 4. Nothing named it. Speak the prettified id ("flat_under_waterflow_3" -> "Flat under
+        //    waterflow 3") and say so in the log: that line is how we find out which zone ids still
+        //    need a rule, instead of guessing from the spoken text alone.
         var text = zoneId.Replace('_', ' ').Replace('-', ' ').Trim();
         if (text.Length == 0) return zoneId;
+        if (_unnamedZonesLogged.Add(zoneId))
+            _log?.LogInfo($"[NAVIGATOR] Zone '{zoneId}' has no game name and no rule - speaking raw id");
         return char.ToUpper(text[0]) + text.Substring(1);
     }
 

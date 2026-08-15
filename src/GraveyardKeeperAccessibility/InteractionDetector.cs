@@ -1593,7 +1593,7 @@ internal static class InteractionDetector
             // Fall back to object name if obj_def access fails
         }
 
-        return CleanObjectName(wgo.name);
+        return DescriptiveNames.For(wgo.name) ?? CleanObjectName(wgo.name);
     }
 
     /// <summary>
@@ -1618,10 +1618,15 @@ internal static class InteractionDetector
             id.Contains("hatch") ? Loc.Get("door.hatch") :
             id.Contains("stairs") ? Loc.Get("door.stairs") :
             id.Contains("dungeon") ? Loc.Get("door.dungeon_entrance") :
-            "Door";
+            Loc.Get("door.generic");
 
+        // DoorPlaceFromTag returns the RAW place because callers match on it (see
+        // ObjectNavigator.FindEntranceDoor) — translate only here, where it is spoken. The tag
+        // words are English ("house", "tavern_cellar") and are not ids the game translates, so
+        // map the common ones ourselves; anything unknown keeps its raw words.
         var place = DoorPlaceFromTag(wgo?.custom_tag);
-        return string.IsNullOrEmpty(place) ? kind : $"{kind}: {place}";
+        if (string.IsNullOrEmpty(place)) return kind;
+        return $"{kind}: {DescriptiveNames.ForPlace(place) ?? place}";
     }
 
     /// <summary>
@@ -1703,9 +1708,23 @@ internal static class InteractionDetector
     /// "mf_preparation_1" resolves to "Autopsy table" / "Obduktionstisch" instead of the
     /// raw "Mf preparation 1". Falls back to the prettified id when there is no translation.
     /// </summary>
+    // Ids we've already reported as unnamed, so the log gets one line each rather than one per
+    // frame the object is in range.
+    private static readonly HashSet<string> _unnamedIdsLogged = new(StringComparer.Ordinal);
+
     internal static string LocalizedObjectName(string objId)
     {
-        return Translate(objId) ?? CleanObjectName(objId);
+        // Game translation wins; then our descriptive rules for the scenery the game never names;
+        // only then the raw prettified id.
+        var name = Translate(objId) ?? DescriptiveNames.For(objId);
+        if (name != null) return name;
+
+        // Nothing named it. Say so once, with the id: that line is how we learn which ids still
+        // need a rule (enemies, DLC scenery) instead of guessing from the spoken text.
+        if (!string.IsNullOrEmpty(objId) && _unnamedIdsLogged.Add(objId))
+            _log?.LogInfo($"[NAMES] No translation and no rule for '{objId}' - speaking raw id");
+
+        return CleanObjectName(objId);
     }
 
     /// <summary>

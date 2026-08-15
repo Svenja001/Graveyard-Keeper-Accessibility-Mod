@@ -183,19 +183,22 @@ internal static class ScreenReader
         // Coins (gld/slv/brz) are mass nouns — no singular/plural distinction, "1 gold" reads fine.
         switch (token)
         {
-            case "gld": return num != null ? num + " gold" : "gold";
-            case "slv": return num != null ? num + " silver" : "silver";
-            case "brz": return num != null ? num + " bronze" : "bronze";
+            case "gld": return num != null ? Loc.Fmt("money.gold", num) : Loc.Get("token.gold");
+            case "slv": return num != null ? Loc.Fmt("money.silver", num) : Loc.Get("token.silver");
+            case "brz": return num != null ? Loc.Fmt("money.bronze", num) : Loc.Get("token.bronze");
         }
+
         // "(skull)" and "(wskull)" are both the white skull; "(rskull)" is red.
-        bool plural = num == null || num != "1";
-        string label;
-        switch (token)
+        string key = token switch
         {
-            case "rskull": label = plural ? "red skulls" : "red skull"; break;
-            case "cross":  label = plural ? "crosses" : "cross"; break;
-            default:       label = plural ? "white skulls" : "white skull"; break;
-        }
-        return num != null ? num + " " + label : label;
+            "rskull" => "token.red_skull",
+            "cross"  => "token.cross",
+            _        => "token.white_skull",
+        };
+
+        // A token with no number is the bare noun ("(wskull)" as a legend); with one it's counted,
+        // and German needs the count inside the phrase so the plural form can agree.
+        if (num == null) return Loc.Get(key + ".bare");
+        return Loc.Plural(key, num == "1" ? 1 : 2, num);
     }
 }

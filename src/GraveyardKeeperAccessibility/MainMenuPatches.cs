@@ -1584,7 +1584,9 @@ internal static class GUIAccessibility
         text = text.Replace("(:-))", Loc.Get("report.guests_loved"))
                    .Replace("(:-|)", Loc.Get("report.guests_fine"))
                    .Replace("(:-()", Loc.Get("report.guests_disliked"));
-        return text.Replace("(s1)", "1 star").Replace("(s2)", "2 stars").Replace("(s3)", "3 stars");
+        return text.Replace("(s1)", Loc.Plural("stars", 1, 1))
+                   .Replace("(s2)", Loc.Plural("stars", 2, 2))
+                   .Replace("(s3)", Loc.Plural("stars", 3, 3));
     }
 
     private static void AnnounceReportDialog(DialogGUI gui)
