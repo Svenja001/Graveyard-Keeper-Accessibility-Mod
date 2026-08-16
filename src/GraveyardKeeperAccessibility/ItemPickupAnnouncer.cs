@@ -19,7 +19,7 @@ internal static class ItemPickupAnnouncer
     // Insertion-ordered tally of pending gains (name -> total count). We keep the order list
     // and the lookup index in sync so repeated gains of the same item merge into one entry
     // while the first-seen order is preserved for the spoken sentence.
-    private static readonly List<KeyValuePair<string, int>> _pending = new();
+    private static readonly List<(string Name, string PluralKey, int Count)> _pending = new();
     private static readonly Dictionary<string, int> _index = new();
     private static float _lastAddTime;
 
@@ -65,9 +65,11 @@ internal static class ItemPickupAnnouncer
     {
         try
         {
-            Accumulate(Loc.Get("pickup.tech.red"), r);
-            Accumulate(Loc.Get("pickup.tech.green"), g);
-            Accumulate(Loc.Get("pickup.tech.blue"), b);
+            // The colour word carries the count in German ("ein roter Technologiepunkt"), so pass
+            // the key and let the flush pick singular or plural once the totals have settled.
+            Accumulate("r", r, "pickup.tech.red");
+            Accumulate("g", g, "pickup.tech.green");
+            Accumulate("b", b, "pickup.tech.blue");
         }
         catch (Exception ex)
         {
@@ -76,16 +78,16 @@ internal static class ItemPickupAnnouncer
     }
 
     /// <summary>Add <paramref name="count"/> of <paramref name="name"/> to the pending tally.</summary>
-    private static void Accumulate(string name, int count)
+    private static void Accumulate(string name, int count, string pluralKey = null)
     {
         if (count <= 0 || string.IsNullOrEmpty(name)) return;
 
         if (_index.TryGetValue(name, out var i))
-            _pending[i] = new KeyValuePair<string, int>(name, _pending[i].Value + count);
+            _pending[i] = (name, pluralKey, _pending[i].Count + count);
         else
         {
             _index[name] = _pending.Count;
-            _pending.Add(new KeyValuePair<string, int>(name, count));
+            _pending.Add((name, pluralKey, count));
         }
 
         _lastAddTime = Time.unscaledTime;
@@ -101,7 +103,9 @@ internal static class ItemPickupAnnouncer
         {
             var parts = new List<string>(_pending.Count);
             foreach (var kv in _pending)
-                parts.Add(Loc.Fmt("pickup.entry", kv.Value, kv.Key));
+                parts.Add(kv.PluralKey != null
+                    ? Loc.Plural(kv.PluralKey, kv.Count, kv.Count)
+                    : Loc.Fmt("pickup.entry", kv.Count, kv.Name));
 
             var spoken = Loc.Fmt("pickup.got", string.Join(", ", parts));
             _log?.LogInfo($"[PICKUP] {spoken}");

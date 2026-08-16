@@ -57,6 +57,28 @@ internal static class DescriptiveNames
         ("mushroom_poison", "obj.mushroom_poison"),
         ("mushroom",        "obj.mushroom"),
 
+        // --- vegetable beds ---------------------------------------------------------------
+        // Sits BELOW trees/bushes (so "bush_berry_garden" stays a berry bush) but ABOVE the loose
+        // crop rules below (so "garden_wheat" is a bed, not a wheat plant).
+        // "garden_of_stones" is a graveyard decoration, NOT a bed - it must beat the generic
+        // "garden" rule at the bottom of this block.
+        ("garden_of_stones", "obj.garden_of_stones"),
+        ("garden_carrot",    "obj.garden_carrot"),
+        ("garden_beet",      "obj.garden_beet"),
+        ("garden_cabbage",   "obj.garden_cabbage"),
+        ("garden_cannabis",  "obj.garden_cannabis"),
+        ("garden_lentils",   "obj.garden_lentils"),
+        ("garden_onion",     "obj.garden_onion"),
+        ("garden_pumpkin",   "obj.garden_pumpkin"),
+        // Confirmed from the log: the real id is SINGULAR ("garden_hop", "garden_hop_growing",
+        // "garden_hop_planting_"). The plural spelling is kept as a cheap guard for variants.
+        ("garden_hop",       "obj.garden_hops"),
+        ("garden_hops",      "obj.garden_hops"),
+        ("garden_wheat",     "obj.garden_wheat"),
+        ("garden_flax",      "obj.garden_flax"),
+        ("garden_grapes",    "obj.garden_grapes"),
+        ("garden",           "obj.garden_bed"),
+
         // --- flowers / small gatherables --------------------------------------------------
         ("flower",      "obj.flower"),
         ("herb",        "obj.herb"),
@@ -88,7 +110,6 @@ internal static class DescriptiveNames
         ("lake_fishing",      "obj.fishing_lake"),
         ("fishing_spot",      "obj.fishing_spot"),
 
-        // --- misc scenery the game leaves unnamed ------------------------------------------
         // --- dungeon / world enemies ------------------------------------------------------
         // "worker_zombie" MUST stay above the plain "zombie" rule: our own workers are not mobs.
         ("worker_zombie",   "obj.worker_zombie"),
@@ -109,21 +130,35 @@ internal static class DescriptiveNames
         ("mummy",           "obj.mob_mummy"),
         ("zombie",          "obj.mob_zombie"),
 
-        ("donat_box",       "obj.donation_box"),
-        ("tavern_cashbox",  "obj.cashbox"),
-        ("writers_table",   "obj.writers_table"),
-        ("nameplate",       "obj.nameplate"),
-        ("garden_carrot",   "obj.garden_carrot"),
-        ("bat_test",        "obj.bat"),
-        ("citizen_woman",   "obj.citizen_woman"),
-        ("citizen_man",     "obj.citizen_man"),
-        ("citizen",         "obj.citizen"),
-        ("guard",           "obj.guard"),
-        ("water_well",    "obj.well"),
-        ("hiccup_grass",  "obj.hiccup_grass"),
-        ("ground_shit",   "obj.dung"),
-        ("blockage",      "obj.blockage"),
-        ("roof",          "obj.roof"),
+        // --- camp / ruins scenery ---------------------------------------------------------
+        ("camp_wagon",     "obj.camp_wagon"),
+        ("tent",           "obj.tent"),
+        ("chicken",        "obj.chicken"),
+        ("ruins_pillar",   "obj.ruins_pillar"),
+        ("ruins_viaduct",  "obj.ruins_viaduct"),
+        ("ruins",          "obj.ruins"),
+
+        // --- misc scenery the game leaves unnamed ------------------------------------------
+        ("donat_box",      "obj.donation_box"),
+        ("tavern_cashbox", "obj.cashbox"),
+        ("writers_table",  "obj.writers_table"),
+        ("nameplate",      "obj.nameplate"),
+        ("cupboard",       "obj.cupboard"),
+        ("fence_wood",     "obj.fence_wood"),
+        ("lantern",        "obj.lantern"),
+        ("sword_rack",     "obj.sword_rack"),
+        ("worker_invisible", "obj.invisible_worker"),
+        ("citizen_woman",  "obj.citizen_woman"),
+        ("citizen_man",    "obj.citizen_man"),
+        ("citizen",        "obj.citizen"),
+        ("guard",          "obj.guard"),
+        ("water_well",     "obj.well"),
+        ("hiccup_grass",   "obj.hiccup_grass"),
+        ("ground_shit",    "obj.dung"),
+        ("pile_on_ground", "obj.dirt_pile"),
+        ("blockage",       "obj.blockage"),
+        ("obstruction",    "obj.blockage"),
+        ("roof",           "obj.roof"),
     };
 
     // Zone ids, used for the Landmarks list. Separate from the object rules because the same word

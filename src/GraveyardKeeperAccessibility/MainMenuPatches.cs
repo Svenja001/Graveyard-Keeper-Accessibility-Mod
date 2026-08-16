@@ -3673,11 +3673,11 @@ internal static class GUIAccessibility
         switch (id)
         {
             case "faith": return Loc.Get("perk.faith");
-            case "r": return Loc.Get("points.red");
-            case "g": return Loc.Get("points.green");
-            case "b": return Loc.Get("points.blue");
-            case "v": return Loc.Get("points.violet");
-            case "gratitude_points": return Loc.Get("points.gratitude");
+            case "r": return Loc.Get("points.red.bare");
+            case "g": return Loc.Get("points.green.bare");
+            case "b": return Loc.Get("points.blue.bare");
+            case "v": return Loc.Get("points.violet.bare");
+            case "gratitude_points": return Loc.Get("points.gratitude.bare");
             default: return null;
         }
     }
@@ -4431,7 +4431,7 @@ internal static class GUIAccessibility
             {
                 var v = Mathf.RoundToInt(price.Get(type));
                 if (v <= 0) continue;
-                parts.Add($"{v} {TechPointName(type)}");
+                parts.Add(InventoryItemHandler.PointPhrase(type, v.ToString()));
             }
             return parts.Count > 0 ? string.Join(", ", parts) : null;
         }
@@ -4440,19 +4440,6 @@ internal static class GUIAccessibility
 
     // The three tech-point colours (and the rarer ones) spoken as words. These are the (r)/(g)/(b)
     // coin-style sprites the on-screen cost label uses, which don't convert to speech.
-    private static string TechPointName(string type)
-    {
-        switch (type)
-        {
-            case "r": return Loc.Get("points.red");
-            case "g": return Loc.Get("points.green");
-            case "b": return Loc.Get("points.blue");
-            case "v": return Loc.Get("points.violet");
-            case "gratitude_points": return Loc.Get("points.gratitude");
-            default: return type;
-        }
-    }
-
     /// <summary>
     /// Re-list the remote-crafting window after it switched zone. Switching destroys and rebuilds
     /// every station row, so the old element list is stale; land on the first station of the new

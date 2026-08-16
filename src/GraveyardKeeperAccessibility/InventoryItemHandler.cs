@@ -470,7 +470,7 @@ internal static class InventoryItemHandler
                 var amount = SurveyRewardAmount(outp);
                 if (amount == null) continue;   // evaluates to zero => nothing actually granted
 
-                parts.Add($"{amount} {PointColorName(outp.id)}");
+                parts.Add(PointPhrase(outp.id, amount));
             }
             return parts.Count > 0
                 ? Loc.Fmt("study.not_yet_reward", string.Join(", ", parts))
@@ -557,17 +557,28 @@ internal static class InventoryItemHandler
     }
 
     /// <summary>Fallback spoken name for a tech-point pool when no localized name is available (r/g/b/v colors or gratitude).</summary>
-    private static string PointColorName(string id)
+    private static string PointColorKey(string id)
     {
         switch (id)
         {
-            case "r": return Loc.Get("points.red");
-            case "g": return Loc.Get("points.green");
-            case "b": return Loc.Get("points.blue");
-            case "v": return Loc.Get("points.violet");
-            case "gratitude_points": return Loc.Get("points.gratitude");
-            default: return id;
+            case "r": return "points.red";
+            case "g": return "points.green";
+            case "b": return "points.blue";
+            case "v": return "points.violet";
+            case "gratitude_points": return "points.gratitude";
+            default: return null;
         }
+    }
+
+    /// <summary>
+    /// "3 grüne Punkte" / "ein grüner Punkt". <paramref name="amount"/> is a STRING because a
+    /// survey reward can be a range ("45 to 55"), which is never singular.
+    /// </summary>
+    internal static string PointPhrase(string id, string amount)
+    {
+        var key = PointColorKey(id);
+        if (key == null) return $"{amount} {id}";
+        return Loc.Fmt(amount == "1" ? key + ".one" : key + ".other", amount);
     }
 
     /// <summary>
