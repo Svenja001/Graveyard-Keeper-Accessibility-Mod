@@ -197,14 +197,24 @@ public class Plugin : BaseUnityPlugin
 
     // Startup greeting, spoken once the game has settled on a language (see Awake). The timeout
     // covers the case where it never reports one, so the player still hears the mod is alive.
+    //
+    // It was 10 seconds, which is shorter than Graveyard Keeper's own boot: GameSettings only
+    // applies the language on the way to the main menu, so the timeout kept winning the race and
+    // the greeting came out in English ("Game starting") in a German game. The clock starts at
+    // process launch, not at Awake, so it has to clear the whole load. Nothing is lost by waiting
+    // — the title screen announcement follows within moments of the language landing, and it is
+    // localized too.
     private bool _greeted;
-    private const float GreetingTimeout = 10f;
+    private const float GreetingTimeout = 60f;
 
     private void SpeakGreetingWhenLanguageKnown()
     {
         if (_greeted) return;
-        if (!Loc.LanguageKnown && Time.unscaledTime < GreetingTimeout) return;
+        var known = Loc.LanguageKnown;
+        if (!known && Time.unscaledTime < GreetingTimeout) return;
         _greeted = true;
+        if (!known)
+            Log.LogWarning($"[Loc] Game never reported a language within {GreetingTimeout}s - greeting falls back to English");
         ScreenReader.Say(Loc.Get("plugin.game_starting"), interrupt: true);
     }
 
@@ -240,10 +250,19 @@ public class Plugin : BaseUnityPlugin
             // end-of-sermon burst of coin/health speech. See GUIAccessibility.FlushPendingReport.
             GUIAccessibility.FlushPendingReport();
 
+            // Confirm the player is back in the world after leaving the pause menu, once it's
+            // clear no other window (the save-and-exit confirm) took its place.
+            GUIAccessibility.FlushPendingResume();
+
             // Accessible build placement: while the build ghost is live, this owns the
             // keyboard (arrows move, Enter places, etc.). Skip the rest of the update so the
             // nav system and menu reader don't fight it for the same keys.
             if (BuildPlacementHandler.Update())
+                return;
+
+            // Rebinding a key on the controls page: the game captures the very next key pressed,
+            // so nothing else may look at the keyboard until it's done.
+            if (ControlsHandler.Update())
                 return;
 
             // Dialogue answer choices own the keyboard while shown (Up/Down to pick an answer,

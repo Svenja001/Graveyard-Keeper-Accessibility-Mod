@@ -110,6 +110,7 @@ internal static class GUIAccessibility
     internal const string TagResurrect = "resurrect";
     internal const string TagHealSoul = "heal_soul";
     internal const string TagCategory = "category";
+    internal const string TagDialogMessage = "dialog_message";
 
     /// <summary>
     /// The spoken name of a window. Windows have no localized title of their own that we can read —
@@ -237,12 +238,22 @@ internal static class GUIAccessibility
                 .Where(t => !string.IsNullOrEmpty(t) && t.Length > 1)
                 .ToList();
 
-            // Skip header/buttons and get the main dialogue content
-            var mainDialogue = dialogLabels.FirstOrDefault(t => t.Length > 10 && !t.StartsWith("X") && !t.Equals("Ja", StringComparison.OrdinalIgnoreCase) && !t.Equals("Nein", StringComparison.OrdinalIgnoreCase));
+            // Skip header/buttons and get the main dialogue content. A confirmation box knows
+            // exactly which labels hold its question, so prefer those over the heuristic.
+            var mainDialogue = gui is DialogGUI msgDialog ? ConfirmDialogMessage(msgDialog) : null;
+            if (string.IsNullOrWhiteSpace(mainDialogue))
+                mainDialogue = dialogLabels.FirstOrDefault(t => t.Length > 10 && !t.StartsWith("X") && !t.Equals("Ja", StringComparison.OrdinalIgnoreCase) && !t.Equals("Nein", StringComparison.OrdinalIgnoreCase));
+
             if (!string.IsNullOrEmpty(mainDialogue))
             {
                 Plugin.Log.LogInfo($"[DIALOGUE CONTENT] {mainDialogue}");
                 ScreenReader.Say(mainDialogue);
+
+                // Start the player ON the question row rather than nowhere, so the first Down
+                // reaches an option instead of re-reading what was just said. Enter here repeats
+                // the question, which is also why landing on it can't confirm anything by accident.
+                var msgIdx = GetActiveElements().FindIndex(e => e.Tag == TagDialogMessage);
+                if (msgIdx >= 0) SelectedIndex = msgIdx;
                 return;
             }
         }
@@ -262,6 +273,28 @@ internal static class GUIAccessibility
             // Still focus the confirm button so Enter works without arrowing.
             var els = GetActiveElements();
             SelectedIndex = els.Count > 0 ? 0 : -1;
+            return;
+        }
+
+        // The pause menu (Escape in the world). Its rows already read via the BaseMenuGUI path,
+        // but the generic header can't say the two things that actually matter here: that the
+        // game is PAUSED — nothing else tells you, the world just goes quiet — and that Escape
+        // gets you straight back out, so the player doesn't have to hunt for the Continue row.
+        // Announced on every open, including the return from Options, because coming back from
+        // another screen is exactly when the player needs re-orienting.
+        if (gui is InGameMenuGUI)
+        {
+            var pauseRows = GetActiveElements();
+            var pauseIntro = Loc.Get("pause.intro");
+            if (pauseRows.Count > 0)
+            {
+                SelectedIndex = 0;
+                ScreenReader.Say($"{pauseIntro} {pauseRows[0].ReadLabel()}");
+            }
+            else
+            {
+                ScreenReader.Say(pauseIntro);
+            }
             return;
         }
 
@@ -456,6 +489,13 @@ internal static class GUIAccessibility
                 header = Join(header, bagInfo);
         }
 
+        // Settings screens (the options menu, reached from the pause menu and from the main menu):
+        // their rows are sliders and switchers, where Enter does nothing at all and Left/Right is
+        // the only thing that works. A sighted player sees the arrows drawn beside each row; say it.
+        if (!reopened && gui is BaseMenuGUI
+            && active.Any(e => e.Type == ElementType.Slider || e.Type == ElementType.Switcher))
+            header = Join(header, Loc.Get("menu.adjust_hint"));
+
         // Two-sided windows (chest, vendor): tell the player about the one-press side switch, the
         // keyboard stand-in for a sighted player moving the mouse to the other grid.
         var openGroups = ActiveGroups(active);
@@ -512,7 +552,31 @@ internal static class GUIAccessibility
             _groupCursorGui = null;
         }
 
+        // Leaving the pause menu is completely silent otherwise — the player presses Escape and
+        // has no way to tell whether it landed. Arm a confirmation rather than speaking now:
+        // "Save and exit" ALSO closes the menu and opens its confirm dialog in the same breath,
+        // and Options leaves it is_shown-but-deactivated. FlushPendingResume speaks only if the
+        // player really is back in the world a beat later.
+        if (!covered && gui is InGameMenuGUI)
+            _pauseResumeAt = Time.unscaledTime + 0.4f;
+
         InventoryItemHandler.OnGUIClosed(gui);
+    }
+
+    // When the pause menu was left, say so once the dust has settled — see OnGUIClosed. Zero
+    // means nothing is pending. Called every frame from Plugin.Update.
+    private static float _pauseResumeAt;
+
+    internal static void FlushPendingResume()
+    {
+        if (_pauseResumeAt <= 0f) return;
+        if (Time.unscaledTime < _pauseResumeAt) return;
+
+        _pauseResumeAt = 0f;
+        // Another window took over (the save-and-exit confirm, the options screen coming up):
+        // that window has already announced itself, so stay quiet.
+        if (_currentGUI != null) return;
+        ScreenReader.Say(Loc.Get("pause.resumed"));
     }
 
     // Voice changes to a watched amount/price slider (the game steps it on Left/Right; we
@@ -999,6 +1063,11 @@ internal static class GUIAccessibility
     {
         Plugin.Log.LogInfo($"[DiscoverMenuItems] Found {items.Length} MenuItemGUI rows in {menu.GetType().Name}");
 
+        // Only the pause menu gets its rows explained (see PauseRowHint) — the main menu's
+        // "Play"/"Credits"/"Exit" speak for themselves, and the options rows already read their
+        // current value, which is the information that matters there.
+        var explainRows = menu is InGameMenuGUI;
+
         foreach (var mi in items)
         {
             if (mi == null) continue;
@@ -1006,6 +1075,9 @@ internal static class GUIAccessibility
             var switcher = mi.GetComponentInChildren<SimpleOptionsSwitcher>(true);
             var smart = mi.GetComponentInChildren<SmartSlider>(true);
             var title = GetMenuItemTitle(mi, smart, switcher);
+
+            if (explainRows)
+                title = ExplainPauseRow(mi, title);
 
             if (switcher != null)
             {
@@ -1052,16 +1124,72 @@ internal static class GUIAccessibility
             if (Elements.Any(e => e.Go == button.gameObject || button.transform.IsChildOf(e.Go.transform))) continue;
 
             var label = ScreenReader.StripNguiCodes(button.GetComponentInChildren<UILabel>()?.text);
+            var isClose = IsCloseButtonName(name);
+
+            // The pause menu's X button carries no label at all, so this used to fall through to
+            // the raw GameObject name — an untranslated "close" row in an otherwise German menu,
+            // which then did nothing when activated: it has no OnClick() method to SendMessage to,
+            // its action hangs off NGUI's onClick delegate list. Name it properly and close the
+            // window through the game's own path.
+            if (string.IsNullOrWhiteSpace(label) && isClose)
+                label = Loc.Get("common.close");
             if (string.IsNullOrWhiteSpace(label)) label = name;
             if (string.IsNullOrWhiteSpace(label) || label.Length <= 1) continue;
 
+            if (explainRows && isClose)
+            {
+                var closeHint = Loc.Find("pause.row.close");
+                if (!string.IsNullOrEmpty(closeHint)) label = $"{label}, {closeHint}";
+            }
+
+            var capturedButton = button;
             Elements.Add(new GUIElement
             {
                 Go = button.gameObject,
                 Label = label,
-                Type = ElementType.Button
+                Type = ElementType.Button,
+                OnActivate = isClose
+                    ? () => menu.OnClosePressed()
+                    : PressNguiButton(capturedButton)
             });
         }
+    }
+
+    /// <summary>
+    /// A window's own close/back widget, by GameObject name. Names are set in the prefab and are
+    /// not localized, so matching on them is safe in any language.
+    /// </summary>
+    private static bool IsCloseButtonName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        var n = name.ToLowerInvariant();
+        return n.Contains("close") || n.Contains("cross") || n == "x" || n.Contains("btn_back") || n.Contains("back_btn");
+    }
+
+    /// <summary>
+    /// Activation for a plain NGUI button: run its onClick delegate list if it has one, otherwise
+    /// fall back to the SendMessage path. <c>SendMessage("OnClick")</c> alone only reaches
+    /// components that define an OnClick method on the button's own GameObject, so buttons wired
+    /// through the inspector's onClick list (the usual NGUI way) silently did nothing.
+    /// Returns null when the button has no delegates, leaving ActivateSelected's generic path in
+    /// charge — that path is what every already-working button in the mod goes through.
+    /// </summary>
+    private static Action PressNguiButton(UIButton button)
+    {
+        try
+        {
+            if (button.onClick == null || button.onClick.Count == 0) return null;
+        }
+        catch
+        {
+            return null;
+        }
+
+        return () =>
+        {
+            try { EventDelegate.Execute(button.onClick); }
+            catch (Exception ex) { Plugin.Log.LogWarning($"[MENU] button '{button.name}' onClick failed: {ex.Message}"); }
+        };
     }
 
     // Build one element per active save slot. The first row is the "new game" entry; the rest
@@ -1309,6 +1437,35 @@ internal static class GUIAccessibility
         }
     }
 
+    /// <summary>
+    /// The full question a confirmation dialog is asking. DialogGUI.Open puts the main text in
+    /// label_1 and any extra lines in label_2 / label_3, activating those only when they were
+    /// given — so reading the active ones in order reconstructs exactly what is on screen,
+    /// without the label heuristic's guesswork about which UILabel is the message.
+    /// </summary>
+    private static string ConfirmDialogMessage(DialogGUI gui)
+    {
+        var parts = new List<string>();
+        void Add(UILabel l)
+        {
+            if (l == null || !l.gameObject.activeInHierarchy) return;
+            var t = ScreenReader.StripNguiCodes(l.text)?.Trim();
+            if (!string.IsNullOrWhiteSpace(t)) parts.Add(t);
+        }
+
+        try
+        {
+            Add(gui.label_1);
+            Add(gui.label_2);
+            Add(gui.label_3);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[DIALOG] could not read the message: {ex.Message}");
+        }
+        return string.Join(". ", parts);
+    }
+
     // The DialogButtonsGUI a DialogGUI actually wired up in Init, and that widget's own ordered
     // button list. The prefab holds a second, unwired copy of the whole button row; going through
     // these two fields is what keeps us on the live one.
@@ -1324,6 +1481,26 @@ internal static class GUIAccessibility
     // null (the same trap DiscoverReportDialogButtons works around).
     private static void DiscoverConfirmDialogButtons(DialogGUI gui)
     {
+        // A row that holds the question itself, listed first, ahead of Yes/No. The question is
+        // spoken once when the dialog opens and is then gone — moving to an option cuts it off
+        // mid-sentence, and there was no way to hear it again, so a player could be left choosing
+        // between Yes and No without knowing what was being asked. Arrowing onto this row (Up from
+        // Yes, or on round the list) re-reads it; so does Enter, without moving off it.
+        var message = ConfirmDialogMessage(gui);
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            Elements.Add(new GUIElement
+            {
+                Go = gui.gameObject,
+                Label = message,
+                Type = ElementType.Button,
+                Tag = TagDialogMessage,
+                // Re-read rather than cached: label_2 / label_3 can be filled in after the open.
+                ReadDynamic = () => ConfirmDialogMessage(gui),
+                OnActivate = () => ScreenReader.Say(ConfirmDialogMessage(gui), interrupt: true)
+            });
+        }
+
         DialogButtonsGUI widget = null;
         try { widget = _dialogButtonsField(gui); } catch { }
         if (widget == null) widget = gui.GetComponentInChildren<DialogButtonsGUI>(true);
@@ -1501,6 +1678,37 @@ internal static class GUIAccessibility
     // (TutorialWindowsGUI) instead lists each TutorialItemGUI topic; activating one opens it.
     private static void DiscoverTutorialButtons(BaseGUI gui)
     {
+        // The controls page (pause menu -> Steuerung). Its rebindable key lines are neither
+        // buttons nor labels the generic paths would find, so the whole page used to read as one
+        // run-on blob with nothing to act on. One row per binding, each of which rebinds on Enter.
+        foreach (var line in ControlsHandler.KeyLines(gui))
+        {
+            var captured = line;
+            Elements.Add(new GUIElement
+            {
+                Go = line.gameObject,
+                // Read fresh every time: a rebind changes the key in place, and taking a key from
+                // another action changes that row too.
+                ReadDynamic = () => ControlsHandler.Describe(captured),
+                Label = ControlsHandler.Describe(line),
+                Type = ElementType.Button,
+                OnActivate = () => ControlsHandler.BeginRebind(captured)
+            });
+        }
+
+        // "Reset to defaults", last so it can't be hit by accident on the way down the list.
+        var controlsPage = Elements.Count > 0 ? ControlsHandler.Page(gui) : null;
+        if (controlsPage != null)
+        {
+            Elements.Add(new GUIElement
+            {
+                Go = controlsPage.gameObject,
+                Label = Loc.Get("controls.reset"),
+                Type = ElementType.Button,
+                OnActivate = () => ControlsHandler.ResetBindings(controlsPage)
+            });
+        }
+
         // Help-topics list: each topic is a TutorialItemGUI (not a UIButton). Activating it
         // opens that topic's tutorial window.
         foreach (var item in gui.GetComponentsInChildren<TutorialItemGUI>(true))
@@ -1650,6 +1858,19 @@ internal static class GUIAccessibility
         SelectedIndex = active.Count > 0 ? 0 : -1;
 
         var lead = string.IsNullOrEmpty(body) ? Loc.Get("tutorial.title") : body;
+
+        // The controls page carries an illustrated summary block above the editable bindings. Now
+        // that every binding is a navigable row, reading that block as well says everything twice
+        // — and says it worse: it pairs the I/T/N tab keys with "character", when I opens the
+        // inventory. The rows are built from the game's own per-key data, so they are the truth
+        // here; drop the block and point the player at the list instead. Logged rather than
+        // discarded silently, in case it ever holds something the rows don't.
+        var keyLines = ControlsHandler.KeyLines(gui);
+        if (keyLines.Count > 0)
+        {
+            Plugin.Log.LogInfo($"[CONTROLS] {keyLines.Count} key rows; summary block not spoken: {body}");
+            lead = $"{Loc.Get("controls.title")}. {Loc.Get("controls.rebind_hint")}";
+        }
         if (active.Count > 0)
             ScreenReader.Say($"{lead}. {active[SelectedIndex].ReadLabel()}");
         else
@@ -1673,11 +1894,23 @@ internal static class GUIAccessibility
                     (label.transform == e.Go.transform || label.transform.IsChildOf(e.Go.transform))))
                 continue;
 
-            var t = ScreenReader.StripNguiCodes(label.text)?.Trim();
+            var t = HumanizeKeyTokens(ScreenReader.StripNguiCodes(label.text))?.Trim();
             if (string.IsNullOrWhiteSpace(t) || t.Length < 2 || t.IndexOf('!') >= 0) continue;
             if (seen.Add(t)) parts.Add(t);
         }
         return string.Join(". ", parts);
+    }
+
+    // The controls page (pause menu -> Controls) draws every binding as a bracketed key icon:
+    // "[E] ", "[Escape] ", "[Tab] ". Those brackets are GameKeyTip's keyboard-icon syntax, not
+    // NGUI colour codes, so StripNguiCodes leaves them in and the reader spells out the
+    // punctuation around each key. Drop the brackets, keep the key name. Scoped to body text
+    // we read wholesale (tutorial/controls windows) rather than added to StripNguiCodes, which
+    // runs over every label in the game and must not eat genuine square brackets.
+    private static string HumanizeKeyTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.IndexOf('[') < 0) return text;
+        return Regex.Replace(text, @"\[([A-Za-z0-9][A-Za-z0-9 ]{0,15})\]", "$1");
     }
 
     // The visible title of a menu row, ignoring any label that belongs to the row's slider or
@@ -1702,6 +1935,51 @@ internal static class GUIAccessibility
         }
 
         return mi.name;
+    }
+
+    // What each pause-menu row actually does, by the callback the row is wired to. The rows read
+    // as one or two bare words ("Weiter", "Optionen", "Steuerung"), which is enough when you can
+    // see the paused world behind them; blind, the difference between "leave to the main menu"
+    // and "resume" is worth a clause. Keyed on the method name rather than the label because the
+    // label is translated and the method name is not.
+    private static readonly Dictionary<string, string> PauseRowHintKeys = new()
+    {
+        { "OnPressedContinue",      "pause.row.continue" },
+        { "OnPressedOptions",       "pause.row.options" },
+        { "OpenControlsHelpWindow", "pause.row.controls" },
+        { "OpenTutorialsWindow",    "pause.row.tutorials" },
+        { "OnPressedSaveAndExit",   "pause.row.save_and_exit" },
+        { "OnPressedRestart",       "pause.row.restart" },
+    };
+
+    // EventDelegate lives in the NGUI assembly; read its method name reflectively so an NGUI
+    // version without the property costs us the hint rather than the build.
+    private static PropertyInfo _eventMethodNameProp;
+
+    private static string ExplainPauseRow(MenuItemGUI mi, string title)
+    {
+        try
+        {
+            var ed = mi.on_pressed;
+            if (ed == null) return title;
+
+            _eventMethodNameProp ??= AccessTools.Property(ed.GetType(), "methodName");
+            var method = _eventMethodNameProp?.GetValue(ed) as string;
+
+            // Logged so a single test run confirms the mapping: an unknown name here means the
+            // row silently loses its explanation, which is otherwise invisible from the outside.
+            Plugin.Log.LogInfo($"[PauseMenu] row '{title}' -> {method ?? "(no callback)"}");
+            if (string.IsNullOrEmpty(method)) return title;
+            if (!PauseRowHintKeys.TryGetValue(method, out var key)) return title;
+
+            var hint = Loc.Find(key);
+            return string.IsNullOrEmpty(hint) ? title : $"{title}, {hint}";
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[PauseMenu] could not read row callback: {ex.Message}");
+            return title;
+        }
     }
 
     // CraftItemGUI.CanCraft(int? amount) is private; cache the MethodInfo so we can tell the
@@ -5852,20 +6130,22 @@ internal static class GUIAccessibility
         }
 
         var go = instance.gameObject;
-        for (int i = 0; i < Elements.Count; i++)
+
+        // Exact matches first, containment only as a fallback. Some rows are anchored on the
+        // whole window rather than on a widget of their own — the confirm dialog's repeat-the-
+        // question row, a tutorial window's synthetic Close — and every button in the window is a
+        // child of those. A single containment pass would let such a row shadow the actual button
+        // under the mouse, so hovering "Yes" would read the question back instead.
+        var hit = Elements.FirstOrDefault(e => e.Go == go)
+                  ?? Elements.FirstOrDefault(e => e.Go != null && go.transform.IsChildOf(e.Go.transform));
+        if (hit == null) return;
+
+        var active = GetActiveElements();
+        var activeIdx = active.IndexOf(hit);
+        if (activeIdx >= 0)
         {
-            var elem = Elements[i];
-            if (elem.Go == go || go.transform.IsChildOf(elem.Go.transform))
-            {
-                var active = GetActiveElements();
-                var activeIdx = active.IndexOf(elem);
-                if (activeIdx >= 0)
-                {
-                    SelectedIndex = activeIdx;
-                    ScreenReader.SayMenu(elem.ReadLabel());
-                }
-                return;
-            }
+            SelectedIndex = activeIdx;
+            ScreenReader.SayMenu(hit.ReadLabel());
         }
     }
 

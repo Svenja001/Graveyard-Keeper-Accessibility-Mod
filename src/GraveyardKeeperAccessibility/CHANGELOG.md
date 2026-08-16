@@ -18,12 +18,18 @@ reader. Developed 3 June – 16 August 2026 over 151 commits.
 ### Menus and interface
 
 - Main menu, title screen, new game and save slots; save slots can be loaded and deleted.
+- Pause menu (Escape), which says the game is paused and explains what each entry does —
+  including that leaving to the main menu does *not* save.
+- Controls page, with every key binding read aloud, rebindable from the keyboard, and a
+  reset-to-defaults entry.
 - All option menus, with sliders adjustable by keyboard.
 - Inventory and chests, including item quality stars, tool and weapon durability, food
   buffs, and what an item decomposes into. Empty containers announce that they are empty.
 - Hotbar/quick-use slots, assignable from the inventory.
 - Items can be destroyed from the inventory.
 - Tutorial popups and new-technology popups read their full text and close by keyboard.
+- Yes/no confirmation boxes list the question itself as a row alongside the options, so it can
+  be read again after moving to Yes or No.
 - Technology tree, including perk descriptions and why a technology is locked.
 - NPC and quest menus, church sermon and donation reports, and the time machine.
 
