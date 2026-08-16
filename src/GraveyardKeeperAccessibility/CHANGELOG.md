@@ -106,7 +106,7 @@ reader. Developed 3 June – 16 August 2026 over 151 commits.
   arrows and Escape stop responding and speech stops — because BepInEx's Configuration Manager
   and the game's UI both poll the keyboard at the same time. The feature is disabled rather
   than left half-working; everything else is reachable without it.
-- **The game's opening intro is not narrated.** Its subtitles are drawn by a separate system
+- **The game's opening intro and other visuals are not narrated.** Its subtitles are drawn by a separate system
   that is not hooked yet.
 - **Linux and macOS are untested.** The Prism speech libraries for both are bundled, but
   nobody has confirmed yet that BepInEx loads on the game's native Mac and Linux builds. Windows
@@ -114,7 +114,7 @@ reader. Developed 3 June – 16 August 2026 over 151 commits.
   reach a Linux screen reader such as Orca from inside Proton.
 - **Only English and German are fully translated.** Spanish, French, Italian and Russian
   files exist but are near-empty and fall back to English.
-- **The quest category only lists quests that have a map marker.** Quests without one are not
+- **The quest category in the Objecttracker only lists quests that have a map marker.** Quests without one are not
   listed — that is how the game itself tracks them, not something the mod can add.
 
 ---
