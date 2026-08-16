@@ -6,7 +6,24 @@
     <ItemGroup>
         <Compile Remove="..\Shared\**" />
     </ItemGroup>
+    <!-- Bundle the Prism native library so releases speak through NVDA/JAWS out of the box
+         instead of falling back to SAPI. All three platforms ship because one release zip
+         serves every storefront and we cannot know which OS it lands on; PrismWrapper picks
+         the right file at runtime. MPL-2.0 requires the licence text to travel with the
+         binaries; see libs\native\prism\README.md. -->
     <ItemGroup>
-      <PackageReference Include="GraveyardKeeper.GameLibs" Version="*-*" />
+        <None Include="..\..\libs\native\prism\prism.dll" Link="prism.dll" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\libs\native\prism\libprism.so" Link="libprism.so" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\libs\native\prism\libprism.dylib" Link="libprism.dylib" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\libs\native\prism\LICENSE" Link="prism-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\libs\native\prism\NOTICE" Link="prism-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+    <ItemGroup>
+      <!-- Reference-only: without ExcludeAssets="runtime" the package's ~110 game and Unity
+           assemblies (Assembly-CSharp.dll, UnityEngine.*.dll, ...) are copied to OutputPath.
+           Harmless while OutputPath was a scratch folder, but OutputPath is now the game's
+           BepInEx\plugins\<mod>\ - BepInEx would scan them, and shipped copies of
+           Assembly-CSharp.dll shadow the real game assemblies. -->
+      <PackageReference Include="GraveyardKeeper.GameLibs" Version="*-*" ExcludeAssets="runtime" />
     </ItemGroup>
 </Project>

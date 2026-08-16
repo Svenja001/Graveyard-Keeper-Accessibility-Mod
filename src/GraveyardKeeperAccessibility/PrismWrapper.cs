@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace GraveyardKeeperAccessibility;
@@ -6,13 +7,47 @@ internal static class PrismWrapper
 {
     private const string DllName = "prism";
 
+    /// <summary>
+    /// Mirrors <c>PrismConfig</c> from prism.h, as of the bundled <b>v0.17.3</b>.
+    /// <para>
+    /// ⚠ This struct must be kept in lockstep with the bundled binaries. It was a lone
+    /// <c>uint8_t version</c> up to v0.16.5 and grew these eight fields in v0.17.0; a mismatch
+    /// is not a compile error but memory corruption, because <c>prism_config_init</c> returns
+    /// it by value (large structs come back through a hidden pointer, small ones in a
+    /// register) and <c>prism_init</c> then reads the full struct back out.
+    /// </para>
+    /// <para>
+    /// Every field is left exactly as <c>prism_config_init</c> filled it — the mod only wants
+    /// the default registry and no availability callback. Kept blittable (the C <c>bool</c> is
+    /// a <see cref="byte"/> here, not a <see cref="bool"/>, which would marshal as a 4-byte
+    /// BOOL) so the by-value return needs no marshalling.
+    /// </para>
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
     private struct PrismConfig
     {
         public byte version;
+        public IntPtr registry;                        // PrismRegistry*
+        public IntPtr availability_callback;           // PrismAvailabilityCallback
+        public IntPtr availability_userdata;           // void*
+        public uint availability_poll_interval_ms;
+        public uint availability_debounce_samples;
+        public uint availability_backoff_max_ms;
+        public byte availability_auto_power_manage;    // C bool
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr LoadLibrary(string dllToLoad);
+
+    // dlopen lives in libdl on older glibc and in libc on newer ones (and on macOS); try both.
+    private const int RtldNow = 2;
+    private const int RtldGlobal = 8;
+
+    [DllImport("libdl", EntryPoint = "dlopen")]
+    private static extern IntPtr dlopen_libdl(string fileName, int flags);
+
+    [DllImport("libc", EntryPoint = "dlopen")]
+    private static extern IntPtr dlopen_libc(string fileName, int flags);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern PrismConfig prism_config_init();
@@ -72,16 +107,87 @@ internal static class PrismWrapper
     /// </summary>
     private static bool _supportsOutput;
 
+    private static bool IsWindows =>
+        Application.platform == RuntimePlatform.WindowsPlayer || Application.platform == RuntimePlatform.WindowsEditor;
+
+    private static bool IsMac =>
+        Application.platform == RuntimePlatform.OSXPlayer || Application.platform == RuntimePlatform.OSXEditor;
+
+    /// <summary>
+    /// File name of the native Prism library for the platform we are running on. All three are
+    /// bundled, so this only picks which one to load. Unity reports OSXPlayer for both Intel
+    /// and Apple Silicon; the bundled dylib is a universal binary covering both.
+    /// </summary>
+    private static string NativeLibraryName()
+    {
+        if (IsWindows)
+            return DllName + ".dll";
+
+        return IsMac ? "lib" + DllName + ".dylib" : "lib" + DllName + ".so";
+    }
+
+    /// <summary>
+    /// Full path to the native Prism library shipped alongside this assembly, or null when it is
+    /// missing (a hand-installed copy in the game root, or an assembly loaded from memory with
+    /// no <see cref="Assembly.Location"/>).
+    /// </summary>
+    private static string BundledPrismPath()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(typeof(PrismWrapper).Assembly.Location);
+            if (string.IsNullOrEmpty(dir))
+                return null;
+
+            var path = Path.Combine(dir, NativeLibraryName());
+            return File.Exists(path) ? path : null;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning($"Could not locate the bundled Prism library: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Pre-loads the native library from an absolute path. Neither loader searches the BepInEx
+    /// plugin folder on its own - Windows looks beside the executable, and Mono probes the
+    /// standard library paths - so the module has to be brought in by hand before the first
+    /// <c>[DllImport(DllName)]</c> call binds to it by name.
+    /// </summary>
+    private static IntPtr LoadNativeLibrary(string path)
+    {
+        if (IsWindows)
+            return LoadLibrary(path);
+
+        // RTLD_GLOBAL so the symbols are visible when Mono later resolves DllImport("prism").
+        try
+        {
+            return dlopen_libdl(path, RtldNow | RtldGlobal);
+        }
+        catch (DllNotFoundException)
+        {
+            return dlopen_libc(path, RtldNow | RtldGlobal);
+        }
+    }
+
     internal static bool Init(ManualLogSource log)
     {
         _log = log;
         try
         {
-            _log.LogInfo("Loading prism.dll...");
-            var handle = LoadLibrary(DllName + ".dll");
+            // The native library ships next to this assembly, one per platform. Loading it by
+            // bare name would search the game's exe directory and the system library paths but
+            // never the BepInEx plugin folder, so resolve the bundled copy by full path. Falling
+            // back to the bare name keeps working for installs that still have a hand-placed
+            // copy in the game root.
+            var bundled = BundledPrismPath();
+            var name = NativeLibraryName();
+            _log.LogInfo(bundled != null ? $"Loading bundled {name} from {bundled}..." : $"Loading {name} from the game folder...");
+            var handle = LoadNativeLibrary(bundled ?? name);
             if (handle == IntPtr.Zero)
             {
-                _log.LogWarning("Failed to load prism.dll");
+                _log.LogWarning($"Failed to load {name}");
                 return false;
             }
 

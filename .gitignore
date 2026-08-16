@@ -38,7 +38,16 @@ bld/
 *.pdb
 *.nupkg
 
-[Ll]ibs/
+# Game/Unity reference assemblies are supplied locally and never tracked. Written as
+# "libs/*" rather than "libs/" so the Prism exception below can re-include a subfolder -
+# git will not descend into an excluded *directory*, so negations under it would be dead.
+[Ll]ibs/*
+!libs/native/
+libs/native/*
+# Prism ships inside releases on purpose (MPL-2.0, see libs/native/prism/README.md).
+# This has to come after the "*.dll" rule above to win for prism.dll.
+!libs/native/prism/
+!libs/native/prism/**
 [Ll]ib/
 
 # Visual Studio 2015/2017 cache/options directory
