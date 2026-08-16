@@ -6,6 +6,8 @@ reader. Developed 3 June – 16 August 2026 over 151 commits.
 
 **Requires BepInEx 5.4.x (Windows x64).**
 
+`KEYBINDINGS.md` ships next to the mod and lists every key it adds.
+
 ### Speech output
 
 - Speaks through **Prism**, which drives NVDA, JAWS, Orca, Voiceover and others directly, and falls back to SAPI when no screen reader is running.

@@ -6,6 +6,14 @@
     <ItemGroup>
         <Compile Remove="..\Shared\**" />
     </ItemGroup>
+    <!-- The keyboard reference travels with the mod. There is no Configuration Manager here (see
+         ConfigManagerAccessibility), so this file is the only place a player can find out what the
+         mod's keys are. Copied via the csproj rather than by adding a rule to the shared
+         zip.target: OutputPath is already globbed into the release zip, so this ships without any
+         tracked build file diverging from upstream. -->
+    <ItemGroup>
+        <None Include="KEYBINDINGS.md" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
     <!-- Bundle the Prism native library so releases speak through NVDA/JAWS out of the box
          instead of falling back to SAPI. All three platforms ship because one release zip
          serves every storefront and we cannot know which OS it lands on; PrismWrapper picks
