@@ -1,106 +1,142 @@
-# Graveyard Keeper Mods
+# Graveyard Keeper Accessibility
 
-A collection of **38 BepInEx mods** for [Graveyard Keeper](https://store.steampowered.com/app/599140/Graveyard_Keeper/).
+A BepInEx mod that makes [Graveyard Keeper](https://store.steampowered.com/app/599140/Graveyard_Keeper/)
+playable for blind players. Menus, dialogue, the world, crafting, the graveyard, the dungeon and
+the DLC content are all narrated through a screen reader.
+
+## Requirements
+
+- **Graveyard Keeper** (Steam, GOG, Epic or Xbox), 64-bit Windows.
+- **Nothing else.** BepInEx, the loader that makes mods run at all, is included in the download —
+  see below if you already have it.
+- **A screen reader is optional.** NVDA, JAWS, Orca, VoiceOver and others are driven directly; if
+  none is running, the mod falls back to Windows SAPI and still speaks.
+
+Everything the mod needs travels inside its ZIP — the Prism speech library is bundled for Windows,
+Linux and macOS too, so there is nothing separate to install.
+
+### Do not install BepInEx Configuration Manager
+
+The mod has no settings to configure, and Configuration Manager actively breaks it: opening it
+(F1) stops the arrow keys, Escape and all speech from working, because it and the game's own UI
+both poll the keyboard at once. If you already have it, simply never press F1.
 
 ## Install
 
-### 1. Install BepInEx 5
+There is no installer, and the mod does not look for your game folder — you extract one ZIP into
+it yourself. That is the whole install.
 
-Every mod here needs the [**Graveyard Keeper BepInEx 5 Pack**](https://www.nexusmods.com/graveyardkeeper/mods/79). Install that first - it sets up the modding framework.
+### Which download to take
 
-### 2. Install the mods
+- **`GraveyardKeeperAccessibility_<version>_WithBepInEx.zip`** — take this one unless you know you
+  need the other. It contains the mod *and* BepInEx, so there is nothing else to fetch.
+- **`GraveyardKeeperAccessibility_<version>_ModOnly.zip`** — the mod on its own, without BepInEx.
+  **If you already run other Graveyard Keeper mods, use this one**: the bundled ZIP would overwrite
+  your loader with version 5.4.23.5 and could disturb mods that expect a different one.
 
-**Vortex (recommended).** Every mod page has a "Mod Manager Download" button - click it and Vortex handles the rest.
+### Finding your game folder
 
-**Manually.** Download the mod's ZIP from its Nexus page and extract it into:
+The folder you want is the one that contains `Graveyard Keeper.exe` and a folder called
+`Graveyard Keeper_Data`. Where that is depends on where you bought the game:
+
+- **Steam** — `C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper`
+  Steam libraries can live on any drive. In the Steam client: right-click the game → *Manage* →
+  *Browse local files*.
+- **GOG** — `C:\Program Files (x86)\GOG Galaxy\Games\Graveyard Keeper`
+  or `C:\GOG Games\Graveyard Keeper` if you used an offline installer.
+- **Epic** — `C:\Program Files\Epic Games\GraveyardKeeper` (no space in that folder name).
+- **Xbox / Microsoft Store** — `C:\XboxGames\Graveyard Keeper\Content`.
+  Only this layout works. If the game sits inside `WindowsApps` instead, Windows locks the folder
+  down and BepInEx cannot be installed there at all.
+
+### Installing (the bundled ZIP)
+
+Extract `..._WithBepInEx.zip` **into the game folder itself** — the one holding
+`Graveyard Keeper.exe`. For example:
 
 ```
-...\steamapps\common\Graveyard Keeper\BepInEx\
+C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper\
+C:\GOG Games\Graveyard Keeper\
+C:\XboxGames\Graveyard Keeper\Content\
 ```
 
-That drops the mod's DLL into `BepInEx\plugins\<ModName>\` where the game will load it.
+If Windows asks whether to merge folders, say yes. When it is done, `winhttp.dll` sits next to
+`Graveyard Keeper.exe`, and the mod is in `BepInEx\plugins\GraveyardKeeperAccessibility\`.
 
-### 3. Configure (optional)
+That is everything. Nothing needs to be run first, and no folders need creating by hand.
 
-Launch the game, load a save, then press **F1** to open BepInEx Configuration Manager. Every mod's settings live there. You can also edit the TOML files in `BepInEx\config\` directly if you prefer.
+### Installing (the mod-only ZIP)
 
-## Updates
+If you already have BepInEx, extract `..._ModOnly.zip` into the **`BepInEx` folder inside** your
+game folder instead:
 
-When you're on the main menu, an auto-updating notice on the side of the screen will flag any mod in this collection that has a newer version on Nexus. Click an entry to open its Nexus page. If you'd rather not see it, every mod has a **"Check for Updates"** toggle in its config - turn that off and the mod is silent.
+```
+C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper\BepInEx\
+```
 
-The notice reads from a manifest file that refreshes every 12 hours, and the game caches results for 4 hours on disk, so newly-uploaded versions can take a few hours to appear.
+It contains a `plugins` folder, so the mod lands in
+`BepInEx\plugins\GraveyardKeeperAccessibility\`.
 
-## The mods
+Either way, do not move the individual files around afterwards — the speech library and the `lang`
+folder have to stay beside the DLL.
 
-### Quality of life & UI
+### Start the game
 
-- **[Save Now](https://www.nexusmods.com/graveyardkeeper/mods/41)** - Save anytime with a keybind, auto-save on a timer, save on new day/on exit, restore your exact position on reload, tidier load-game list with pin-last-played.
-- **[Max Buttons Redux](https://www.nexusmods.com/graveyardkeeper/mods/59)** - Min/Max buttons on the craft window (queues as many as you can afford in one click) + Max button on vendor slider. Controller triggers snap to min/max. Requires [Rest In Patches](https://www.nexusmods.com/graveyardkeeper/mods/125).
-- **[Queue Everything](https://www.nexusmods.com/graveyardkeeper/mods/57)** - Turns the craft window into a proper queueing interface. Optional idle auto-crafts you can walk away from.
-- **[Show Me Moar](https://www.nexusmods.com/graveyardkeeper/mods/81)** - Modern display support: native resolution, higher refresh rates, zoom, HUD scaling.
-- **[Thoughtful Reminders](https://www.nexusmods.com/graveyardkeeper/mods/52)** - When the day flips over, the keeper thinks about what day of the week it is and what's happening, so you don't walk past merchant days or tavern nights.
-- **[Rest In Patches](https://www.nexusmods.com/graveyardkeeper/mods/125)** - Collection of small vanilla bug fixes: restores missing craft-window arrow icons, smooths player movement, tunes footprints, keeps big stockpiles visible, swallows a few harmless vanilla exceptions. More added over time.
-- **[Misc. Bits and Bobs](https://www.nexusmods.com/graveyardkeeper/mods/55)** - Grab-bag: movement-speed multiplier, Evict Church Visitors button, Skip Intro Video On New Game, Remove Cinematic Letterboxing, more. All toggleable.
-- **[Fog Be Gone](https://www.nexusmods.com/graveyardkeeper/mods/46)** - Cleans up the weather overlay. Fog removed by default; wind and rain stay unless you turn them off too.
-- **[No Intros](https://www.nexusmods.com/graveyardkeeper/mods/47)** - Skips the publisher and developer logos on launch.
-- **[New Game At Bottom](https://www.nexusmods.com/graveyardkeeper/mods/43)** - Moves the "New Game" slot to the bottom of the save list so you don't fat-finger it.
+The mod announces itself once the game has finished loading. From there the title screen, the save
+slots and everything after them are read aloud.
 
-### Travel & storage
+## Keys
 
-- **[Beam Me Up Gerry](https://www.nexusmods.com/graveyardkeeper/mods/61)** - Teleport stones become a fast-travel system to every zone you've visited. Zero cooldown, optional small fee, save your own custom teleport points.
-- **[Where's Ma' Storage](https://www.nexusmods.com/graveyardkeeper/mods/62)** - One shared inventory across every crafting station, bigger chests, bigger stacks. **Important:** don't mix with other inventory-modifying mods.
-- **[Auto-Loot Heavies](https://www.nexusmods.com/graveyardkeeper/mods/51)** - Teleports heavy drops (timber, stone, marble, ore) straight to the nearest stockpile with space.
-- **[Moar Pallets](https://www.nexusmods.com/graveyardkeeper/mods/157)** - Adds wooden pallets to the wooden and cellar build desks. Cellar pallets get filled by the elevator and emptied by the porter; barn pallets count toward merchant trading capacity. Loose crates auto-route to the nearest pallet with space.
-- **[Gerry's Junk Trunk](https://www.nexusmods.com/graveyardkeeper/mods/64)** - A buildable trunk Gerry empties at midnight - drop items in, get coin back at dawn. Upgrade it through Woodworking → Engineer → Jeweler tech.
-- **[Get Outta Ma Way](https://www.nexusmods.com/graveyardkeeper/mods/88)** - Walk through NPCs instead of pushing them around. No more body-blocks in doorways.
+`KEYBINDINGS.md` ships next to the mod inside `BepInEx\plugins\GraveyardKeeperAccessibility\` and
+lists every key the mod adds, grouped by where it works.
 
-### Crafting, farming & alchemy
+The game's own keys can be changed in the pause menu (Escape) under Controls, which is fully
+keyboard-navigable. The mod's own keys are fixed for now, since the GyK Configurationmanager is not yet accessible yet and there is no configuration file for it yet.
 
-- **[FasterCraft Reloaded](https://www.nexusmods.com/graveyardkeeper/mods/65)** - Speed up every crafting-related activity. Each speedup is a separate toggle.
-- **[Apple Trees Enhanced](https://www.nexusmods.com/graveyardkeeper/mods/54)** - Turns garden apple trees, berry bushes, and bee hives into passive producers that drop harvests for you to pick up. Optional realistic mode.
-- **[Where's Ma' Veggies](https://www.nexusmods.com/graveyardkeeper/mods/76)** - Harvest every ready garden plot of the same crop at once instead of walking to each bed.
-- **[The Seed Equalizer](https://www.nexusmods.com/graveyardkeeper/mods/58)** - Stops garden and vineyard seed counts from slowly bleeding dry - keeps at least a 1:1 ratio, usually net-positive.
-- **[I Neeeed Sticks](https://www.nexusmods.com/graveyardkeeper/mods/56)** - Adds a "Wooden stick" craft to the circular saw, so you don't have to grind fallen branches.
-- **[Moar Wells](https://www.nexusmods.com/graveyardkeeper/mods/158)** - Adds the basic stone well and the pump well to the wooden build desk. The pump well spawns on the nearest existing stone well and can be placed repeatedly; a config toggle removes its Engineer tech requirement.
-- **[Keepers Candles](https://www.nexusmods.com/graveyardkeeper/mods/87)** - Candelabras and incense burners stay lit forever; removing a candle returns it to your inventory.
-- **[Add Straight To Table](https://www.nexusmods.com/graveyardkeeper/mods/49)** - Skips the "Are you sure?" confirmation when you pick a body part to remove at the autopsy table.
-- **[Alchemy Research Redux](https://www.nexusmods.com/graveyardkeeper/mods/90)** - Shows what an alchemy combination will produce before you craft it. Patches a gap where researched recipes weren't actually registered as known.
-- **[Decomp Delight](https://www.nexusmods.com/graveyardkeeper/mods/86)** - Adds the decomposition element (Chaos/Life/Death/Body/Mind/Nature…) to every researched item's tooltip.
+## Languages
 
-### Economy & progression
-
-- **[Economy Reloaded](https://www.nexusmods.com/graveyardkeeper/mods/67)** - Disables vendor inflation and deflation so prices stay stable over a long playthrough.
-- **[Give Me Moar](https://www.nexusmods.com/graveyardkeeper/mods/70)** - Multipliers for just about every drop, reward, and craft output in the game.
-- **[Where's Ma' Points](https://www.nexusmods.com/graveyardkeeper/mods/71)** - Red / green / blue XP goes straight to your bar instead of spawning physical orbs - big performance win when you've been crafting a lot.
-- **[Pray The Day Away](https://www.nexusmods.com/graveyardkeeper/mods/72)** - Lifts the vanilla "one sermon per week" rule and gives you fine-grained control over church running costs.
-- **[Exhaust-less](https://www.nexusmods.com/graveyardkeeper/mods/42)** - QoL tweaks that reduce grind around energy, sanity, gratitude, tools, meditation, and sleep. All off by default or independently toggleable.
-
-### Gameplay tweaks
-
-- **[Longer Days](https://www.nexusmods.com/graveyardkeeper/mods/53)** - Stretches the in-game day. Vanilla is 7.5 real-time minutes per day - double or triple it without changing anything else.
-- **[Bring Out Yer Dead](https://www.nexusmods.com/graveyardkeeper/mods/73)** - Control when and how fast the body-delivery donkey arrives at the graveyard. Multiple deliveries per day; faster walk.
-- **[Grave Changes Redux](https://www.nexusmods.com/graveyardkeeper/mods/89)** - Raises the max quality of grave items and decorations from the vanilla cap up to 30.
-- **[I Build Where I Want](https://www.nexusmods.com/graveyardkeeper/mods/60)** - Build anywhere on the map instead of only inside the pre-defined construction zones.
-- **[Trees No More](https://www.nexusmods.com/graveyardkeeper/mods/50)** - Once you've cleared a tree (felled + stump dug), nothing grows back there. Useful for laying out a graveyard or garden.
-- **[Regeneration Reloaded](https://www.nexusmods.com/graveyardkeeper/mods/66)** - Passive life and energy regeneration at a rate you control - the keeper recovers over time without needing to sleep, eat, or meditate.
-- **[No Time For Fishing](https://www.nexusmods.com/graveyardkeeper/mods/44)** - Skips the fishing mini-game. Cast your line and the mod handles the rest.
+English and German translations are complete. Spanish, French, Italian and
+Russian files exist but are near-empty and fall back to English.
 
 ## Save compatibility
 
-- **Most mods are safe to add or remove mid-save** - they patch game behaviour at runtime and don't persist anything unusual to your save file.
-- **Where's Ma' Storage** - the bumped capacity is stored per-container inside the save (as a regular `inventory_size` param), so uninstalling doesn't delete items: each chest loads at its bumped size even without the mod. Before uninstalling, it's worth tidying your personal inventory down to 20 items - vanilla caps the player at 20 slots, and anything left in slots 21+ will still exist in the save but can't be reorganised with vanilla UI until you drop some or reinstall the mod.
-- **Gerry's Junk Trunk** - if you uninstall the mod, the trunk you built just reverts to a normal trunk. Nothing breaks and nothing needs cleaning up.
-- **Back up your save** before any big config change. Most are safe; the exceptions are anything touching save files (Save Now) or inventory structure (Where's Ma' Storage's sliders).
+The mod only reads the game and speaks; it writes nothing of its own to your save. It is safe to
+add or remove at any point in a playthrough.
 
-## Support & contact
+## Known limitations
 
-- **Ko-fi** - [ko-fi.com/p1xel8ted](https://ko-fi.com/p1xel8ted). Development, testing, and user support take real time; any support is greatly appreciated. If you'd rather not donate, clicking the Endorse button on the Nexus pages also helps.
-- **Discord** - [discord.gg/Dy5ApMYYY8](https://discord.gg/Dy5ApMYYY8). Faster than Nexus comments for back-and-forth.
-- **Bug reports / feature requests** - comment on the specific mod's Nexus page. GitHub issues are disabled; Nexus is the single channel.
-- **Crash on startup?** Check `BepInEx\LogOutput.log` - a line starting with `GYK Mods` lists every mod that loaded plus your game/platform details, which is the first thing I'll ask for.
+- The game's opening intro is not narrated — its subtitles are drawn by a separate system that is
+  not hooked yet.
+- Linux and macOS are untested. Windows is verified. Playing through Proton works, but Prism
+  cannot reach a Linux screen reader such as Orca from inside Proton; those DLLs have to be
+  installed by hand, as a mod cannot do it in that case.
+- BepInEx Configuration Manager is not accessible (see above).
+- manual fishing is not accessible yet, but its possible to automatically fish.
+
+`CHANGELOG.md` ships with the mod and has the full list.
+
+## Something went wrong?
+
+`BepInEx\LogOutput.log` inside the game folder records what the mod did. It is a plain text file,
+and the lines beginning with `Graveyard Keeper Accessibility` are this mod's. That log is the
+first thing worth looking at, and the most useful thing to attach to a bug report.
 
 ## Licence & credits
 
-Licensed under the **GNU General Public License v3.0** - see [LICENSE](LICENSE) for the full text. In short: you're free to use, study, modify, and redistribute the source under the same licence; any distributed fork must also be GPL v3.
+Licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE) (shipped with the
+mod as `LICENSE.txt`) for the full text.
+In short: you are free to use, study, modify and redistribute the source under the same licence;
+any distributed fork must also be GPL v3.
 
-Individual mods credit their original authors on the Nexus page where the mod was based on a prior work (Max Buttons Redux, Rest In Patches, and others - see each Nexus page's Credits section).
+Speech is provided by [Prism](https://github.com/ethindp/prism), used under the **Mozilla Public
+License 2.0**; its licence and notice travel with the mod as `prism-LICENSE.txt` and
+`prism-NOTICE.txt`.
+
+The bundled ZIP also contains [BepInEx](https://github.com/BepInEx/BepInEx) and its
+[Doorstop](https://github.com/NeighTools/UnityDoorstop) loader, both under the **GNU Lesser General
+Public License 2.1**, redistributed unmodified. Their licence texts ship as `BepInEx-LICENSE.txt`
+and `Doorstop-LICENSE.txt` in the game folder. The exact release used is
+`BepInEx_win_x64_5.4.23.5.zip` from BepInEx's own releases page.
+
+This repository is a fork of [p1xel8ted's Graveyard Keeper mod collection](https://github.com/p1xel8ted/Graveyard-Keeper-Mods),
+whose build tooling it still uses.

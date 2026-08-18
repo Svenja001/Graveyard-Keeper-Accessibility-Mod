@@ -13,6 +13,12 @@
          tracked build file diverging from upstream. -->
     <ItemGroup>
         <None Include="KEYBINDINGS.md" CopyToOutputDirectory="PreserveNewest" />
+        <!-- The install instructions ship too: a blind player who has just extracted the ZIP has
+             the folder open in front of them, and that is the moment they need them. -->
+        <None Include="..\..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
+        <!-- GPL v3 requires the licence to accompany the distribution, and README.md links to it.
+             Without this the link is dead for anyone who only ever sees the ZIP. -->
+        <None Include="..\..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
     <!-- Bundle the Prism native library so releases speak through NVDA/JAWS out of the box
          instead of falling back to SAPI. All three platforms ship because one release zip
@@ -34,4 +40,84 @@
            Assembly-CSharp.dll shadow the real game assemblies. -->
       <PackageReference Include="GraveyardKeeper.GameLibs" Version="*-*" ExcludeAssets="runtime" />
     </ItemGroup>
+
+    <!--
+        A second release ZIP that carries BepInEx as well, so the whole install is one extract
+        into the game folder. The standard zip.target ZIP is rooted at the game's BepInEx\ folder
+        and assumes the loader is already there; this one is rooted at the GAME folder, because
+        Doorstop's winhttp.dll has to sit beside the .exe.
+
+        Why bother: every extra manual step is a place a blind player ends up with a game that
+        silently starts unmodded - wrong BepInEx asset, wrong folder, or forgetting the launch
+        that creates BepInEx\plugins\. Shipping the loader removes all three at once; the ZIP
+        already contains plugins\, so no first run is needed either.
+
+        BepInEx and Doorstop are LGPL-2.1, which permits this as long as the binaries are
+        unmodified and the licence texts travel with them - both conditions are met here, see
+        libs\bepinex-dist\README.md. The mod's own GPL-3.0 is unaffected: two independent
+        programs in one archive is mere aggregation.
+
+        Runs after zip.target's ZipOutputPath so OutputPath is fully populated, and leaves that
+        target completely alone - it is shared with ~47 other mods.
+    -->
+    <!--
+        Rename the plain ZIP that zip.target just produced. Its "_BepInEx" suffix means "rooted at
+        the BepInEx folder", but sitting next to a "_WithBepInEx" ZIP that genuinely does contain
+        BepInEx, it reads as the opposite of what it is. That ambiguity matters more than usual
+        here: the audience often picks a download by filename read aloud, with no folder listing to
+        compare against. Renamed here rather than in the shared zip.target, which ~47 other mods use.
+    -->
+    <Target Name="RenameModOnlyZip" AfterTargets="ZipOutputPath" Condition="'$(Storefront)' != 'gog'">
+        <PropertyGroup>
+            <_PlainZip>$(MSBuildThisFileDirectory)..\AAA_Releases\$(MSBuildProjectName)_v$(Version)_BepInEx.zip</_PlainZip>
+            <_ModOnlyZip>$(MSBuildThisFileDirectory)..\AAA_Releases\$(MSBuildProjectName)_v$(Version)_ModOnly.zip</_ModOnlyZip>
+        </PropertyGroup>
+        <Move Condition="Exists('$(_PlainZip)')" SourceFiles="$(_PlainZip)" DestinationFiles="$(_ModOnlyZip)" />
+        <Message Condition="Exists('$(_ModOnlyZip)')" Importance="high"
+                 Text="Mod-only release: $(MSBuildProjectName)_v$(Version)_ModOnly.zip" />
+    </Target>
+
+    <Target Name="ZipWithBepInEx" AfterTargets="ZipOutputPath" Condition="'$(Storefront)' != 'gog'">
+        <PropertyGroup>
+            <_FullStaging>$(TEMP)\GYK_staging_full\$(MSBuildProjectName)</_FullStaging>
+            <_BepInExDist>$(MSBuildThisFileDirectory)..\..\libs\bepinex-dist</_BepInExDist>
+            <_ReleasesDir>$(MSBuildThisFileDirectory)..\AAA_Releases</_ReleasesDir>
+        </PropertyGroup>
+
+        <RemoveDir Directories="$(_FullStaging)" />
+        <MakeDir Directories="$(_FullStaging)" />
+
+        <ItemGroup>
+            <!-- The loader, laid out relative to the game folder already. -->
+            <_BepInExFiles Include="$(_BepInExDist)\**\*.*" Exclude="$(_BepInExDist)\README.md" />
+            <!-- The mod itself, mirroring what went into the plain ZIP. Same exclusions as
+                 zip.target: Vortex leftovers and build by-products must not ship. -->
+            <_ModFiles Include="$(OutputPath)\**\*.*"
+                       Exclude="$(OutputPath)\**\*.zip;$(OutputPath)\**\*.pdb;$(OutputPath)\**\*.deps.json;$(OutputPath)\**\*.csv;$(OutputPath)\**\*.vortex_backup;$(OutputPath)\**\*.vortex_new;$(OutputPath)\SaveBackup\**\*.*;$(OutputPath)\_dump\**\*.*;$(OutputPath)\Locations\**\*.*" />
+        </ItemGroup>
+
+        <Copy SourceFiles="@(_BepInExFiles)"
+              DestinationFiles="@(_BepInExFiles->'$(_FullStaging)\%(RecursiveDir)%(Filename)%(Extension)')" />
+        <Copy SourceFiles="@(_ModFiles)"
+              DestinationFiles="@(_ModFiles->'$(_FullStaging)\BepInEx\plugins\$(MSBuildProjectName)\%(RecursiveDir)%(Filename)%(Extension)')" />
+
+        <!-- CHANGELOG.md never reaches OutputPath - zip.target copies it into its own staging dir
+             directly - so the glob above misses it and this ZIP would ship without it. -->
+        <Copy Condition="Exists('$(MSBuildProjectDirectory)\CHANGELOG.md')"
+              SourceFiles="$(MSBuildProjectDirectory)\CHANGELOG.md"
+              DestinationFolder="$(_FullStaging)\BepInEx\plugins\$(MSBuildProjectName)" />
+
+        <!-- Fail loudly rather than shipping a ZIP that quietly cannot load anything. -->
+        <Error Condition="!Exists('$(_FullStaging)\winhttp.dll')"
+               Text="BepInEx bundle is missing winhttp.dll - is libs\bepinex-dist populated? See its README." />
+        <Error Condition="!Exists('$(_FullStaging)\BepInEx\plugins\$(MSBuildProjectName)\$(MSBuildProjectName).dll')"
+               Text="BepInEx bundle is missing the mod DLL." />
+
+        <ZipDirectory Overwrite="true"
+                      SourceDirectory="$(_FullStaging)"
+                      DestinationFile="$(_ReleasesDir)\$(MSBuildProjectName)_v$(Version)_WithBepInEx.zip" />
+
+        <RemoveDir Directories="$(_FullStaging)" />
+        <Message Importance="high" Text="Bundled release: $(MSBuildProjectName)_v$(Version)_WithBepInEx.zip" />
+    </Target>
 </Project>

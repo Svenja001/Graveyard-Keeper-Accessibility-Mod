@@ -8,6 +8,10 @@ reader. Developed 3 June – 16 August 2026 over 151 commits.
 
 `KEYBINDINGS.md` ships next to the mod and lists every key it adds.
 
+Two downloads: `..._WithBepInEx.zip` includes the BepInEx loader and is extracted into the game
+folder — the whole install in one step. `..._ModOnly.zip` is the mod on its own, for players who
+already run other Graveyard Keeper mods, and goes into the existing `BepInEx` folder.
+
 ### Speech output
 
 - Speaks through **Prism**, which drives NVDA, JAWS, Orca, Voiceover and others directly, and falls back to SAPI when no screen reader is running.

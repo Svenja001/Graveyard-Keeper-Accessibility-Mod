@@ -48,6 +48,12 @@ libs/native/*
 # This has to come after the "*.dll" rule above to win for prism.dll.
 !libs/native/prism/
 !libs/native/prism/**
+# BepInEx ships inside the bundled release the same way (LGPL-2.1, unmodified upstream binaries —
+# see libs/bepinex-dist/README.md). Without this the WithBepInEx zip could only ever be built on
+# the one machine that has the folder. Same two-line shape as Prism: the directory has to be
+# re-included before its contents, because git does not descend into an excluded directory.
+!libs/bepinex-dist/
+!libs/bepinex-dist/**
 [Ll]ib/
 
 # Visual Studio 2015/2017 cache/options directory
