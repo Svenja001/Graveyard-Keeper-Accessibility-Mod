@@ -6,11 +6,13 @@ the DLC content are all narrated through a screen reader.
 
 ## Requirements
 
-- **Graveyard Keeper** (Steam, GOG, Epic or Xbox), 64-bit Windows.
+- **Graveyard Keeper** on Windows (Steam, GOG, Epic or Xbox). Steam's version is 64-bit and GOG's
+  is 32-bit, so there is a download for each — see *Which download to take* below.
 - **Nothing else.** BepInEx, the loader that makes mods run at all, is included in the download —
   see below if you already have it.
 - **A screen reader is optional.** NVDA, JAWS, Orca, VoiceOver and others are driven directly; if
-  none is running, the mod falls back to Windows SAPI and still speaks.
+  none is running, the mod falls back to Windows SAPI and still speaks. On the 32-bit GOG build
+  it is always SAPI — see *A note for GOG players*.
 
 Everything the mod needs travels inside its ZIP — the Prism speech library is bundled for Windows,
 Linux and macOS too, so there is nothing separate to install.
@@ -28,11 +30,20 @@ it yourself. That is the whole install.
 
 ### Which download to take
 
-- **`GraveyardKeeperAccessibility_<version>_WithBepInEx.zip`** — take this one unless you know you
-  need the other. It contains the mod *and* BepInEx, so there is nothing else to fetch.
-- **`GraveyardKeeperAccessibility_<version>_ModOnly.zip`** — the mod on its own, without BepInEx.
-  **If you already run other Graveyard Keeper mods, use this one**: the bundled ZIP would overwrite
-  your loader with version 5.4.23.5 and could disturb mods that expect a different one.
+- **`GraveyardKeeperAccessibility_<version>_WithBepInEx.zip`** — **for Steam** (and Epic or Xbox).
+  Take this one unless you know you need one of the others. It contains the mod *and* BepInEx, so
+  there is nothing else to fetch.
+- **`GraveyardKeeperAccessibility_<version>_WithBepInEx_GOG_32bit.zip`** — **for GOG.** The same
+  thing, with the 32-bit loader. GOG sells a 32-bit build of the game, which cannot load the
+  64-bit loader in the file above; it would start with no mod, no error and no log file.
+- **`GraveyardKeeperAccessibility_<version>_ModOnly.zip`** — the mod on its own, without BepInEx,
+  and it does not matter which store your game came from. **If you already run other Graveyard
+  Keeper mods, use this one**: the bundled ZIPs would overwrite your loader with version 5.4.23.5
+  and could disturb mods that expect a different one.
+
+If you are not sure which build you have: start the game, open Task Manager, and find
+`Graveyard Keeper` under *Processes*. If the name is followed by *(32 bit)*, take the GOG
+download; otherwise take the first one.
 
 ### Finding your game folder
 
@@ -51,8 +62,8 @@ The folder you want is the one that contains `Graveyard Keeper.exe` and a folder
 
 ### Installing (the bundled ZIP)
 
-Extract `..._WithBepInEx.zip` **into the game folder itself** — the one holding
-`Graveyard Keeper.exe`. For example:
+Extract `..._WithBepInEx.zip` — or `..._WithBepInEx_GOG_32bit.zip` if your game came from GOG —
+**into the game folder itself**, the one holding `Graveyard Keeper.exe`. For example:
 
 ```
 C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper\
@@ -79,6 +90,19 @@ It contains a `plugins` folder, so the mod lands in
 
 Either way, do not move the individual files around afterwards — the speech library and the `lang`
 folder have to stay beside the DLL.
+
+### A note for GOG players
+
+GOG sells a 32-bit build of the game, and two things follow from that.
+
+**Speech comes from the Windows SAPI voice, not from your screen reader.** Prism, the library the
+mod uses to talk to NVDA, JAWS and braille displays, has never been built for 32-bit Windows, so
+there is nothing to install and no older version that would help. Everything is still spoken —
+just in the Windows voice, and without braille.
+
+**It is tested and working, but less thoroughly than on Steam.** The mod is built against the Steam
+version of the game, and GOG's is older and differs in places. If something behaves oddly only on
+GOG, a report is very welcome.
 
 ### Start the game
 

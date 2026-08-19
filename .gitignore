@@ -54,6 +54,10 @@ libs/native/*
 # re-included before its contents, because git does not descend into an excluded directory.
 !libs/bepinex-dist/
 !libs/bepinex-dist/**
+# The 32-bit Doorstop for the GOG build, which is a 32-bit process. Its own folder rather than a
+# second file inside bepinex-dist/, which is a verbatim extraction of the x64 asset.
+!libs/bepinex-dist-x86/
+!libs/bepinex-dist-x86/**
 [Ll]ib/
 
 # Visual Studio 2015/2017 cache/options directory

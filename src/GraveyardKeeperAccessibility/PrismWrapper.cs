@@ -174,6 +174,19 @@ internal static class PrismWrapper
     internal static bool Init(ManualLogSource log)
     {
         _log = log;
+
+        // Every bundled Prism binary is 64-bit, because upstream has never published a 32-bit
+        // Windows build (checked across all 54 releases, v0.1.0 to v0.17.3). The GOG build of the
+        // game is a 32-bit process, so there is nothing to load there and no version to fall back
+        // to. Say so plainly instead of letting it read as a broken install: the caller starts the
+        // SAPI voice next, which works fine, but loses NVDA/JAWS and braille.
+        if (IntPtr.Size == 4)
+        {
+            log.LogWarning("32-bit game process (this is the GOG build). Prism has no 32-bit " +
+                           "library, so speech falls back to Windows SAPI - no NVDA, JAWS or braille.");
+            return false;
+        }
+
         try
         {
             // The native library ships next to this assembly, one per platform. Loading it by

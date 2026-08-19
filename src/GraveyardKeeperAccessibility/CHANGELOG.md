@@ -1,3 +1,18 @@
+## 0.1.1 | 19 August 2026
+
+**GOG players: the 0.1.0 download could not work, and gave no sign of it.** The GOG build of
+Graveyard Keeper is a 32-bit program, and the loader in `..._WithBepInEx.zip` was the 64-bit one.
+A 32-bit game cannot load it, so the game simply started without the mod — no error message, no
+log file, nothing.
+
+- New download **`..._WithBepInEx_GOG_32bit.zip`**. Take this one for GOG; take
+  `..._WithBepInEx.zip` for Steam. Everything else about them is identical.
+- On the GOG build, speech comes from Windows SAPI rather than your screen reader. Prism, the
+  library that drives NVDA, JAWS and braille displays, has no 32-bit version — there is no
+  release of it that does. The mod still speaks everything, just in the Windows voice.
+- Tested on the GOG build and working. It is still built against the Steam version of the game, and
+  GOG's is older, so if you meet something that behaves oddly only on GOG, please report it.
+
 ## 0.1.0 | 16 August 2026
 
 Initial release. Graveyard Keeper played entirely by ear — menus, dialogue, the world,

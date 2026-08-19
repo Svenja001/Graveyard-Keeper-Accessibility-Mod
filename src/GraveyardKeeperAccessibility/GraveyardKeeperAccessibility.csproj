@@ -42,10 +42,11 @@
     </ItemGroup>
 
     <!--
-        A second release ZIP that carries BepInEx as well, so the whole install is one extract
-        into the game folder. The standard zip.target ZIP is rooted at the game's BepInEx\ folder
-        and assumes the loader is already there; this one is rooted at the GAME folder, because
-        Doorstop's winhttp.dll has to sit beside the .exe.
+        Two more release ZIPs that carry BepInEx as well, so the whole install is one extract into
+        the game folder - one with the 64-bit loader (Steam) and one with the 32-bit one (GOG).
+        The standard zip.target ZIP is rooted at the game's BepInEx\ folder and assumes the loader
+        is already there; these are rooted at the GAME folder, because Doorstop's winhttp.dll has
+        to sit beside the .exe.
 
         Why bother: every extra manual step is a place a blind player ends up with a game that
         silently starts unmodded - wrong BepInEx asset, wrong folder, or forgetting the launch
@@ -81,6 +82,7 @@
         <PropertyGroup>
             <_FullStaging>$(TEMP)\GYK_staging_full\$(MSBuildProjectName)</_FullStaging>
             <_BepInExDist>$(MSBuildThisFileDirectory)..\..\libs\bepinex-dist</_BepInExDist>
+            <_BepInExDistX86>$(MSBuildThisFileDirectory)..\..\libs\bepinex-dist-x86</_BepInExDistX86>
             <_ReleasesDir>$(MSBuildThisFileDirectory)..\AAA_Releases</_ReleasesDir>
         </PropertyGroup>
 
@@ -116,8 +118,29 @@
         <ZipDirectory Overwrite="true"
                       SourceDirectory="$(_FullStaging)"
                       DestinationFile="$(_ReleasesDir)\$(MSBuildProjectName)_v$(Version)_WithBepInEx.zip" />
+        <Message Importance="high" Text="Bundled release: $(MSBuildProjectName)_v$(Version)_WithBepInEx.zip" />
+
+        <!--
+            Same bundle again for the GOG build, which is a 32-bit process and therefore cannot
+            load the 64-bit Doorstop above: Windows falls through to the system winhttp.dll and the
+            game starts unmodded with no error and no log at all. v0.1.0 shipped only the x64
+            loader and reached every GOG player as a silent no-op.
+
+            winhttp.dll is the ONLY file that differs between BepInEx's win_x86 and win_x64 assets
+            (everything else, BepInEx\core\ included, is managed AnyCPU and byte-identical - hashed
+            file by file, see libs\bepinex-dist-x86\README.md). So swap that one file in the staging
+            dir already built above and zip it a second time, rather than staging twice: the two
+            archives then cannot drift apart in anything else.
+        -->
+        <Error Condition="!Exists('$(_BepInExDistX86)\winhttp.dll')"
+               Text="32-bit loader missing - is libs\bepinex-dist-x86 populated? See its README." />
+        <Copy SourceFiles="$(_BepInExDistX86)\winhttp.dll" DestinationFolder="$(_FullStaging)" />
+
+        <ZipDirectory Overwrite="true"
+                      SourceDirectory="$(_FullStaging)"
+                      DestinationFile="$(_ReleasesDir)\$(MSBuildProjectName)_v$(Version)_WithBepInEx_GOG_32bit.zip" />
+        <Message Importance="high" Text="Bundled release: $(MSBuildProjectName)_v$(Version)_WithBepInEx_GOG_32bit.zip" />
 
         <RemoveDir Directories="$(_FullStaging)" />
-        <Message Importance="high" Text="Bundled release: $(MSBuildProjectName)_v$(Version)_WithBepInEx.zip" />
     </Target>
 </Project>
