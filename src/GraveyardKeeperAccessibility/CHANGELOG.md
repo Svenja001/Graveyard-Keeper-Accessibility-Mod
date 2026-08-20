@@ -1,3 +1,30 @@
+## 0.1.2 | 20 August 2026
+
+**The mod was making the game stutter, and this release fixes the cause.** Several players
+reported the game running rough — worst while walking around. That was the mod's doing, not the
+game's.
+
+Three of the mod's systems — the "what is next to me" readout, the combat assist, and the object
+tracker — each asked Unity for a list of every object in the world, and they did it *every single
+frame*. Building that list means walking the entire scene and allocating a fresh several-thousand
+entry array, and then the mod sifted each list with checks that allocated a new piece of text per
+object per check. Tens of thousands of throwaway allocations a second is what the stutter was: the
+memory collector kicking in over and over.
+
+- The mod now keeps its own list of world objects and updates it as objects come and go, instead of
+  rebuilding it from scratch dozens of times a second. Everything each object is checked for that
+  cannot change — is it the player, is it a prefab shell, does it belong to a DLC you own — is
+  worked out once per object instead of once per object per frame.
+- The proximity readout no longer sorts the entire world to find the nearest thing to you.
+- The title-screen check no longer searches the whole scene on every frame of normal play.
+- The world-zone list behind the navigation landmarks is reused rather than re-gathered on every
+  refresh.
+
+Nothing about what the mod says or how it behaves changes — it does the same work, far more
+cheaply. If your game still runs rough, the mod now writes its own timings into
+`BepInEx/LogOutput.log` (lines beginning `[PERF]`), and that log is the most useful thing you can
+attach to a report.
+
 ## 0.1.1 | 19 August 2026
 
 **GOG players: the 0.1.0 download could not work, and gave no sign of it.** The GOG build of

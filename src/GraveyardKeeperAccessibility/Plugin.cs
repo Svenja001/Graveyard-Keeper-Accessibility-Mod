@@ -12,6 +12,8 @@ public class Plugin : BaseUnityPlugin
         // Must come first: everything below can speak, and speech goes through Loc.
         Loc.Init(Log);
         ScreenReader.Init(Log);
+        WorldObjectRegistry.Init(Log);
+        Perf.Init(Log);
         MovementFeedback.Init(Log);
         InteractionDetector.Init(Log);
         InventoryItemHandler.Init(Log);
@@ -188,6 +190,20 @@ public class Plugin : BaseUnityPlugin
             nameof(ToolbarHandler.UseItemFromToolbar_Prefix), nameof(ToolbarHandler.UseItemFromToolbar_Postfix),
             typeof(BaseCharacterComponent), "UseItemFromToolbar", new[] { typeof(int) });
 
+        // Keep a live index of every world object instead of re-scanning the whole scene several
+        // times a frame. WorldGameObject.Awake/OnDestroy are public and parameterless, so a plain
+        // postfix/prefix pair maintains the list at effectively zero cost. If either patch fails
+        // the registry falls back to periodic sweeps on its own, so this is an optimisation only —
+        // nothing below depends on it succeeding. See WorldObjectRegistry.
+        bool addPatched = TryPatch(harmony, typeof(Patches), nameof(Patches.WorldGameObject_Awake_Postfix),
+            typeof(WorldGameObject), "Awake", Type.EmptyTypes);
+        bool removePatched = TryPatchPrefix(harmony, typeof(Patches), nameof(Patches.WorldGameObject_OnDestroy_Prefix),
+            typeof(WorldGameObject), "OnDestroy", Type.EmptyTypes);
+        if (addPatched && removePatched)
+            WorldObjectRegistry.MarkPatched();
+        else
+            Log.LogWarning("[REGISTRY] Live tracking unavailable - falling back to throttled scene sweeps");
+
         Log.LogInfo("Graveyard Keeper Accessibility loaded");
     }
 
@@ -219,9 +235,18 @@ public class Plugin : BaseUnityPlugin
 
     private void Update()
     {
+        // Measured end to end, so the log can answer "is the mod what's costing frames?" without
+        // anyone having to attach a profiler to someone else's game. See Perf.
+        Perf.Begin(Perf.Section.Total);
         try
         {
             SpeakGreetingWhenLanguageKnown();
+
+            // Keep the shared world-object index healthy (compaction + the periodic safety-net
+            // re-sync). Must run before anything that queries it. See WorldObjectRegistry.
+            Perf.Begin(Perf.Section.Registry);
+            WorldObjectRegistry.Tick();
+            Perf.End(Perf.Section.Registry);
 
             // Log scene changes
             var currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
@@ -235,6 +260,9 @@ public class Plugin : BaseUnityPlugin
                 HealthEnergyAnnouncer.Reset();
                 // Drop stale per-walk navmesh-recovery state so a save-load/day change starts clean.
                 ObjectNavigator.ResetNavStateOnSceneChange();
+                // A new scene is an entirely new object set; rebuild the index from scratch rather
+                // than waiting for the periodic sweep.
+                WorldObjectRegistry.RequestResync("scene change");
             }
 
             // Speak any items the player just received ("Got 4 wood"). Runs regardless of GUI
@@ -281,7 +309,9 @@ public class Plugin : BaseUnityPlugin
                 return;
 
             // Update persistent navigation system
+            Perf.Begin(Perf.Section.Navigator);
             ObjectNavigator.Update();
+            Perf.End(Perf.Section.Navigator);
 
             // Handle object navigation input
             HandleNavigationInput();
@@ -294,17 +324,23 @@ public class Plugin : BaseUnityPlugin
             // Check for GUI first
             if (guiCheck)
             {
+                Perf.Begin(Perf.Section.Gui);
                 GUIAccessibility.CheckForNewGUI();
+                Perf.End(Perf.Section.Gui);
             }
 
             // Check for interactable objects (when not in GUI/menu)
             if (!GUIAccessibility.HasActiveGUI && !TitleScreenAccessibility.HasActiveScreen)
             {
                 // MovementFeedback temporarily disabled - needs debugging
+                Perf.Begin(Perf.Section.Interaction);
                 InteractionDetector.Update();
+                Perf.End(Perf.Section.Interaction);
 
                 // Real-time combat assistance (auto-aim, enemy radar, one-key attack).
+                Perf.Begin(Perf.Section.Combat);
                 CombatAssist.Update();
+                Perf.End(Perf.Section.Combat);
 
                 // "Cutscene, please wait" + reminders through its silent camera/walk stretches.
                 CutsceneAnnouncer.Update();
@@ -394,6 +430,13 @@ public class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             Log.LogError($"Update exception: {ex.Message}\n{ex.StackTrace}");
+        }
+        finally
+        {
+            // In a finally because Update returns from a dozen places; every one of them still
+            // has to close the frame out or the totals drift.
+            Perf.End(Perf.Section.Total);
+            Perf.EndFrame();
         }
     }
 

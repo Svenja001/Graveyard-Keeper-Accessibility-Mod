@@ -513,6 +513,8 @@ internal static class CombatAssist
 
     // ── Continuous feedback ─────────────────────────────────────────────────────────────────────
 
+    private static readonly HashSet<int> _currentEnemyIds = new();
+
     private static void TrackFeedback(WorldGameObject player, List<WorldGameObject> enemies, WorldGameObject nearest)
     {
         // Player taking damage — the most important cue, interrupts everything.
@@ -522,7 +524,10 @@ internal static class CombatAssist
             ScreenReader.Say(Loc.Fmt("combat.hurt", Mathf.RoundToInt(php), MainGame.me.save.max_hp), interrupt: true);
         _lastPlayerHp = php;
 
-        var currentIds = new HashSet<int>();
+        // Reused rather than reallocated: TrackFeedback runs every frame the player is in the
+        // world, and this set is dead by the end of the call.
+        var currentIds = _currentEnemyIds;
+        currentIds.Clear();
 
         foreach (var e in enemies)
         {
@@ -583,26 +588,42 @@ internal static class CombatAssist
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────
 
+    // Reused scan buffers. These two scans run every frame while the player is in the world, so
+    // allocating a fresh List each time (as they used to) meant two throwaway lists per frame on
+    // top of the two multi-thousand-element arrays FindObjectsOfType handed back. Both are fully
+    // consumed inside a single Update, so a shared buffer is safe.
+    private static readonly List<WorldGameObject> _enemyBuffer = new(32);
+    private static readonly List<WorldGameObject> _breakableBuffer = new(32);
+
+    /// <summary>
+    /// Live mobs within <see cref="DetectRange"/>.
+    ///
+    /// Was a full-scene <c>FindObjectsOfType</c> sweep every frame, which also ran the native
+    /// <c>activeInHierarchy</c> walk and an <c>obj_def.IsMob()</c> lookup on every object in the
+    /// world before the distance test could reject it. The registry applies the distance gate
+    /// first, off a cached position field, so the expensive tests only ever see nearby objects.
+    /// </summary>
     private static List<WorldGameObject> FindEnemies(Vector2 playerPos)
     {
-        var list = new List<WorldGameObject>();
         try
         {
-            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(false))
+            // Neither the DLC gate nor the player/prefab exclusion applies here, deliberately:
+            // this list decides what the player can be attacked by and can swing at, so it stays
+            // exactly the set the old scan produced. Dungeon mobs are instantiated from prefabs,
+            // and nothing that can hurt the player may be filtered out on a name heuristic.
+            WorldObjectRegistry.CollectNear(playerPos, DetectRange, obj =>
             {
-                if (obj == null || obj.is_dead) continue;
-                if (obj.obj_def == null || !obj.obj_def.IsMob()) continue;
-                if (!obj.gameObject.activeInHierarchy) continue;
-                if (obj.hp <= 0f) continue;
-                if (Vector2.Distance(obj.pos, playerPos) > DetectRange) continue;
-                list.Add(obj);
-            }
+                if (obj.is_dead) return false;
+                if (obj.obj_def == null || !obj.obj_def.IsMob()) return false;
+                return obj.hp > 0f;
+            }, _enemyBuffer, requireActive: true, applyDlcFilter: false, applyExclusions: false);
         }
         catch (Exception ex)
         {
             _log?.LogWarning($"[COMBAT] FindEnemies failed: {ex.Message}");
+            _enemyBuffer.Clear();
         }
-        return list;
+        return _enemyBuffer;
     }
 
     // Smashable loot props (dungeon vases/pots, barrels/crates/urns). Uses the SAME predicate as the
@@ -611,24 +632,23 @@ internal static class CombatAssist
     // excludes mobs/NPCs, spent "..._broken" leftovers, and tool-harvested resource nodes (trees/ore).
     private static List<WorldGameObject> FindBreakables(Vector2 playerPos)
     {
-        var list = new List<WorldGameObject>();
         try
         {
-            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(false))
+            // IsBreakableLootProp is the expensive predicate here (definition lookups plus a
+            // keyword sweep), so it runs last, on the few objects already within DetectRange.
+            WorldObjectRegistry.CollectNear(playerPos, DetectRange, obj =>
             {
-                if (obj == null || obj.is_dead) continue;
-                if (!obj.gameObject.activeInHierarchy) continue;
-                if (obj.hp <= 0f) continue;
-                if (Vector2.Distance(obj.pos, playerPos) > DetectRange) continue;
-                if (!ObjectNavigator.IsBreakableLootProp(obj)) continue;
-                list.Add(obj);
-            }
+                if (obj.is_dead) return false;
+                if (obj.hp <= 0f) return false;
+                return ObjectNavigator.IsBreakableLootProp(obj);
+            }, _breakableBuffer, requireActive: true, applyDlcFilter: false, applyExclusions: false);
         }
         catch (Exception ex)
         {
             _log?.LogWarning($"[COMBAT] FindBreakables failed: {ex.Message}");
+            _breakableBuffer.Clear();
         }
-        return list;
+        return _breakableBuffer;
     }
 
     private static void LogSmash(WorldGameObject prop)

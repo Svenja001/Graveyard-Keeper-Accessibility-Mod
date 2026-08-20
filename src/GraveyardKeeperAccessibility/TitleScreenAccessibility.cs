@@ -146,6 +146,39 @@ internal static class TitleScreenAccessibility
         }
     }
 
+
+    // Cached reflection + probe throttle for CheckForTitleScreen; see the comments there.
+
+    private static Type _isShownOwner;
+
+    private static PropertyInfo _isShownProp;
+
+    private static int _lastScreenProbeFrame = int.MinValue;
+
+    private const int ScreenProbeInterval = 15;   // ~4 probes/second
+
+
+    private static PropertyInfo IsShownProperty(TitleScreen screen)
+
+    {
+
+        var t = screen.GetType();
+
+        if (!ReferenceEquals(t, _isShownOwner))
+
+        {
+
+            _isShownOwner = t;
+
+            _isShownProp = t.GetProperty("is_shown");
+
+        }
+
+        return _isShownProp;
+
+    }
+
+
     internal static void CheckForTitleScreen()
     {
         try
@@ -159,7 +192,23 @@ internal static class TitleScreenAccessibility
                 return;
             }
 
-            var screen = UnityEngine.Object.FindObjectOfType<TitleScreen>();
+            // CheckForTitleScreen is called every frame the player is in the world, and
+            // FindObjectOfType has to walk the whole scene before it can tell us "no title screen
+            // here" — which is the answer for the entire game session. Two cheap guards:
+            //
+            //   * once we already hold a screen, re-check THAT instance instead of searching again;
+            //   * when we don't, search a few times a second rather than sixty. A title screen
+            //     appearing a sixteenth of a second later is imperceptible, and the reappearing
+            //     case (backing out to the main menu) is still caught.
+            var screen = _currentScreen;
+            if (screen == null)
+            {
+                int frame = Time.frameCount;
+                if (frame - _lastScreenProbeFrame < ScreenProbeInterval)
+                    return;
+                _lastScreenProbeFrame = frame;
+                screen = UnityEngine.Object.FindObjectOfType<TitleScreen>();
+            }
 
             // Check both that it exists and that it's actually visible (using is_shown property)
             bool isVisible = false;
@@ -167,8 +216,10 @@ internal static class TitleScreenAccessibility
             {
                 try
                 {
-                    // TitleScreen likely has is_shown property like BaseGUI
-                    var isShownProp = screen.GetType().GetProperty("is_shown");
+                    // TitleScreen likely has is_shown property like BaseGUI. The lookup is
+                    // resolved once and cached: reflecting for the same property of the same type
+                    // on every frame is pure overhead.
+                    var isShownProp = IsShownProperty(screen);
                     if (isShownProp != null)
                     {
                         isVisible = (bool)isShownProp.GetValue(screen);

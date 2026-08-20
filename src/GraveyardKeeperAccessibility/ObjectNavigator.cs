@@ -354,6 +354,44 @@ internal static class ObjectNavigator
     // separating "in here with me" from "through that wall", so keep it to about a room's width.
     private const float InteriorRevealUnzonedRadius = 10f * TileSize;
     private const int UpdateInterval = 30;                 // refresh list every 30 frames
+
+    // Reused snapshot buffer for RefreshDestinations. Sized for a full Graveyard Keeper scene so
+    // it stops growing after the first rebuild and the per-refresh allocation drops to zero.
+    private static readonly List<WorldGameObject> _scanBuffer = new(4096);
+
+    // Cached WorldZone sweep. FindObjectsOfType is O(everything in the scene) whatever type you
+    // ask it for, and the landmark pass ran one on every destination rebuild — up to 12 times a
+    // second inside a fast-refresh window. World zones are static scene content: they are placed
+    // with the level and never spawn or despawn during play, so re-sweeping for them at that rate
+    // bought nothing. Invalidated on every world transition (which covers scene loads, teleports
+    // and dungeon changes) and re-taken periodically as a backstop.
+    private static WorldZone[] _cachedZones;
+    private static float _cachedZonesAt = float.NegativeInfinity;
+    private const float ZoneCacheSeconds = 10f;
+
+    private static WorldZone[] CachedWorldZones()
+    {
+        if (_cachedZones != null && Time.unscaledTime - _cachedZonesAt < ZoneCacheSeconds)
+            return _cachedZones;
+
+        try
+        {
+            _cachedZones = UnityEngine.Object.FindObjectsOfType<WorldZone>(true) ?? new WorldZone[0];
+        }
+        catch
+        {
+            _cachedZones = _cachedZones ?? new WorldZone[0];
+        }
+        _cachedZonesAt = Time.unscaledTime;
+        return _cachedZones;
+    }
+
+    /// <summary>Force the next landmark pass to re-sweep for world zones.</summary>
+    private static void InvalidateZoneCache()
+    {
+        _cachedZones = null;
+        _cachedZonesAt = float.NegativeInfinity;
+    }
     private const float ApproachOffset = 80f;              // stop ~1 tile short, on walkable ground
 
     // Beyond LongWalkStartDistance the A* player graph can't path in one shot, so Ctrl+Home
@@ -702,6 +740,10 @@ internal static class ObjectNavigator
             _log?.LogInfo($"[NAVIGATOR] World transition: {reason} — refreshing destinations");
             _lastTransitionReason = reason;
             _refreshNextUpdate = true;
+            // The object set and the zone set both change across a transition, so drop the caches
+            // that assume they didn't. Both are rebuilt lazily on the refresh this just queued.
+            InvalidateZoneCache();
+            WorldObjectRegistry.RequestResync(reason);
         }
 
         _fastRefreshUntil = Time.unscaledTime + FastRefreshSeconds;
@@ -2672,8 +2714,15 @@ internal static class ObjectNavigator
             // The world is a 2D x-y plane (z is only render-sorting depth), so use
             // WorldGameObject.pos which is the authoritative (x, y) world position.
             var playerPos = player.pos;
-            var allObjects = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true);
-            if (allObjects == null || allObjects.Length == 0)
+            // A snapshot of the shared registry, not a fresh scene sweep. FindObjectsOfType walked
+            // every object of every type natively and allocated a multi-thousand-element array on
+            // each rebuild — and a rebuild can be requested on a keypress, which is what made the
+            // nav categories feel like they hitched. Snapshotting also makes the walk below safe:
+            // labelling an object can spawn or destroy one, which would otherwise mutate the list
+            // we're iterating. See WorldObjectRegistry.
+            WorldObjectRegistry.Snapshot(_scanBuffer);
+            var allObjects = _scanBuffer;
+            if (allObjects.Count == 0)
                 return;
 
             // No x-ray for blind players: when the player is in an enclosed interior, a sighted
@@ -2735,7 +2784,10 @@ internal static class ObjectNavigator
               try
               {
                 if (obj == null || obj.is_removed) continue;
-                if (InteractionDetector.IsPlayer(obj) || InteractionDetector.IsPrefab(obj)) continue;
+                // Player/prefab verdict comes from the registry's per-object cache. Computing it
+                // inline read obj.name four times, and Unity allocates a fresh string on every
+                // single name read — thousands of objects per rebuild made that pure GC churn.
+                if (WorldObjectRegistry.IsExcluded(obj)) continue;
 
                 // Whether this object is part of the loaded dungeon level (a child of dungeon_root).
                 // Computed up here (not just below) because the DLC filter needs it: see the
@@ -2762,7 +2814,7 @@ internal static class ObjectNavigator
                 // is what un-hid the pickaxe mining veins (dungeon_source_*), which share an obj_id
                 // with the unowned-Souls overworld ruins diamond source (a world_root child, still
                 // hidden). Without this the veins were dropped here before ever being classified.
-                if (!isDungeonObj && !IsObjectDlcAvailable(obj)) continue;
+                if (!isDungeonObj && !WorldObjectRegistry.IsDlcAvailable(obj)) continue;
 
                 if (!TryClassify(obj, out var category)) continue;
 
@@ -3505,7 +3557,7 @@ internal static class ObjectNavigator
     /// these targets exist even from across the map; the compass/auto-walk then heads there.
     /// Like quest targets, landmarks ignore the distance cap.
     /// </summary>
-    private static void GatherLandmarkTargets(Vector2 playerPos, WorldGameObject[] allObjects)
+    private static void GatherLandmarkTargets(Vector2 playerPos, List<WorldGameObject> allObjects)
     {
         try
         {
@@ -3545,7 +3597,7 @@ internal static class ObjectNavigator
 
             // Every world zone, de-duplicated by id.
             var seenZones = new HashSet<string>();
-            var zones = UnityEngine.Object.FindObjectsOfType<WorldZone>(true);
+            var zones = CachedWorldZones();
             foreach (var zone in zones)
             {
                 if (zone == null || zone.IsDisabled()) continue;
@@ -3643,7 +3695,7 @@ internal static class ObjectNavigator
     /// </summary>
     private static readonly Dictionary<string, WorldGameObject> _entranceDoorCache = new();
 
-    private static WorldGameObject FindEntranceDoor(WorldGameObject[] allObjects, string place, Vector2 playerPos)
+    private static WorldGameObject FindEntranceDoor(List<WorldGameObject> allObjects, string place, Vector2 playerPos)
     {
         if (allObjects == null) return null;
 

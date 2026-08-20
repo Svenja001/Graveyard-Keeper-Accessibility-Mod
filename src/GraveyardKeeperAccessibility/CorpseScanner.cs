@@ -15,6 +15,10 @@ internal static class CorpseScanner
 
     private static ManualLogSource _log;
 
+    // Reused between scans so pressing K repeatedly doesn't allocate a fresh multi-thousand-element
+    // list each time.
+    private static readonly List<WorldGameObject> _scanBuffer = new(4096);
+
     internal static void Init(ManualLogSource log)
     {
         _log = log;
@@ -37,13 +41,19 @@ internal static class CorpseScanner
             // are skipped on purpose — an interred body isn't a loose corpse to process, and the
             // graveyard holds dozens of them which would bury the one delivery the player cares
             // about. Buried bodies remain findable via the Graves / Exhumable graves categories.
-            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true))
+            // Walks the shared registry rather than sweeping the scene: this is a world-wide scan
+            // with no distance cap, fired straight off a keypress, so it was one of the most
+            // noticeable single-frame stalls in the mod. Snapshotted because the body lookups below
+            // touch object inventories. See WorldObjectRegistry.
+            WorldObjectRegistry.Snapshot(_scanBuffer);
+            foreach (var obj in _scanBuffer)
             {
                 if (obj == null || obj.is_removed) continue;
 
                 // Skip DLC "ruins" the player doesn't own (souls zone, etc.) — uniform with the
-                // proximity/navigation filters, even though these hold no body today.
-                if (!ObjectNavigator.IsObjectDlcAvailable(obj)) continue;
+                // proximity/navigation filters, even though these hold no body today. Cached per
+                // object by the registry instead of re-lower-casing obj_id for every object here.
+                if (!WorldObjectRegistry.IsDlcAvailable(obj)) continue;
 
                 try
                 {

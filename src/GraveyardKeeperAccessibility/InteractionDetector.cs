@@ -69,7 +69,7 @@ internal static class InteractionDetector
                 }
                 else
                 {
-                    var target = FindClosestInteractable();
+                    var target = FindClosestInteractable(forceFresh: true);
                     if (target != null)
                     {
                         ScreenReader.Say(DescribeObject(target), interrupt: true);
@@ -991,25 +991,14 @@ internal static class InteractionDetector
             if (player == null) return null;
             var playerPos = player.pos;
 
-            WorldGameObject best = null;
-            float bestDist = float.MaxValue;
-            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true))
+            // 1 tile = 96 world units; only consider objects within a couple of tiles. The
+            // registry applies the distance gate before touching anything native, so the
+            // inventory lookup below only runs on the handful of objects actually in reach.
+            return WorldObjectRegistry.Nearest(playerPos, 240f, obj =>
             {
-                if (obj == null || IsPlayer(obj) || IsPrefab(obj)) continue;
-                if (!obj.gameObject.activeInHierarchy) continue;
-
-                // 1 tile = 96 world units; only consider objects within a couple of tiles.
-                var dist = Vector2.Distance(obj.pos, playerPos);
-                if (dist > 240f || dist >= bestDist) continue;
-
-                Item body = null;
-                try { body = obj.GetBodyFromInventory(); } catch { }
-                if (body == null) continue;
-
-                best = obj;
-                bestDist = dist;
-            }
-            return best;
+                try { return obj.GetBodyFromInventory() != null; }
+                catch { return false; }
+            });
         }
         catch
         {
@@ -1030,16 +1019,10 @@ internal static class InteractionDetector
             if (player == null) return null;
             var playerPos = player.pos;
 
-            foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true))
-            {
-                if (obj == null || IsPlayer(obj) || IsPrefab(obj)) continue;
-                if (!obj.gameObject.activeInHierarchy) continue;
-                if (string.IsNullOrEmpty(obj.obj_id)) continue;
-                if (obj.obj_id.IndexOf("throw_body_river", StringComparison.OrdinalIgnoreCase) < 0) continue;
-
-                // 1 tile = 96 world units; the player stands right on the throw spot.
-                if (Vector2.Distance(obj.pos, playerPos) <= 240f) return obj;
-            }
+            // 1 tile = 96 world units; the player stands right on the throw spot.
+            return WorldObjectRegistry.Nearest(playerPos, 240f, obj =>
+                !string.IsNullOrEmpty(obj.obj_id)
+                && obj.obj_id.IndexOf("throw_body_river", StringComparison.OrdinalIgnoreCase) >= 0);
         }
         catch { }
         return null;
@@ -1150,37 +1133,56 @@ internal static class InteractionDetector
         }
     }
 
-    private static WorldGameObject FindClosestInteractable()
+    // Cached result of the proximity scan, plus the frame it was taken on. The scan used to run
+    // once per frame; the readout it feeds is de-duplicated by object name, so re-taking it at
+    // ~20Hz instead of 60Hz is inaudible while cutting the work to a third. A key press that needs
+    // an answer *now* (E) forces a fresh scan via forceFresh.
+    private static WorldGameObject _cachedNearest;
+    private static int _cachedNearestFrame = -1;
+    private const int NearestScanInterval = 3;
+
+    /// <summary>
+    /// The closest thing to the player worth talking about.
+    ///
+    /// This used to be a <c>FindObjectsOfType</c> sweep of the entire scene followed by a LINQ
+    /// <c>OrderBy</c> — i.e. it sorted every object in the world, every frame, to look at the first
+    /// one. Worse, the filters in front of the sort read <c>obj.name</c> four times per object
+    /// (Unity allocates a new string on every <c>name</c> read) and lower-cased <c>obj_id</c> for
+    /// the DLC check, so a single frame produced tens of thousands of throwaway strings. That
+    /// allocation storm, not the comparisons, is what made walking stutter.
+    ///
+    /// Now: one pass over the shared registry, squared-distance compare, cheap field reads gating
+    /// the expensive native ones, and the name/DLC verdicts cached per object for its lifetime.
+    /// See <see cref="WorldObjectRegistry"/>.
+    /// </summary>
+    private static WorldGameObject FindClosestInteractable(bool forceFresh = false)
     {
         try
         {
-            if (MainGame.me?.player == null)
+            int frame = Time.frameCount;
+            if (!forceFresh && _cachedNearestFrame >= 0 && frame - _cachedNearestFrame < NearestScanInterval)
+                return _cachedNearest;
+
+            var player = MainGame.me?.player;
+            if (player == null)
+            {
+                _cachedNearest = null;
+                _cachedNearestFrame = frame;
                 return null;
+            }
 
-            var playerPos = MainGame.me.player.transform.position;
-            var allObjects = UnityEngine.Object.FindObjectsOfType<WorldGameObject>(true);
+            // WorldGameObject.pos is the authoritative (x, y) world position and a plain cached
+            // field, where transform.position is a native call that also drags in z — which in this
+            // game is only render-sorting depth. Dropping z can only ever make the range gate
+            // slightly more generous (3D distance >= 2D distance), so nothing that used to be
+            // announced stops being announced.
+            var playerPos = player.pos;
 
-            if (allObjects == null || allObjects.Length == 0)
-                return null;
-
-            // Find closest object, filtering out inactive ones
-            var nearby = allObjects
-                .Where(obj => obj != null && !obj.is_removed && !IsPlayer(obj) && !IsPrefab(obj))
-                .Where(obj => obj.gameObject.activeInHierarchy)
-                // Don't announce DLC "ruins" (souls zone, Euric's room, ...) the player doesn't own;
-                // they spawn into every save regardless of ownership but are inert without the DLC.
-                .Where(obj => ObjectNavigator.IsObjectDlcAvailable(obj))
-                .OrderBy(obj => Vector3.Distance(obj.transform.position, playerPos))
-                .FirstOrDefault();
-
-            if (nearby == null)
-                return null;
-
-            var distance = Vector3.Distance(nearby.transform.position, playerPos);
-            if (distance > InteractionRange)
-                return null;
-
-            return nearby;
+            // Excluded (player/prefab), DLC-availability and activeInHierarchy are all applied
+            // inside the query, in cheapest-first order.
+            _cachedNearest = WorldObjectRegistry.Nearest(playerPos, InteractionRange, null);
+            _cachedNearestFrame = frame;
+            return _cachedNearest;
         }
         catch (Exception ex)
         {

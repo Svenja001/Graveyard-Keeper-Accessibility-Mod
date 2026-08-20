@@ -712,4 +712,24 @@ internal static class Patches
             Plugin.Log.LogError($"[DIALOGUE_HOOK] Error: {ex.Message}");
         }
     }
+
+    // ---- Live world-object registry ----------------------------------------
+    //
+    // The mod's per-frame scanners used to call FindObjectsOfType<WorldGameObject> three times a
+    // frame to answer "what is near me". That call sweeps the whole scene natively and allocates a
+    // multi-thousand-element array each time. These two patches let us maintain the list
+    // incrementally instead — see WorldObjectRegistry for the full rationale.
+    //
+    // Both are deliberately minimal and swallow everything: they run on the hot path of every
+    // object the game creates or destroys, and a throw here would break the GAME, not just the mod.
+
+    public static void WorldGameObject_Awake_Postfix(WorldGameObject __instance)
+    {
+        try { WorldObjectRegistry.Register(__instance); } catch { }
+    }
+
+    public static void WorldGameObject_OnDestroy_Prefix(WorldGameObject __instance)
+    {
+        try { WorldObjectRegistry.Unregister(__instance); } catch { }
+    }
 }
