@@ -159,6 +159,51 @@ internal static class DescriptiveNames
         ("blockage",       "obj.blockage"),
         ("obstruction",    "obj.blockage"),
         ("roof",           "obj.roof"),
+
+        // --- ids the [NAMES] log caught speaking raw ---------------------------------------
+        // Everything here comes from a play session's "No translation and no rule for '<id>'"
+        // lines, so each entry is an id the game really does leave unnamed. Kept last so the
+        // rules above, which were written against known ids, keep their precedence.
+        ("wall_candelabrum", "obj.candelabrum_wall"),
+        ("candelabrum",      "obj.candelabrum"),
+        ("church_candle",    "obj.church_candle"),
+        ("candle",           "obj.candle"),
+        ("spiral_stair",     "obj.spiral_stairs"),
+        ("vine_press",       "obj.vine_press"),
+        // The entrance object, not a teleport door - but it is the same thing to the player,
+        // so it borrows the door wording instead of getting a second phrasing of its own.
+        ("dungeon_enter",    "door.dungeon_entrance"),
+        ("hatch",            "door.hatch"),
+        ("grille_opened",    "obj.grille_open"),
+        ("grille",           "obj.grille"),
+        ("smilers_box",      "obj.smiler_box"),
+        ("elevator",         "obj.elevator"),
+        // Above the bare "empty" exact rule: an empty grave is a grave, not a blank slot.
+        ("grave_empty",      "obj.grave_empty"),
+        ("grave_ground",     "obj.grave_ground"),
+        ("bracken",          "obj.fern"),
+        ("hops",             "obj.hops"),
+        ("village_wc",       "obj.outhouse"),
+        ("church_visitor",   "obj.church_visitor"),
+        // An invisible manager object that parks NPCs on standing spots; it has no body, but
+        // it is in the world list, so say what it is rather than "Idle points stock".
+        ("idle_points",      "obj.idle_point_marker"),
+        ("wood_obstacle",    "obj.wood_obstacle"),
+        ("obstacle",         "obj.obstacle"),
+        // Below "sword_rack" (above), which would otherwise lose its weapons to this.
+        ("rack",             "obj.rack"),
+        ("vase",             "obj.vase"),
+        ("house",            "obj.house"),
+    };
+
+    // Ids named by the WHOLE id rather than by a word inside it, because the word is far too
+    // generic to use as a substring: the tavern building's id is just "Tavern", but
+    // "tavern_chair" is a chair; a blank decoration slot is "empty", but "grave_empty" is a
+    // grave. Checked before <see cref="Rules"/>.
+    private static readonly Dictionary<string, string> ExactRules = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "tavern", "obj.tavern" },
+        { "empty",  "obj.empty_slot" },
     };
 
     // Zone ids, used for the Landmarks list. Separate from the object rules because the same word
@@ -198,6 +243,13 @@ internal static class DescriptiveNames
     /// </summary>
     internal static string For(string objId)
     {
+        if (!string.IsNullOrEmpty(objId)
+            && ExactRules.TryGetValue(objId, out var exactKey))
+        {
+            var exact = Loc.Find(exactKey);
+            if (!string.IsNullOrEmpty(exact)) return exact;
+        }
+
         return Match(objId, Rules);
     }
 
@@ -231,6 +283,12 @@ internal static class DescriptiveNames
     /// "Marble heap mid 1" / "tree_3_2 (Clone)" -> "_marble_heap_mid_1_" / "_tree_3_2_clone_".
     /// Anything that isn't a letter or digit becomes a separator, so ids, prefab names and the
     /// space-separated place words from a door tag all match the same rules.
+    ///
+    /// A digit stuck straight onto a word is separated too ("dungeon_obj_rack02" ->
+    /// "_dungeon_obj_rack_02_"), because the variant number is part of the id's spelling and not
+    /// part of the word: without the split, "rack02" is one token and the "rack" rule misses it.
+    /// The rule patterns run through the same normalisation, so this only ever finds MORE
+    /// matches - no pattern contains a digit to be broken up.
     /// </summary>
     private static string Normalize(string s)
     {
@@ -238,7 +296,12 @@ internal static class DescriptiveNames
         sb.Append('_');
         foreach (var c in s)
         {
-            if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+            if (char.IsLetterOrDigit(c))
+            {
+                var prev = sb[sb.Length - 1];
+                if (prev != '_' && char.IsDigit(c) != char.IsDigit(prev)) sb.Append('_');
+                sb.Append(char.ToLowerInvariant(c));
+            }
             else if (sb[sb.Length - 1] != '_') sb.Append('_');
         }
         if (sb[sb.Length - 1] != '_') sb.Append('_');
