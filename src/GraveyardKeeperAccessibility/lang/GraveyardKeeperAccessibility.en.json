@@ -46,7 +46,7 @@
   "daytime.phase.evening": "evening",
   "daytime.phase.night": "night",
   "daytime.day_word": "day",
-  "daytime.day_mention_pattern": "\\bday\\s+(\\d+)\\b",
+  "daytime.day_mention_pattern": "\\bday\\s*(\\d+)\\b",
 
   "money.you_have": "You have {0}",
   "money.gold": "{0} gold",

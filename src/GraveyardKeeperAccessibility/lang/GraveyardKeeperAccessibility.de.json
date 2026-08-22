@@ -36,7 +36,7 @@
   "weekday.2": "Tag des Neids",
   "weekday.3": "Tag der Völlerei",
   "weekday.4": "Tag der Wollust",
-  "weekday.5": "Tag des Hochmuts",
+  "weekday.5": "Tag des Stolzes",
 
   "daytime.in_dungeon": "Im Verlies. Tag {0}, {1}. Zeit an der Oberfläche {2}",
   "daytime.day": "Tag {0}, {1}. {2}",
@@ -46,7 +46,7 @@
   "daytime.phase.evening": "Abends",
   "daytime.phase.night": "Nachts",
   "daytime.day_word": "Tag",
-  "daytime.day_mention_pattern": "\\bTag\\s+(\\d+)\\b",
+  "daytime.day_mention_pattern": "\\bTag\\s*(\\d+)\\b",
 
   "money.you_have": "Du hast {0}",
   "money.gold": "{0} Gold",

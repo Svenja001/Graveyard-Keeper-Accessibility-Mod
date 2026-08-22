@@ -7,8 +7,10 @@ internal static class Patches
     // when speaking, e.g. "day 6 (Day of Sloth)". Only the spoken string is changed.
     //
     // Both the word to look for and the pattern come from the lang file, because the dialogue we
-    // are scanning is in the game's language ("Tag 6" on a German install). Cached until the
-    // pattern itself changes, so switching language mid-session still picks up the new one.
+    // are scanning is in the game's language ("Tag 6" on a German install). The space is optional
+    // in the pattern: the English text writes some of these without one ("day6"), which an
+    // \s+ pattern skipped. Cached until the pattern itself changes, so switching language
+    // mid-session still picks up the new one.
     private static Regex _dayMentionRegex;
     private static string _dayMentionPattern;
 
