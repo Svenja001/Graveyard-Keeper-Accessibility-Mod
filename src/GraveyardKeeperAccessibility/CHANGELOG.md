@@ -1,3 +1,27 @@
+## 0.1.3 | 22 August 2026
+
+**Naming fixes: one wrong German day name, and a pile of objects that were read out as raw
+internal ids.**
+
+- The sixth day of the week was called "Tag des Hochmuts". It is now **"Tag des Stolzes"**. (The
+  sin itself is still "Hochmut" where the game talks about sins — only the day is renamed.)
+- **English: dialogue that names a day now gets the weekday read out too.** When an NPC says they
+  will come on a certain day, the mod adds which day of the week that is — "day 6 (Day of Sloth)".
+  In the English game some of those are written without a space ("day6"), and the mod only
+  recognised the spaced form, so English players heard the bare number and no weekday. Both forms
+  work now. German was never affected.
+- **Twenty-odd world objects had no name and were read out as their internal id.** Things like
+  "Candelabrum 2 1", "Vegit bracken 1" or "Village wc Face 2" — the game gives them no name of its
+  own, because a sighted player just sees what they are. They now have proper names in English and
+  German: candelabra and wall candelabra, church candles, spiral staircases, the wine press,
+  dungeon grates, shelves, vases, the dungeon lift, ferns, hops, houses, the tavern, the village
+  outhouse, earth graves, empty graves, church visitors, wooden barriers and the abandoned Smiler
+  box.
+
+If you hear an object read out as something that looks like an id rather than a name, that is
+worth reporting — the mod writes each one into `BepInEx/LogOutput.log` on a line starting
+`[NAMES]`, and that line is all that is needed to give it a name.
+
 ## 0.1.2 | 20 August 2026
 
 **The mod was making the game stutter, and this release fixes the cause.** Several players
