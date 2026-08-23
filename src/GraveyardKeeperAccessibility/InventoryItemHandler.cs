@@ -440,7 +440,7 @@ internal static class InventoryItemHandler
     /// blue-point reward "Wissenschaft" badly confused players. Blue points are just blue points.
     /// Returns null for items the game shows no study line for (no survey craft at all).
     /// </summary>
-    private static string DescribeStudyStatus(ItemDefinition def, bool atStudyStation)
+    internal static string DescribeStudyStatus(ItemDefinition def, bool atStudyStation)
     {
         try
         {
@@ -533,7 +533,7 @@ internal static class InventoryItemHandler
     /// "Alchemisch kompatible Plätze" (slots) half of that widget is dead code in this build:
     /// <c>ItemDetailsAlchemy.slots</c> is never populated, so there is nothing to read there.
     /// </summary>
-    private static string DescribeAlchemyDecompose(ItemDefinition def)
+    internal static string DescribeAlchemyDecompose(ItemDefinition def)
     {
         try
         {

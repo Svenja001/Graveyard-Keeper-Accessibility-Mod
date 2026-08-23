@@ -4539,7 +4539,7 @@ internal static class GUIAccessibility
 
     /// <summary>"at the alchemy workbench" — the stations an item is made at, as the tooltip's own
     /// "crafted at" line lists them (<see cref="ItemDefinition.GetItemDetails"/>), or null.</summary>
-    private static string CraftedAtText(ItemDefinition def)
+    internal static string CraftedAtText(ItemDefinition def)
     {
         try
         {
@@ -5240,6 +5240,12 @@ internal static class GUIAccessibility
         SelectedIndex = index;
         var elem = active[SelectedIndex];
         RememberGroupCursor(active, SelectedIndex);
+
+        // Moving the focus ends any details read in progress: coming back to a row should start
+        // from its summary again, not carry on into the expanded list from before.
+        _lastDetailsItemId = null;
+        _detailsExpanded = false;
+
         ScreenReader.Say(elem.ReadLabel());
     }
 
@@ -5380,7 +5386,8 @@ internal static class GUIAccessibility
     // survives the refresh (a bag row, which stays put while its side panel appears above it),
     // land back on it by identity rather than guessing at an index that just moved.
     private static void RefreshCurrentGUI(int focusIndex, string prefix = null,
-        string keepGroup = null, int keepOffset = 0, GameObject keepFocusOn = null)
+        string keepGroup = null, int keepOffset = 0, GameObject keepFocusOn = null,
+        bool announce = true)
     {
         if (_currentGUI == null) return;
 
@@ -5394,7 +5401,8 @@ internal static class GUIAccessibility
         if (active.Count == 0)
         {
             SelectedIndex = -1;
-            ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? Loc.Get("common.empty") : emptyDesc));
+            if (announce)
+                ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? Loc.Get("common.empty") : emptyDesc));
             return;
         }
 
@@ -5424,6 +5432,8 @@ internal static class GUIAccessibility
         }
 
         RememberGroupCursor(active, SelectedIndex);
+        if (!announce) return;
+
         var label = active[SelectedIndex].ReadLabel();
         ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(emptyDesc) ? label : $"{emptyDesc}. {label}"));
     }
@@ -5816,6 +5826,28 @@ internal static class GUIAccessibility
                 var bagRow = elem.Cell?.item?.is_bag == true ? elem.Cell.gameObject : null;
 
                 var (summary, closed) = InventoryItemHandler.ActivateInventoryItem(elem.Cell, inventoryGui);
+
+                // Nothing happened: the item can't be used, equipped or opened (wood, a body part,
+                // a quest token). Pressing Enter on one used to just re-read its name, which told
+                // the player nothing about why it did nothing. Answer the question they were
+                // actually asking — what IS this, what can I do with it — with the O-key details.
+                if (summary == null && !closed && _currentGUI is InventoryGUI)
+                {
+                    // Read the item BEFORE re-discovering: the refresh below can replace the cell
+                    // objects this element points at.
+                    var details = ItemDetailsReader.Describe(elem.Cell?.item);
+                    if (!string.IsNullOrEmpty(details))
+                    {
+                        // Re-discover silently. A press that did nothing normally leaves the grid
+                        // exactly as it was, but the activation can also have thrown partway
+                        // through — and a stale element list would outlive that.
+                        RefreshCurrentGUI(prevIndex, keepGroup: prevGroup, keepOffset: prevOffset,
+                            keepFocusOn: bagRow, announce: false);
+                        ScreenReader.Say(details);
+                        return;
+                    }
+                }
+
                 if (closed || !(_currentGUI is InventoryGUI))
                 {
                     // The item closed the inventory (e.g. teleport opens the map), or a bag move
@@ -5909,7 +5941,8 @@ internal static class GUIAccessibility
             if (elem.SaveSlot != null)
             {
                 // Loading a save / starting a new game makes the title screen flash back up during
-                // the transition; flag it so it announces "Loading" instead of "Title Screen".
+                // the transition; flag it so it stays quiet instead of re-announcing "Title Screen".
+                // "Loading" itself is spoken by the OnSelectSlotPressed patch this call reaches.
                 TitleScreenAccessibility.LoadingStarted = true;
                 elem.SaveSlot.OnSlotSelect();
                 return;
@@ -5992,6 +6025,70 @@ internal static class GUIAccessibility
             if (!string.IsNullOrEmpty(msg)) ScreenReader.Say(msg);
         }
     }
+
+    /// <summary>
+    /// O ("object info") on a focused item — anywhere a window shows one: your inventory, a chest,
+    /// a vendor's stock, a station's recipe list — speaks the details block: what it is, what it is
+    /// for, what makes it. See <see cref="ItemDetailsReader"/> for why the mod has to assemble that
+    /// itself. Returns true when it consumed the key so <see cref="Plugin"/> stops further handling.
+    /// </summary>
+    /// <remarks>
+    /// O rather than the obvious D: D is the game's own Right/SliderInc binding, and the windows
+    /// where this key matters most — vendor, craft stations — do NOT pause the game (only GameGUI,
+    /// ChestGUI, PorterStationGUI and the menus call MainGame.SetPausedMode). Pressing D there
+    /// would walk the character a step to the right, and enough presses would walk them out of the
+    /// vendor's range. O is bound by neither the game nor this mod, in the world or in a window,
+    /// and sits on the same physical key on QWERTZ keyboards as on QWERTY (unlike Y/Z, which Unity
+    /// reports by US position).
+    ///
+    /// Plain O only: modified presses are left alone so this can never fire alongside a chord. The
+    /// controls page — the one screen that swallows every key while rebinding — is handled by
+    /// <see cref="ControlsHandler"/> long before this runs.
+    /// </remarks>
+    internal static bool TryHandleItemDetails()
+    {
+        if (!Input.GetKeyDown(KeyCode.O)) return false;
+        if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) return false;
+        if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) return false;
+        if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)) return false;
+
+        var active = GetActiveElements();
+        if (SelectedIndex < 0 || SelectedIndex >= active.Count) return false;
+
+        var item = active[SelectedIndex].Cell?.item;
+
+        // Second press on the same item: read the "used for" lists with nothing left out. A staple
+        // like a board feeds twenty buildings, and the one the player needs is exactly as likely to
+        // be in the tail the summary cut as in the six it read. Returns null when there is nothing
+        // capped, so an item with a short list just gets its summary repeated.
+        var itemId = item?.id;
+        if (!string.IsNullOrEmpty(itemId) && itemId == _lastDetailsItemId && !_detailsExpanded)
+        {
+            var full = ItemDetailsReader.DescribeAllUses(item);
+            if (!string.IsNullOrEmpty(full))
+            {
+                _detailsExpanded = true;
+                ScreenReader.Say(full);
+                return true;
+            }
+        }
+
+        _lastDetailsItemId = itemId;
+        _detailsExpanded = false;
+
+        var details = ItemDetailsReader.Describe(item);
+
+        // Say something either way: silence after a key press reads as a broken mod, and "no item
+        // on this row" is itself the answer when the player has arrowed onto a button or a header.
+        ScreenReader.Say(string.IsNullOrEmpty(details) ? Loc.Get("details.no_item") : details);
+        return true;
+    }
+
+    // Which item the details key last spoke, and whether that press was the expanded read. Keyed on
+    // the item id rather than the Item instance: a window redraw hands out fresh Item objects for
+    // the same stack, and identity would then reset the toggle under the player mid-press.
+    private static string _lastDetailsItemId;
+    private static bool _detailsExpanded;
 
     /// <summary>
     /// While the player's own inventory is open with an item cell focused, pressing a number key

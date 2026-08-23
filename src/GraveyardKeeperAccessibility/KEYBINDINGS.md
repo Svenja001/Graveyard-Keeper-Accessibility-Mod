@@ -56,6 +56,13 @@ Anywhere "Ctrl" appears it means the left or right Control key; "Shift" means ei
 - **Enter** — activate the focused row
 - **Hold Enter** — repeat an action that supports it, such as decomposing a whole stack at the
   study table in one go
+- **O** — details about the focused item: what it is, what it can be used for, and where it is
+  made. Works on any item the game shows you — in your inventory, in a chest, in a vendor's
+  list, on a station's recipe. Pressing Enter on an inventory item that cannot be used, worn or
+  opened reads the same details, instead of only repeating its name
+- **O again** — for an item used in many recipes the list is shortened to six, ending in "and 12
+  more". Press **O** a second time on the same item to hear the whole list. Moving to another row
+  starts over at the short version
 - **Shift+Enter** — move or trade a whole stack at once, when a stackable item is focused
 - **Delete** — destroy the focused inventory item, or delete the focused save slot
 - **1** – **4** — in your own inventory, assign the focused item to that quick-use slot
@@ -124,3 +131,7 @@ you have moved to Yes or No.
   are not placing anything, and **I** reports a position only while a building is being placed.
 - Keys that take a modifier ignore the plain version and vice versa, so **G** and **Ctrl+G** never
   fire together.
+- Most items in Graveyard Keeper have no description of their own — the game only wrote one for
+  about eighty of them. For everything else the mod works out what the item is for from the
+  recipes that use it, and only counts recipes you have already unlocked, so **O** never gives
+  away something you have not researched yet.

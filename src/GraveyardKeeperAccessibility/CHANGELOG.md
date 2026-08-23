@@ -1,3 +1,45 @@
+## 0.1.4 | 23 August 2026
+
+**Items can now tell you what they are for.** Press **O** on any item and the mod says what it is,
+what you can make with it, and where it is made.
+
+- **New key: O — details about the focused item.** It works on every item the game shows you: in
+  your inventory, in a chest, in a vendor's list, on a station's recipe row. You hear the item's
+  name and quality, whatever the game itself has to say about it, and then the part the game never
+  tells anyone — **what the item is used for**. "Wooden plank. Used to make Box of vegetables, Box
+  of goods, Carved wood … Used for building Beehive, Workbench …"
+
+  Graveyard Keeper only ever wrote descriptions for about 80 of its 770 items, so for nearly
+  everything the mod works this out from the recipes themselves. Only recipes you have already
+  unlocked are counted, so O never gives away something you have not researched yet.
+
+- **Press O twice for the whole list.** Staple materials go into a lot of recipes, so the list stops
+  after six and says "and 12 more". Press O again on the same item to hear all of them. Moving to
+  another row starts over at the short version.
+
+- **Enter on an item that cannot be used now explains the item** instead of just repeating its name.
+  Pressing Enter on a plank or a quest item did nothing and said nothing useful, which gave no clue
+  why nothing happened. It now reads the same details as O.
+
+- **Values that the game draws as little icons are finally spoken.** Food, potions and tools show
+  their effect as an icon with a number next to it — a heart, a lightning bolt — and the mod used to
+  read the raw code around it, or nothing at all. Health, energy, sanity, faith and the coloured
+  research points now come out as words: "gives 3 health", "drains 5 energy". This is fixed
+  everywhere the mod reads game text, not only for the new key.
+
+- **Removed a wrong "used to make Story" from 281 items.** The research table sometimes
+  produces a story, and that lucky roll is written into the data as if every studied item made one.
+  Studying is not crafting, so studying no longer counts as a use at all — what studying gives you
+  is still spoken by the "not studied yet" line. Clean paper still says it, because the zombie at the
+  pulpit really does turn it into stories.
+
+- **"Loading" is back when you pick a save.** Choosing a save slot (or "new game") went
+  silent in 0.1.2, so there was nothing to tell you the game had accepted the press and was
+  loading. The mod now says it the moment the slot is pressed, whether you press Enter on it or
+  click it.
+
+The keyboard reference that ships next to the mod (KEYBINDINGS.md) lists the new key.
+
 ## 0.1.3 | 22 August 2026
 
 **Naming fixes: one wrong German day name, and a pile of objects that were read out as raw

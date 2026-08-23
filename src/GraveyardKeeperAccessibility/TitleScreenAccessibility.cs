@@ -9,8 +9,26 @@ internal static class TitleScreenAccessibility
 
     // Set true when the player loads a save or starts a new game from the save-slots screen. The
     // title screen flashes back up during the load transition, which would otherwise re-announce
-    // "Title Screen"; instead we say "Loading" once and clear the flag.
+    // "Title Screen"; the flag keeps that flash quiet.
     internal static bool LoadingStarted;
+
+    private static float _loadingSpokenAt = float.NegativeInfinity;
+
+    // One load transition can reach AnnounceLoading twice (the slot press, then the title-screen
+    // flash a moment later). Anything inside this window belongs to the same load, so it stays silent.
+    private const float LoadingRepeatGuard = 15f;
+
+    /// <summary>
+    /// Says "Loading" once per load transition. The reliable caller is the SaveSlotsMenuGUI patch,
+    /// which fires the instant the slot is pressed; the title-screen flash is a fallback for when
+    /// that patch didn't apply. Whichever gets here first speaks; the other is swallowed.
+    /// </summary>
+    internal static void AnnounceLoading()
+    {
+        if (Time.unscaledTime - _loadingSpokenAt < LoadingRepeatGuard) return;
+        _loadingSpokenAt = Time.unscaledTime;
+        ScreenReader.Say(Loc.Get("title.loading"), interrupt: true);
+    }
 
     internal static bool HasActiveScreen => _currentScreen != null;
 
@@ -31,7 +49,7 @@ internal static class TitleScreenAccessibility
         {
             LoadingStarted = false;
             _announced = true;
-            ScreenReader.Say(Loc.Get("title.loading"));
+            AnnounceLoading();
             return;
         }
 

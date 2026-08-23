@@ -387,6 +387,8 @@
   "token.gold": "Gold",
   "token.silver": "Silber",
   "token.bronze": "Bronze",
+  "token.gain": "gibt {0}",
+  "token.lose": "entzieht {0}",
   "token.white_skull.bare": "weiße Schädel",
   "token.white_skull.one": "{0} weißer Schädel",
   "token.white_skull.other": "{0} weiße Schädel",
@@ -516,6 +518,14 @@
   "item.unequipped": "{0} abgelegt",
   "item.equipped": "{0} ausgerüstet",
   "item.cant_destroy": "{0} kann nicht weggeworfen werden",
+
+  "details.used_to_make": "Wird gebraucht für {0}",
+  "details.used_to_build": "Wird gebraucht zum Bauen von {0}",
+  "details.and_more": "{0} und {1} weitere",
+  "details.press_again": "O erneut drücken für die ganze Liste",
+  "details.armor": "{0} Rüstung",
+  "details.nothing_more": "Mehr ist darüber nicht bekannt",
+  "details.no_item": "Kein Gegenstand in dieser Zeile",
 
   "study.already": "bereits untersucht",
   "study.not_yet": "noch nicht untersucht",

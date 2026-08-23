@@ -161,6 +161,11 @@ public class Plugin : BaseUnityPlugin
         TryPatch(harmony, typeof(Patches), nameof(Patches.GUIElements_ShowSavingStatus_Postfix),
             typeof(GUIElements), "ShowSavingStatus", new[] { typeof(bool) });
 
+        // Say "Loading" the moment a save slot (or "new game") is picked. Both the mouse click and
+        // our Enter on a slot row funnel through SaveSlotsMenuGUI.OnSelectSlotPressed. See Patches.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.SaveSlotsMenuGUI_OnSelectSlotPressed_Postfix),
+            typeof(SaveSlotsMenuGUI), "OnSelectSlotPressed", new[] { typeof(SaveSlotData) });
+
         // Speak "Achievement unlocked: <name>" on every Steam achievement — the game only shows a
         // silent toast. Every unlock routes through PlatformSpecific.OnAchievementComplete. See Patches.
         TryPatch(harmony, typeof(Patches), nameof(Patches.PlatformSpecific_OnAchievementComplete_Postfix),
@@ -406,6 +411,10 @@ public class Plugin : BaseUnityPlugin
             // In the player's own inventory, number keys 1-4 assign the focused item to that
             // hotbar slot (the accessible replacement for dragging it onto the bottom bar).
             if (GUIAccessibility.TryHandleToolbarAssign())
+                return;
+
+            // O reads the focused item's details — what it is, what it is for, where it's made.
+            if (GUIAccessibility.TryHandleItemDetails())
                 return;
 
             if (Input.GetKeyDown(KeyCode.DownArrow))

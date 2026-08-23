@@ -282,6 +282,25 @@ internal static class Patches
         }
     }
 
+    // Picking a save slot (or "new game") used to be announced only when the title screen flashed
+    // back up mid-load — which the throttled title-screen probe now regularly misses, leaving the
+    // player with silence after pressing Enter on a slot. Both the mouse click and our Enter run
+    // through SaveSlotsMenuGUI.OnSelectSlotPressed, which is where the game itself puts up its
+    // loading screen, so announce there instead. The title-screen flash still calls the same
+    // helper as a fallback; the second call inside one load is swallowed. See TitleScreenAccessibility.
+    public static void SaveSlotsMenuGUI_OnSelectSlotPressed_Postfix()
+    {
+        try
+        {
+            TitleScreenAccessibility.LoadingStarted = true;
+            TitleScreenAccessibility.AnnounceLoading();
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[LOAD] OnSelectSlotPressed postfix: {ex.Message}");
+        }
+    }
+
     // Achievements only surface as a silent Steam toast a blind player can't see. Every unlock
     // funnels through PlatformSpecific.OnAchievementComplete (from AchievementsSystem — both the
     // live CheckKeyQuests path and the load-time VerifyAndSetMissedAchievements resync), so we

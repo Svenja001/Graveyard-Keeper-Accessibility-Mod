@@ -169,11 +169,88 @@ internal static class ScreenReader
         // so turn them into words like "20 white skulls" / "5 red skulls" / "10 crosses" /
         // "10 gold" / "20 silver" / "5 bronze" (see Trading.FormatMoney for the coin tokens).
         if (text.Contains('('))
+        {
             text = Regex.Replace(text, @"\((wskull|rskull|skull|cross|gld|slv|brz)\)(-?\d+(?:\.\d+)?)?", TokenToWords);
+            text = Regex.Replace(text, StatTokenPattern, StatTokenToWords);
+        }
         // Strip NGUI color codes: [XXXXXX], [-], [c], [/c], etc.
         if (text.Contains('['))
             text = Regex.Replace(text, @"\[[\da-fA-F]{6}\]|\[-\]|\[/?c\]", "");
         return text;
+    }
+
+    /// <summary>
+    /// The bar and tech-point sprite tokens, in both the orders the game writes them.
+    ///
+    /// <see cref="GameRes.ToFormattedString"/> — which builds every "effect on use" and "energy
+    /// consumption" line — emits SIGN, token, then the amount: "+(hp)3", "-(en)5". Hand-written
+    /// description text does the opposite and puts the number first: "Gives 25(b) when used". Both
+    /// are matched here, so the amount is whichever group actually captured.
+    ///
+    /// Note the game's short ids: energy is "(en)" and sanity is "(sn)", NOT the spelled-out names
+    /// the balance data uses for the same values.
+    /// </summary>
+    private const string StatTokenPattern =
+        @"([+-])?(?:(\d+(?:[.,]\d+)?)\s*)?\((hp|en|sn|energy|sanity|faith|gratitude_points|gratitude points|r|g|b|v)\)(\d+(?:[.,]\d+)?)?";
+
+    /// <summary>
+    /// "+(hp)3" -> "gives 3 health", "-(en)5" -> "drains 5 energy", "25(b)" -> "25 blue points",
+    /// a bare "(faith)" -> "faith". Spoken literally these tokens come out as "hp", "en" or worse:
+    /// the sprite is an icon on screen, and the text around it is written assuming you can see it.
+    /// </summary>
+    private static string StatTokenToWords(Match m)
+    {
+        string sign = m.Groups[1].Value;
+        string amount = m.Groups[2].Success ? m.Groups[2].Value
+                      : m.Groups[4].Success ? m.Groups[4].Value
+                      : null;
+        string token = m.Groups[3].Value;
+
+        string value;
+        switch (token)
+        {
+            case "hp":     value = Bar("perk.health", amount); break;
+            case "en":
+            case "energy": value = Bar("perk.energy", amount); break;
+            case "sn":
+            case "sanity": value = Bar("perk.sanity", amount); break;
+            case "faith":  value = Bar("perk.faith", amount); break;
+
+            // Tech points have their own counted phrasing ("1 blue point" / "5 blue points"), so
+            // they go through the shared point wording rather than a bare noun plus a number.
+            default:
+                var id = token == "gratitude points" ? "gratitude_points" : token;
+                value = amount == null
+                    ? Loc.Get(PointBareKey(id))
+                    : InventoryItemHandler.PointPhrase(id, amount);
+                break;
+        }
+
+        // The sign is only meaningful with a number behind it, and it is the whole difference
+        // between food that feeds you and a swing that costs you: say it in words rather than
+        // leaving a "+" or "-" for the speech engine to swallow or mispronounce.
+        if (amount == null || sign.Length == 0) return value;
+        return Loc.Fmt(sign == "-" ? "token.lose" : "token.gain", value);
+    }
+
+    /// <summary>"3 health" — the bar name with its amount, or the bare name when uncounted.</summary>
+    private static string Bar(string wordKey, string amount)
+    {
+        var word = Loc.Get(wordKey);
+        return amount == null ? word : $"{amount} {word}";
+    }
+
+    /// <summary>Uncounted name of a tech-point pool ("blue points").</summary>
+    private static string PointBareKey(string id)
+    {
+        switch (id)
+        {
+            case "r": return "points.red.bare";
+            case "g": return "points.green.bare";
+            case "v": return "points.violet.bare";
+            case "gratitude_points": return "points.gratitude.bare";
+            default: return "points.blue.bare";
+        }
     }
 
     private static string TokenToWords(Match m)

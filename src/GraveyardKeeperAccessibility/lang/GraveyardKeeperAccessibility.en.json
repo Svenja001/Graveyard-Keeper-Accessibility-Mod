@@ -387,6 +387,8 @@
   "token.gold": "gold",
   "token.silver": "silver",
   "token.bronze": "bronze",
+  "token.gain": "gives {0}",
+  "token.lose": "drains {0}",
   "token.white_skull.bare": "white skulls",
   "token.white_skull.one": "{0} white skull",
   "token.white_skull.other": "{0} white skulls",
@@ -516,6 +518,14 @@
   "item.unequipped": "Unequipped {0}",
   "item.equipped": "Equipped {0}",
   "item.cant_destroy": "{0} can't be destroyed",
+
+  "details.used_to_make": "Used to make {0}",
+  "details.used_to_build": "Used for building {0}",
+  "details.and_more": "{0} and {1} more",
+  "details.press_again": "Press O again for the whole list",
+  "details.armor": "{0} armour",
+  "details.nothing_more": "Nothing more is known about it",
+  "details.no_item": "No item on this row",
 
   "study.already": "already studied",
   "study.not_yet": "not studied yet",
