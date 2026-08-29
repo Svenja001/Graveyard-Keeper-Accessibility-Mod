@@ -29,8 +29,27 @@ Anywhere "Ctrl" appears it means the left or right Control key; "Shift" means ei
 - **Ctrl+Page down** / **Ctrl+Page up** — next / previous category
 - **Home** — say which object is selected and how far away it is
 - **Ctrl+Home** — walk to the selected object
-- **Escape** — stop walking (while the mod is walking you somewhere)
-- **L** — walk to the way out of the current dungeon floor
+- **Ctrl+B** — turn step-by-step directions on or off. While they are on, the mod works out a
+  route around the fences and buildings and gives you one direction at a time: "Walk 12 meters
+  north", then when you get there "Now 5 meters east", until you are standing at it. Every step is
+  a single direction, so it is one key held down, and it is always north, south, east or west —
+  never a diagonal.
+
+  **It never moves you.** Walking is yours; the mod only tells you where. (Ctrl+Home is the key
+  that walks you there itself.) While you are on course it stays quiet, and it speaks up only to
+  correct you, to name something in your way — "Fence blocks the way. Walk 6 meters south, then
+  east" — or to tell you that you have arrived. Arriving also turns you to face the thing, so **E**
+  works without lining yourself up.
+
+  They stay on until you switch them off. Arriving somewhere does not end them, and neither does a
+  cutscene, a teleport or anything else — pick another object and it simply guides you there next.
+  Press **Ctrl+B** again, or **Escape**, to switch them off
+- **Home** (while stepping) — say the current step again, and how far is left
+- **Page up** / **Page down** (while stepping) — the directions follow your selection. Pick a
+  different object and, a moment after you stop paging, it starts guiding you there instead —
+  no need to press **Ctrl+B** again for every place you consider
+- **Escape** — stop walking, or stop the step-by-step directions
+- **L** — walk to the way out of the current dungeon floor if you are stuck. this is an emergency exit, you should not need it in the most cases
 
 **Fighting**
 
@@ -130,7 +149,10 @@ you have moved to Yes or No.
   claims them where the game does not: **R** reads your money only when no window is open and you
   are not placing anything, and **I** reports a position only while a building is being placed.
 - Keys that take a modifier ignore the plain version and vice versa, so **G** and **Ctrl+G** never
-  fire together.
+  fire together — **B** stays combat assist, **Ctrl+B** is the step-by-step directions.
+- The step-by-step directions never move you. If you stray off the line, they say how to get back
+  on it; if you walk into something the route thought was open, they find another way. They stay
+  quiet as long as you are on course.
 - Most items in Graveyard Keeper have no description of their own — the game only wrote one for
   about eighty of them. For everything else the mod works out what the item is for from the
   recipes that use it, and only counts recipes you have already unlocked, so **O** never gives

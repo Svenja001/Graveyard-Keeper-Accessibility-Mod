@@ -11,11 +11,10 @@ the DLC content are all narrated through a screen reader.
 - **Nothing else.** BepInEx, the loader that makes mods run at all, is included in the download —
   see below if you already have it.
 - **A screen reader is optional.** NVDA, JAWS, Orca, VoiceOver and others are driven directly; if
-  none is running, the mod falls back to Windows SAPI and still speaks. On the 32-bit GOG build
-  it is always SAPI — see *A note for GOG players*.
+  none is running, the mod falls back to Windows SAPI and still speaks.
 
 Everything the mod needs travels inside its ZIP — the Prism speech library is bundled for Windows,
-Linux and macOS too, so there is nothing separate to install.
+Linux and macOS, and Tolk for the 32-bit GOG build, so there is nothing separate to install.
 
 ### Do not install BepInEx Configuration Manager
 
@@ -34,8 +33,9 @@ it yourself. That is the whole install.
   Take this one unless you know you need one of the others. It contains the mod *and* BepInEx, so
   there is nothing else to fetch.
 - **`GraveyardKeeperAccessibility_<version>_WithBepInEx_GOG_32bit.zip`** — **for GOG.** The same
-  thing, with the 32-bit loader. GOG sells a 32-bit build of the game, which cannot load the
-  64-bit loader in the file above; it would start with no mod, no error and no log file.
+  thing, with the 32-bit loader and the 32-bit speech library. GOG sells a 32-bit build of the game,
+  which cannot load the 64-bit loader in the file above; it would start with no mod, no error and no
+  log file.
 - **`GraveyardKeeperAccessibility_<version>_ModOnly.zip`** — the mod on its own, without BepInEx,
   and it does not matter which store your game came from. **If you already run other Graveyard
   Keeper mods, use this one**: the bundled ZIPs would overwrite your loader with version 5.4.23.5
@@ -74,6 +74,11 @@ C:\XboxGames\Graveyard Keeper\Content\
 If Windows asks whether to merge folders, say yes. When it is done, `winhttp.dll` sits next to
 `Graveyard Keeper.exe`, and the mod is in `BepInEx\plugins\GraveyardKeeperAccessibility\`.
 
+Four documents land next to `Graveyard Keeper.exe` as well —
+`Accessibility-Mod-README.md` (this file), `Accessibility-Mod-KEYBINDINGS.md`,
+`Accessibility-Mod-CHANGELOG.md` and `Accessibility-Mod-LICENSE.txt`. They are there so the keys
+and the instructions are in the folder you are already standing in, not buried inside the mod.
+
 That is everything. Nothing needs to be run first, and no folders need creating by hand.
 
 ### Installing (the mod-only ZIP)
@@ -86,7 +91,8 @@ C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper\BepInEx\
 ```
 
 It contains a `plugins` folder, so the mod lands in
-`BepInEx\plugins\GraveyardKeeperAccessibility\`.
+`BepInEx\plugins\GraveyardKeeperAccessibility\`, and the four `Accessibility-Mod-*` documents land
+directly in `BepInEx\` where you can see them.
 
 Either way, do not move the individual files around afterwards — the speech library and the `lang`
 folder have to stay beside the DLL.
@@ -95,10 +101,11 @@ folder have to stay beside the DLL.
 
 GOG sells a 32-bit build of the game, and two things follow from that.
 
-**Speech comes from the Windows SAPI voice, not from your screen reader.** Prism, the library the
-mod uses to talk to NVDA, JAWS and braille displays, has never been built for 32-bit Windows, so
-there is nothing to install and no older version that would help. Everything is still spoken —
-just in the Windows voice, and without braille.
+**Your screen reader is used, through a different library.** Prism, which the mod speaks through
+everywhere else, has never been built for 32-bit Windows. The GOG download therefore uses Tolk
+instead, which is bundled with it and needs nothing installed. NVDA, JAWS and ZoomText
+are driven directly, and braille works on the readers that support it. If no screen reader is
+running, speech falls back to the Windows SAPI voice exactly as it does on Steam.
 
 **It is tested and working, but less thoroughly than on Steam.** The mod is built against the Steam
 version of the game, and GOG's is older and differs in places. If something behaves oddly only on
@@ -111,8 +118,10 @@ slots and everything after them are read aloud.
 
 ## Keys
 
-`KEYBINDINGS.md` ships next to the mod inside `BepInEx\plugins\GraveyardKeeperAccessibility\` and
-lists every key the mod adds, grouped by where it works.
+`Accessibility-Mod-KEYBINDINGS.md` lists every key the mod adds, grouped by where it works. It sits
+in the folder you extracted the ZIP into, right beside the other three documents — you do not have
+to go looking for it. (A second copy also travels inside
+`BepInEx\plugins\GraveyardKeeperAccessibility\`, so it survives a Vortex install.)
 
 The game's own keys can be changed in the pause menu (Escape) under Controls, which is fully
 keyboard-navigable. The mod's own keys are fixed for now, since the GyK Configurationmanager is not yet accessible yet and there is no configuration file for it yet.
@@ -137,7 +146,7 @@ add or remove at any point in a playthrough.
 - BepInEx Configuration Manager is not accessible (see above).
 - manual fishing is not accessible yet, but its possible to automatically fish.
 
-`CHANGELOG.md` ships with the mod and has the full list.
+`Accessibility-Mod-CHANGELOG.md`, in the same folder, has the full list.
 
 ## Something went wrong?
 
@@ -148,19 +157,39 @@ first thing worth looking at, and the most useful thing to attach to a bug repor
 ## Licence & credits
 
 Licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE) (shipped with the
-mod as `LICENSE.txt`) for the full text.
+mod as `Accessibility-Mod-LICENSE.txt`) for the full text.
 In short: you are free to use, study, modify and redistribute the source under the same licence;
 any distributed fork must also be GPL v3.
 
-Speech is provided by [Prism](https://github.com/ethindp/prism), used under the **Mozilla Public
-License 2.0**; its licence and notice travel with the mod as `prism-LICENSE.txt` and
-`prism-NOTICE.txt`.
+Speech goes through one of two screen-reader libraries, picked by the bitness of the game process
+(see [A note for GOG players](#a-note-for-gog-players)). Both are redistributed unmodified, and
+each one's licence text travels with the download that contains it.
 
-The bundled ZIP also contains [BepInEx](https://github.com/BepInEx/BepInEx) and its
+[**Prism**](https://github.com/ethindp/prism) — used on the 64-bit builds (Steam, Epic, MS Store),
+under the **Mozilla Public License 2.0**. Its licence and notice ship as `prism-LICENSE.txt` and
+`prism-NOTICE.txt`. In `..._WithBepInEx.zip` and `..._ModOnly.zip`.
+
+[**Tolk**](https://github.com/dkager/tolk) — used on the 32-bit GOG build, where Prism has no
+binary, under the **GNU Lesser General Public License 3.0**. It ships as `Tolk.dll` with its licence
+as `tolk-LICENSE.txt`. In `..._WithBepInEx_GOG_32bit.zip` and `..._ModOnly.zip`.
+
+Tolk brings one dependency with it: **`nvdaControllerClient32.dll`**, NVDA's client API, under the
+**GNU Lesser General Public License 2.1**, verbatim from Tolk's own repository. Its licence ships as
+`nvdaControllerClient-LICENSE.txt`.
+
+`Tolk.dll` is not an upstream binary — the project publishes none — but it is built from unmodified
+upstream source, and LGPL-3.0 asks that you be able to rebuild or replace it. The exact commit, the
+build command and how to verify the result are written down in
+[libs/native/tolk/README.md](libs/native/tolk/README.md); [libs/native/prism/README.md](libs/native/prism/README.md)
+does the same for Prism.
+
+The bundled ZIPs also contain [BepInEx](https://github.com/BepInEx/BepInEx) and its
 [Doorstop](https://github.com/NeighTools/UnityDoorstop) loader, both under the **GNU Lesser General
 Public License 2.1**, redistributed unmodified. Their licence texts ship as `BepInEx-LICENSE.txt`
-and `Doorstop-LICENSE.txt` in the game folder. The exact release used is
-`BepInEx_win_x64_5.4.23.5.zip` from BepInEx's own releases page.
+and `Doorstop-LICENSE.txt` in the game folder. Both come from release
+[v5.4.23.5](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5): asset
+`BepInEx_win_x64_5.4.23.5.zip` for `..._WithBepInEx.zip`, and `BepInEx_win_x86_5.4.23.5.zip` for
+`..._WithBepInEx_GOG_32bit.zip`.
 
 This repository is a fork of [p1xel8ted's Graveyard Keeper mod collection](https://github.com/p1xel8ted/Graveyard-Keeper-Mods),
 whose build tooling it still uses.

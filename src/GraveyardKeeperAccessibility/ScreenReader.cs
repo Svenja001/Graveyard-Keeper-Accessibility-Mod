@@ -6,6 +6,7 @@ namespace GraveyardKeeperAccessibility;
 internal static class ScreenReader
 {
     private static bool _prismAvailable;
+    private static bool _tolkAvailable;
     private static bool _sapiAvailable;
     private static Process _sapiProcess;
     private static StreamWriter _sapiStdin;
@@ -15,11 +16,19 @@ internal static class ScreenReader
     internal static void Init(ManualLogSource log)
     {
         _log = log;
+
+        // Three speech backends, tried in order, and at most one of the two native libraries ever
+        // gets off the ground: Prism is 64-bit only, Tolk is bundled 32-bit only, and each refuses
+        // to initialise in the other's process (see TolkWrapper). So they cannot both hold the
+        // screen reader, and the choice needs no setting - the bitness of the game the player
+        // bought decides it. Steam and the other 64-bit storefronts get Prism, GOG gets Tolk.
         _prismAvailable = PrismWrapper.Init(log);
         if (!_prismAvailable)
+            _tolkAvailable = TolkWrapper.Init(log);
+        if (!_prismAvailable && !_tolkAvailable)
             _sapiAvailable = InitSapi();
 
-        if (!_prismAvailable && !_sapiAvailable)
+        if (!_prismAvailable && !_tolkAvailable && !_sapiAvailable)
             log.LogError("No TTS output available");
     }
 
@@ -64,9 +73,12 @@ internal static class ScreenReader
     {
         if (_prismAvailable)
             PrismWrapper.Shutdown();
+        if (_tolkAvailable)
+            TolkWrapper.Shutdown();
 
         KillSapi();
         _prismAvailable = false;
+        _tolkAvailable = false;
         _sapiAvailable = false;
     }
 
@@ -78,10 +90,11 @@ internal static class ScreenReader
     internal static float LastSpokenAt { get; private set; }
 
     /// <summary>
-    /// True when output also reaches a braille display. Only the Prism screen reader backends
-    /// can do this — the SAPI fallback is speech-only.
+    /// True when output also reaches a braille display. Only a real screen reader can do this —
+    /// Prism's backends on 64-bit, Tolk's on 32-bit; the SAPI fallback is speech-only.
     /// </summary>
-    internal static bool SupportsBraille => _prismAvailable && PrismWrapper.SupportsBraille;
+    internal static bool SupportsBraille =>
+        (_prismAvailable && PrismWrapper.SupportsBraille) || (_tolkAvailable && TolkWrapper.SupportsBraille);
 
     internal static bool Say(string text, bool interrupt = true)
     {
@@ -94,6 +107,12 @@ internal static class ScreenReader
         if (_prismAvailable)
             return PrismWrapper.Speak(text, interrupt);
 
+        // Tolk does the same job on 32-bit, and re-detects the screen reader on every call. A false
+        // here means it has gone away mid-session, so this line goes out through SAPI instead and
+        // the next one tries Tolk again - which is how a screen reader restart recovers by itself.
+        if (_tolkAvailable && TolkWrapper.Speak(text, interrupt))
+            return true;
+
         return SapiSpeak(text);
     }
 
@@ -104,8 +123,10 @@ internal static class ScreenReader
     /// </summary>
     internal static bool Braille(string text)
     {
-        if (string.IsNullOrWhiteSpace(text) || !_prismAvailable) return false;
-        return PrismWrapper.Braille(text);
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (_prismAvailable) return PrismWrapper.Braille(text);
+        if (_tolkAvailable) return TolkWrapper.Braille(text);
+        return false;
     }
 
     private static bool SapiSpeak(string text)
@@ -170,8 +191,12 @@ internal static class ScreenReader
         // "10 gold" / "20 silver" / "5 bronze" (see Trading.FormatMoney for the coin tokens).
         if (text.Contains('('))
         {
-            text = Regex.Replace(text, @"\((wskull|rskull|skull|cross|gld|slv|brz)\)(-?\d+(?:\.\d+)?)?", TokenToWords);
+            text = Regex.Replace(text, @"\((wskull|rskull|skull|cross|gld|slv|brz)\)(?:\s?(-?\d+(?:\.\d+)?))?", TokenToWords);
             text = Regex.Replace(text, StatTokenPattern, StatTokenToWords);
+            // A dropped decorative icon (see StatTokenToWords) leaves a double space or a space in
+            // front of the punctuation it sat before; tidy both so the sentence still reads clean.
+            text = Regex.Replace(text, @" {2,}", " ");
+            text = Regex.Replace(text, @" ([,.;:!?])", "$1");
         }
         // Strip NGUI color codes: [XXXXXX], [-], [c], [/c], etc.
         if (text.Contains('['))
@@ -189,9 +214,23 @@ internal static class ScreenReader
     ///
     /// Note the game's short ids: energy is "(en)" and sanity is "(sn)", NOT the spelled-out names
     /// the balance data uses for the same values.
+    ///
+    /// The same sprite mechanism carries the counters that are only ever drawn as an icon —
+    /// NPC relationship "(happy)"/"(rel)", a grave part's rating "(wr)", the merchant's fame
+    /// "(fame)"/"(marketing)", the refugee camp's happiness/water and the tavern's quality. Task
+    /// and door-lock text is written around those icons ("Die Tuer ist verschlossen, bis ich
+    /// (happy)80 beim Ingenieur habe"), so without a word for them the sentence loses the very
+    /// thing it is about. Longer ids come first in the alternation: the single letters r/g/b/v
+    /// would otherwise swallow the start of "rel" and the "refugee_" ids and kill the match.
+    ///
+    /// Quest text writes the amount after a space ("Erreiche (rel) 100"), so one optional space is
+    /// allowed — inside the amount group, never on its own, or a bare "(wskull) deines Friedhofs"
+    /// would lose the space that separates the two words.
     /// </summary>
     private const string StatTokenPattern =
-        @"([+-])?(?:(\d+(?:[.,]\d+)?)\s*)?\((hp|en|sn|energy|sanity|faith|gratitude_points|gratitude points|r|g|b|v)\)(\d+(?:[.,]\d+)?)?";
+        @"([+-])?(?:(\d+(?:[.,]\d+)?)\s*)?\((hp|en|sn|energy|sanity|faith|gratitude_points|gratitude points|" +
+        @"happy|rel|refugee_happiness_filler|refugee_happiness_slot|refugee_happiness|refugee_water|" +
+        @"soul_zone_capacity|marketing|fame|tavern|wr|r|g|b|v)\)(?:\s?(\d+(?:[.,]\d+)?))?";
 
     /// <summary>
     /// "+(hp)3" -> "gives 3 health", "-(en)5" -> "drains 5 energy", "25(b)" -> "25 blue points",
@@ -216,6 +255,23 @@ internal static class ScreenReader
             case "sanity": value = Bar("perk.sanity", amount); break;
             case "faith":  value = Bar("perk.faith", amount); break;
 
+            // Icon-only counters. Nothing is spoken for them anywhere else, so the name is the
+            // whole message: "(happy)80" has to come out as "80 relationship" / "80 Beziehung".
+            case "happy":
+            case "rel":    value = Bar("stat.relationship", amount); break;
+            case "wr":     value = Bar("stat.grave_quality", amount); break;
+            case "fame":
+            case "marketing": value = Bar("stat.fame", amount); break;
+            // These six only ever appear as pure decoration next to the word they illustrate
+            // ("<Wasser> (refugee_water)") or with a number ("40 (tavern)"). Naming the uncounted
+            // ones would stutter the sentence — "Wasser Wasser" — so an amount-less one is dropped.
+            case "refugee_happiness": value = BarOrDrop("stat.refugee_happiness", amount); break;
+            case "refugee_happiness_filler": value = BarOrDrop("stat.satisfaction", amount); break;
+            case "refugee_happiness_slot": value = BarOrDrop("stat.camp_quality", amount); break;
+            case "refugee_water": value = BarOrDrop("stat.water", amount); break;
+            case "tavern": value = BarOrDrop("stat.tavern_quality", amount); break;
+            case "soul_zone_capacity": value = BarOrDrop("stat.gratitude_capacity", amount); break;
+
             // Tech points have their own counted phrasing ("1 blue point" / "5 blue points"), so
             // they go through the shared point wording rather than a bare noun plus a number.
             default:
@@ -232,6 +288,10 @@ internal static class ScreenReader
         if (amount == null || sign.Length == 0) return value;
         return Loc.Fmt(sign == "-" ? "token.lose" : "token.gain", value);
     }
+
+    /// <summary>"3 water" — the name with its amount, or nothing at all when uncounted.</summary>
+    private static string BarOrDrop(string wordKey, string amount)
+        => amount == null ? "" : Bar(wordKey, amount);
 
     /// <summary>"3 health" — the bar name with its amount, or the bare name when uncounted.</summary>
     private static string Bar(string wordKey, string amount)

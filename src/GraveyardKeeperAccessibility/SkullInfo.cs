@@ -33,7 +33,7 @@ internal static class SkullInfo
         return null;
     }
 
-    /// <summary>e.g. "2 red, 4 white, 80 percent fresh" — or null if not a body.</summary>
+    /// <summary>e.g. "2 red skulls, 4 white skulls, 80 percent fresh" — or null if not a body.</summary>
     internal static string Describe(Item body)
     {
         if (!IsBody(body)) return null;
@@ -42,10 +42,10 @@ internal static class SkullInfo
             body.GetBodySkulls(out int red, out int white, out int whiteAvailable);
             int fresh = Mathf.CeilToInt(body.durability * 100f);
 
-            var core = Loc.Fmt("skulls.red_white", red, white);
+            var core = Loc.Fmt("skulls.red_white", RedPhrase(red), WhitePhrase(white));
             // Decay caps how many white skulls actually count toward grave value.
             if (whiteAvailable < white)
-                core += ", " + Loc.Fmt("skulls.white_usable", whiteAvailable);
+                core += ", " + Loc.Fmt("skulls.white_usable", WhitePhrase(whiteAvailable));
             return Loc.Fmt("skulls.freshness", core, fresh);
         }
         catch
@@ -56,7 +56,7 @@ internal static class SkullInfo
 
     /// <summary>
     /// The skull score of a single body part (flesh, bones, blood, organs, skull) as shown in
-    /// the autopsy grid — e.g. "2 white" (raises grave value) or "1 red" (lowers it). Each part
+    /// the autopsy grid — e.g. "2 white skulls" (raises grave value) or "1 red skull" (lowers it). Each part
     /// carries its own red (<see cref="Item.GetRedSkullsValue"/> = q_minus) and white
     /// (<see cref="Item.GetWhiteSkullsValue"/> = q_plus) values, which is what makes one part
     /// "good" and another "bad". Returns null for non-part items, "no skull value" for a part
@@ -79,8 +79,8 @@ internal static class SkullInfo
             if (red == 0 && white == 0) return Loc.Get("skulls.part.none");
 
             var bits = new List<string>();
-            if (red != 0) bits.Add(Loc.Fmt("skulls.red", red));
-            if (white != 0) bits.Add(Loc.Fmt("skulls.white", white));
+            if (red != 0) bits.Add(RedPhrase(red));
+            if (white != 0) bits.Add(WhitePhrase(white));
             return string.Join(", ", bits);
         }
         catch
@@ -117,11 +117,11 @@ internal static class SkullInfo
 
             var bits = new List<string>();
             // Red is bad for the corpse: removing a red-bearing part takes red away (good).
-            if (red > 0) bits.Add(Loc.Fmt("skulls.cut.removes_red", red));
-            else if (red < 0) bits.Add(Loc.Fmt("skulls.cut.adds_red", -red));
+            if (red > 0) bits.Add(Loc.Plural("skulls.cut.removes_red", red, red));
+            else if (red < 0) bits.Add(Loc.Plural("skulls.cut.adds_red", -red, -red));
             // White is good: removing a white-bearing part takes white away (bad).
-            if (white > 0) bits.Add(Loc.Fmt("skulls.cut.loses_white", white));
-            else if (white < 0) bits.Add(Loc.Fmt("skulls.cut.gains_white", -white));
+            if (white > 0) bits.Add(Loc.Plural("skulls.cut.loses_white", white, white));
+            else if (white < 0) bits.Add(Loc.Plural("skulls.cut.gains_white", -white, -white));
             return Loc.Fmt("skulls.cut.prefix", string.Join(", ", bits));
         }
         catch
@@ -158,8 +158,8 @@ internal static class SkullInfo
             // that skull count. Group by direction so it reads naturally ("adds 1 red, 1 white").
             var added = new List<string>();
             var removed = new List<string>();
-            if (red > 0) added.Add(Loc.Fmt("skulls.red", red)); else if (red < 0) removed.Add(Loc.Fmt("skulls.red", -red));
-            if (white > 0) added.Add(Loc.Fmt("skulls.white", white)); else if (white < 0) removed.Add(Loc.Fmt("skulls.white", -white));
+            if (red > 0) added.Add(RedPhrase(red)); else if (red < 0) removed.Add(RedPhrase(-red));
+            if (white > 0) added.Add(WhitePhrase(white)); else if (white < 0) removed.Add(WhitePhrase(-white));
 
             var parts = new List<string>();
             if (added.Count > 0) parts.Add(Loc.Fmt("skulls.insert.adds", string.Join(", ", added)));
@@ -171,6 +171,17 @@ internal static class SkullInfo
             return null;
         }
     }
+
+    /// <summary>
+    /// "1 red skull" / "7 red skulls" — the count WITH its noun. The noun is not optional: these
+    /// numbers are read out on their own ("1 red, 7 white" told a player nothing about what was
+    /// being counted), and German needs the count inside the phrase so the adjective ending can
+    /// agree with it ("1 roter Schädel" vs "7 rote Schädel").
+    /// </summary>
+    internal static string RedPhrase(int count) => Loc.Plural("skulls.red", count, count);
+
+    /// <inheritdoc cref="RedPhrase"/>
+    internal static string WhitePhrase(int count) => Loc.Plural("skulls.white", count, count);
 
     private static bool IsBody(Item item)
     {

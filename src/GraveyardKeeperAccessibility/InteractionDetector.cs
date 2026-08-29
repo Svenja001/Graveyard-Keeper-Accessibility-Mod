@@ -34,6 +34,8 @@ internal static class InteractionDetector
         Ground,     // wgo.DropItems(...) — items land beside the station
         Storage,    // PutToAllPossibleInventories — linked chests/pallets/warehouse
         Delivered,  // hard-coded receiver (tavern barman, refugee camp depot/well)
+        Scripted,   // flag == 1: the craft hands over to its end_script, destination unknown
+        Elevator,   // flag == 1 at the elevator: the script posts it to elevator_bot, i.e. the cellar
     }
     // NPC whose interaction fired with no dialogue yet, and when we give up waiting for one.
     private static WorldGameObject _silentNpc = null;
@@ -305,6 +307,8 @@ internal static class InteractionDetector
                     {
                         CraftOutputDest.Storage => "craft.done.storage",
                         CraftOutputDest.Delivered => "craft.done.delivered",
+                        CraftOutputDest.Elevator => "craft.done.elevator",
+                        CraftOutputDest.Scripted => "craft.crafted",
                         _ => "craft.done.ground",
                     }, _craftOutputName), interrupt: false);
                 ClearPendingCraft();
@@ -426,6 +430,19 @@ internal static class InteractionDetector
         try
         {
             var def = craft.current_craft;
+
+            // flag == 1 makes ProcessFinishedCraft skip its whole output block: nothing is
+            // dropped, nothing is inserted, and the craft's `output` item exists only to name
+            // and picture the recipe. What really happens is up to its end_script — for the
+            // crate crafts at the elevator (34 of the game's 66 flag-1 crafts) that script
+            // fires an event the elevator answers with Flow_AddItemToWGO on `elevator_bot`,
+            // which is why a finished Verkaufskiste is already down in the cellar.
+            if (def != null && def.flag == 1)
+            {
+                return (wgo.obj_id != null && wgo.obj_id.StartsWith("elevator"))
+                    ? CraftOutputDest.Elevator
+                    : CraftOutputDest.Scripted;
+            }
 
             // A few stations hand their output to a fixed receiver regardless of who worked them.
             switch (wgo.obj_id)
@@ -919,8 +936,13 @@ internal static class InteractionDetector
             foreach (var t in resTypes)
             {
                 float v = wgo.GetParam(t);
-                if (v > 0.01f)
-                    parts.Add($"{Mathf.RoundToInt(v)} {ResourceDisplayName(t)}");
+                if (v <= 0.01f) continue;
+
+                // A grave's "decay" is a 0..100 percentage, not a stack of something it holds, so
+                // it needs the percentage wording rather than the "8 fuel" counting one.
+                parts.Add(t == "decay"
+                    ? Loc.Fmt("station.decay", Mathf.RoundToInt(v))
+                    : $"{Mathf.RoundToInt(v)} {ResourceDisplayName(t)}");
             }
 
             // Items physically inside the station (loaded ingredients, a body on the table, …).

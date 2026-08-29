@@ -353,7 +353,8 @@ internal static class ZoneScoreAnnouncer
             }
 
             if (graves == 0) return null;
-            return Loc.Fmt("zonescore.graveyard_skulls", red, white, graves);
+            return Loc.Fmt("zonescore.graveyard_skulls",
+                           SkullInfo.RedPhrase(red), SkullInfo.WhitePhrase(white), graves);
         }
         catch (Exception ex)
         {

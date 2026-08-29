@@ -1,3 +1,188 @@
+## 0.2.0 | 29 August 2026
+
+**Walk there yourself, one direction at a time.** Auto-walk (Ctrl+Home) does the walking for you,
+which is not what everyone wants — several players would rather move themselves and only be told
+where to go. Until now the only thing on offer for that was the compass beacon, which points
+straight at the target in a dead line: through fences, through the church wall, through the
+graveyard hedge. It was never a route. **Ctrl+B** now gives you the route, spoken one step at a
+time, and your legs stay yours.
+
+### How it works
+
+Pick something the way you always do — **Page up** / **Page down** through a category — and press
+**Ctrl+B**. The mod asks the game for the same obstacle-aware route the auto-walker drives, reduces
+it to the corners worth mentioning, and talks you along it:
+
+> Guiding to the sawmill, 12 meters. Walk 8 meters east, then north.
+
+Hold the one key it names. When you reach the end of that stretch it gives you the next one — "Now
+5 meters north" — and when you arrive it says so and turns you to face the thing, so plain **E**
+interacts without any fiddling to line yourself up.
+
+Then it is quiet. While you are on course it says nothing at all, and it only speaks up when
+something has changed: you have drifted off the line, something is in the way, or you are there.
+
+- **Every step is one direction, so it is one key held down.** North, south, east or west, never
+  "north-east". Partly because one instruction should be one key, and partly because this game moves
+  you up and down at four fifths of the speed it moves you left and right — so a diagonal is not a
+  straight line and any diagonal instruction would drift by design. A slanting stretch of route
+  becomes a staircase of short cardinal steps instead.
+
+- **Distances are in metres, and the next turn comes with the step.** "Walk 12 meters east, then
+  north" — so when the east stretch runs out you already know which key comes next instead of
+  standing still waiting to be told.
+
+- **A step is only ever offered along ground you can actually walk.** Each one is checked twice:
+  against the game's navigation data, and against the same collision the game uses to stop your
+  body. "Walk 12 meters north" never means "walk into the fence".
+
+- **When something is in the way, it names it and takes you round.** "Fence blocks the way. Walk 6
+  meters south, then east." The name is the thing your character actually collided with — the fence,
+  the barrel, the gravestone — or "something solid" when it is part of a building rather than an
+  object of its own. It works out how far round you really have to go, so a barrel costs you a metre
+  and a fence costs you the length of the fence.
+
+- **It corrects you rather than repeating itself.** Drift off the line and it tells you how to get
+  back onto it — "Off course. Walk 3 meters east" — not the same instruction again. Speech takes
+  time and you are still holding the last key while you listen, so nothing is judged off course
+  until the instruction has had time to land.
+
+- **Ctrl+B never moves you.** It is a toggle for the directions and nothing else. Only Ctrl+Home,
+  the key that means "walk me there", may take over your legs.
+
+- **It stays on until you switch it off.** It is a mode, not a one-shot. Arriving leaves it on,
+  ready for the next thing, and so do cutscenes, teleports and anything else that interrupts. You
+  can switch it on before choosing anything — it says "Guidance on" and waits.
+
+- **The directions follow whatever you select.** With it on, paging to another object re-aims the
+  guidance: "Now guiding to the gravestone. Walk 6 meters north." Browsing for somewhere to go no
+  longer means pressing Ctrl+B again for every candidate. It waits until you stop paging before
+  switching, so stepping through a long list does not set off a burst of talking.
+
+- **Home repeats the step you are on**, with how far is left and where you are heading.
+
+- **Indoors, it takes you to the door first.** Choosing something outside while you are standing in
+  your house gets you out of the house rather than a bearing through the wall.
+
+- **If it truly cannot see a way, it says so honestly and keeps the target.** You get the direction
+  and the distance, and it quietly tries again as soon as you have walked a few metres — often that
+  is all it takes. It will not repeat itself at you while you move.
+
+- **Escape** stops the directions, though only once nothing else is moving you, so Escape still
+  stops an auto-walk first.
+
+- **Auto-walk falls back to directions instead of the beacon.** When the auto-walker gets boxed in
+  by geometry it cannot drive through, it now hands you turn-by-turn directions along the route it
+  did find. The old compass bearing is kept for the one case that has no route at all.
+
+### Getting it right
+
+This was built and rebuilt across twenty rounds of play-testing, and it is worth saying what those
+rounds were spent on, because they are the difference between a feature that works and one that
+technically functions. Directions that are wrong occasionally are worse than none: you cannot see
+what the mod got wrong, so every wrong instruction costs you a walk into a fence and your confidence
+in the next one.
+
+Most of that time went on three things. **Believing the route** — the mod now follows the path the
+game's own pathfinder returns instead of scoring compass directions for itself, so anywhere auto-walk
+can walk you, this can talk you. **Believing the collision** — every step is measured against the
+thing that actually stops your body, because the navigation maps do not know a wooden fence is there.
+And "that way is blocked" is now said only when something really is there and
+you were really walking into it, so pausing to think, or listening to an instruction before setting
+off, is no longer mistaken for being stuck against a wall.
+
+### A finished craft says where the result went
+
+The line that speaks when a craft finishes told you the result was lying on the ground beside you.
+That is true of a workbench you worked yourself and wrong nearly everywhere else — and it was said
+even when you had long since walked away.
+
+- **It only speaks while you are still at the station.** A station with a zombie docked in it keeps
+  working after you leave, and a station that unloads behind you looks exactly like one that has
+  just finished, so completion lines were arriving from the other side of the map. If you are more
+  than a few metres away when the craft ends, nothing is said at all.
+
+- **Each kind of station now says where its output really goes.** Work a station yourself and the
+  result drops at your feet, as before. A station run by a docked zombie, or run remotely on
+  gratitude points, files it into the linked storage. The tavern kitchen and oven hand it to the
+  barman, and the refugee camp's kitchen, hive and well hand it to the camp's own store. And the
+  crates you build at the elevator for the merchant are not on the ground anywhere — they go down
+  the shaft: "Box of vegetables crafted, sent down the elevator to the cellar".
+
+- **Where the game hands the result to a script, the mod stops guessing.** Embalming, the rat cell
+  and the skull and soul crafts now finish with a bare "… crafted" and no claim about where the
+  thing is, because the game decides that somewhere the mod cannot follow.
+
+### GOG: your own screen reader, at last
+
+The GOG version of Graveyard Keeper is a 32-bit program, and Prism — the library the mod speaks
+through — has never been built for 32-bit Windows. So GOG players have been getting the Windows
+SAPI voice: everything was spoken, but in a voice that was not theirs, at a speed that was not
+theirs, and never on a braille display.
+
+**The GOG download now bundles Tolk instead**, a second speech library that does have a 32-bit
+build, and it drives **NVDA, JAWS and ZoomText** directly, braille included. Nothing
+to install and nothing to choose: the mod looks at which version of the game it is running inside
+and loads the one library that fits it. On Steam that is Prism, exactly as before, and the two are
+never both awake — so there is no chance of the mod talking to your screen reader twice.
+
+If no screen reader is running, GOG still falls back to the SAPI voice, the same as everywhere else.
+
+
+- **The GOG download is now half the size.** Each bundle carries only the speech library its own
+  version of the game can load — Tolk for GOG, Prism for everyone else — instead of both. That
+  takes the GOG download from 2.6 MB down to 1.3 MB. The `ModOnly` download still contains both,
+  because it does not know which store your game came from.
+
+### The keys are where you can find them
+
+The keyboard reference, the install instructions, the changelog and the licence used to ship only
+inside `BepInEx\plugins\GraveyardKeeperAccessibility\` — four folders down, behind a name there is
+no reason to open. In practice that meant the list of keys was effectively missing.
+
+All four now sit in the **root of every download**, in the folder you extract into, named
+`Accessibility-Mod-README.md`, `Accessibility-Mod-KEYBINDINGS.md`, `Accessibility-Mod-CHANGELOG.md`
+and `Accessibility-Mod-LICENSE.txt`. The prefix keeps them together in a folder listing and tells
+them apart from BepInEx's own changelog and licence files, which land in the same place. The copies
+beside the mod stay where they are, so a Vortex install still has them.
+
+### Also in this release
+
+A handful of words were still coming out in English, or not coming out at all, in the German game.
+
+- **The grave window says fence and cross in your language.** The two decoration rows were labelled
+  from hardcoded English, so a German player heard "No cross" and "No fence" in the middle of a
+  German sentence; they now read "Kein Kreuz" and "Kein Zaun". The repair entries behind them follow
+  the game's own wording ("Grabstein reparieren") instead of a fixed "Repair cross".
+
+- **A grave's decay is spoken as a percentage, with a translated name.** It used to come out as a
+  bare count of the untranslated word "decay"; it is now "Verfall 47 Prozent" / "decay 47 percent".
+
+- **The icon-only counters are read out.** Quite a lot of the game's text is written around a little
+  picture — "Die Tür ist verschlossen, bis ich (happy)80 beim Ingenieur habe" — and the picture is
+  the thing the sentence is about. Relationship, a grave part's quality, the merchant's fame, the
+  refugee camp's happiness, water and camp quality, tavern quality and gratitude capacity now all
+  get a spoken name, so that line becomes "…bis ich 80 Beziehung beim Ingenieur habe". Where the
+  icon is only decoration next to the word it illustrates, it is dropped rather than said twice.
+
+- **Amounts written after the icon are picked up too.** Task text like "Erreiche (rel) 100" puts a
+  space between the two; that used to leave the number stranded with no idea what it counted.
+
+- **Crafting and building tabs have names.** The game draws every tab as a bare icon and has no
+  text for any of them, so the mod had been reading out the internal id — the stone grave decoration
+  tab announced itself as "scross". All fifty of them are now named in both languages.
+
+- **Skull counts say what they are counting.** A corpse used to read out as "1 red, 7 white", which
+  only makes sense if you can see the two skull icons the numbers sit next to. It is now "1 red
+  skull, 7 white skulls". The same applies to the autopsy grid, the cut-out and insert previews, the
+  graveyard's zone score and the soul healer's organ readout.
+
+- **German counts one skull the way you would say it.** The count sits inside the phrase rather than
+  in front of it, so the adjective can agree with it — "ein roter Schädel, 7 weiße Schädel", and in
+  the accusative where the sentence needs it ("verliert einen weißen Schädel"). The same singular
+  now reads correctly wherever a skull is counted: the inline skull and cross icons, a zombie's
+  efficiency, and the grave rating's "ein roter Schädel senkt sie".
+
 ## 0.1.4 | 23 August 2026
 
 **Items can now tell you what they are for.** Press **O** on any item and the mod says what it is,

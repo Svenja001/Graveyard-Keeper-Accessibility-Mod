@@ -26,12 +26,58 @@
          the right file at runtime. MPL-2.0 requires the licence text to travel with the
          binaries; see libs\native\prism\README.md. -->
     <ItemGroup>
-        <None Include="..\..\libs\native\prism\prism.dll" Link="prism.dll" CopyToOutputDirectory="PreserveNewest" />
-        <None Include="..\..\libs\native\prism\libprism.so" Link="libprism.so" CopyToOutputDirectory="PreserveNewest" />
-        <None Include="..\..\libs\native\prism\libprism.dylib" Link="libprism.dylib" CopyToOutputDirectory="PreserveNewest" />
-        <None Include="..\..\libs\native\prism\LICENSE" Link="prism-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
-        <None Include="..\..\libs\native\prism\NOTICE" Link="prism-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" />
+        <PrismFile Include="..\..\libs\native\prism\prism.dll" Link="prism.dll" />
+        <PrismFile Include="..\..\libs\native\prism\libprism.so" Link="libprism.so" />
+        <PrismFile Include="..\..\libs\native\prism\libprism.dylib" Link="libprism.dylib" />
+        <PrismFile Include="..\..\libs\native\prism\LICENSE" Link="prism-LICENSE.txt" />
+        <PrismFile Include="..\..\libs\native\prism\NOTICE" Link="prism-NOTICE.txt" />
     </ItemGroup>
+    <!-- Tolk covers the one case Prism cannot: the GOG build of the game is a 32-bit process, and
+         Prism has never published a 32-bit Windows library. Without this, GOG players get the
+         Windows SAPI voice and no braille. Only the x86 build ships - on 64-bit Prism has already
+         won, and TolkWrapper refuses to initialise there, so the two can never both hold the
+         screen reader. nvdaControllerClient32.dll is Tolk's only on-disk dependency for the readers
+         we cover; LGPL-3.0 requires the licence texts to travel with it, see
+         libs\native\tolk\README.md. -->
+    <ItemGroup>
+        <TolkFile Include="..\..\libs\native\tolk\Tolk.dll" Link="Tolk.dll" />
+        <TolkFile Include="..\..\libs\native\tolk\nvdaControllerClient32.dll" Link="nvdaControllerClient32.dll" />
+        <TolkFile Include="..\..\libs\native\tolk\LICENSE.txt" Link="tolk-LICENSE.txt" />
+        <TolkFile Include="..\..\libs\native\tolk\LICENSE-NVDA.txt" Link="nvdaControllerClient-LICENSE.txt" />
+    </ItemGroup>
+    <!-- Both sets land in OutputPath, which is where the plain (storefront-agnostic) ZIP and the
+         local dev deploy are globbed from. The two bundled ZIPs then take one set each back out
+         again - see ZipWithBepInEx. The Link metadata rides along into the None items, so each
+         file's name inside the plugin folder is written down exactly once, and the release target
+         reuses %(Link) rather than repeating the list. -->
+    <ItemGroup>
+        <None Include="@(PrismFile);@(TolkFile)" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+    <!--
+        The same four documents again, this time at the ROOT of every release ZIP - the first
+        thing in front of a player who has just extracted the download.
+
+        The copies inside the plugin folder above stay where they are: someone who installs
+        through Vortex, or who copies just the plugin folder into an existing setup, never sees
+        the ZIP root at all. But that is also exactly why the plugin folder is the wrong place to
+        rely on - it is four levels down, behind a name nobody has a reason to open, and a blind
+        player extracting the archive has no folder listing to skim for it. Duplicating ~60 KB is
+        the cheaper mistake.
+
+        The names are prefixed rather than left bare because of where these roots are. The bundled
+        ZIPs unpack into the GAME folder, which already receives BepInEx's own changelog.txt,
+        BepInEx-LICENSE.txt and Doorstop-LICENSE.txt - a plain CHANGELOG.md or LICENSE.txt beside
+        those would be genuinely ambiguous about what it documents. The prefix also keeps the four
+        sorted together in a directory listing, which is how they are found when the listing is
+        being read out one entry at a time.
+    -->
+    <ItemGroup>
+        <RootDoc Include="..\..\README.md" Link="Accessibility-Mod-README.md" />
+        <RootDoc Include="KEYBINDINGS.md" Link="Accessibility-Mod-KEYBINDINGS.md" />
+        <RootDoc Include="CHANGELOG.md" Link="Accessibility-Mod-CHANGELOG.md" />
+        <RootDoc Include="..\..\LICENSE" Link="Accessibility-Mod-LICENSE.txt" />
+    </ItemGroup>
+
     <ItemGroup>
       <!-- Reference-only: without ExcludeAssets="runtime" the package's ~110 game and Unity
            assemblies (Assembly-CSharp.dll, UnityEngine.*.dll, ...) are copied to OutputPath.
@@ -62,25 +108,63 @@
         target completely alone - it is shared with ~47 other mods.
     -->
     <!--
-        Rename the plain ZIP that zip.target just produced. Its "_BepInEx" suffix means "rooted at
-        the BepInEx folder", but sitting next to a "_WithBepInEx" ZIP that genuinely does contain
-        BepInEx, it reads as the opposite of what it is. That ambiguity matters more than usual
-        here: the audience often picks a download by filename read aloud, with no folder listing to
-        compare against. Renamed here rather than in the shared zip.target, which ~47 other mods use.
+        Rebuild the plain ZIP that zip.target just produced, and throw that one away.
+
+        Two things are wrong with it as it stands. Its "_BepInEx" suffix means "rooted at the
+        BepInEx folder", but sitting next to a "_WithBepInEx" ZIP that genuinely does contain
+        BepInEx, it reads as the opposite of what it is - and this audience often picks a download
+        by filename read aloud, with no folder listing to compare against. And its documentation is
+        only in plugins\<mod>\, two levels below the root the player lands on.
+
+        Restaged here rather than fixed in the shared zip.target, which ~47 other mods use, and
+        rather than patched into the finished archive, which MSBuild has no task for. The glob and
+        its exclusions are copied from that target deliberately: they must stay identical, so any
+        drift is visible as a difference between two blocks in the same repository.
     -->
-    <Target Name="RenameModOnlyZip" AfterTargets="ZipOutputPath" Condition="'$(Storefront)' != 'gog'">
+    <Target Name="RepackModOnlyZip" AfterTargets="ZipOutputPath" Condition="'$(Storefront)' != 'gog'">
         <PropertyGroup>
-            <_PlainZip>$(MSBuildThisFileDirectory)..\AAA_Releases\$(MSBuildProjectName)_v$(Version)_BepInEx.zip</_PlainZip>
-            <_ModOnlyZip>$(MSBuildThisFileDirectory)..\AAA_Releases\$(MSBuildProjectName)_v$(Version)_ModOnly.zip</_ModOnlyZip>
+            <_ModStaging>$(TEMP)\GYK_staging_modonly\$(MSBuildProjectName)</_ModStaging>
+            <_ModPluginStaging>$(_ModStaging)\plugins\$(MSBuildProjectName)</_ModPluginStaging>
+            <_ModReleasesDir>$(MSBuildThisFileDirectory)..\AAA_Releases</_ModReleasesDir>
+            <_PlainZip>$(_ModReleasesDir)\$(MSBuildProjectName)_v$(Version)_BepInEx.zip</_PlainZip>
         </PropertyGroup>
-        <Move Condition="Exists('$(_PlainZip)')" SourceFiles="$(_PlainZip)" DestinationFiles="$(_ModOnlyZip)" />
-        <Message Condition="Exists('$(_ModOnlyZip)')" Importance="high"
-                 Text="Mod-only release: $(MSBuildProjectName)_v$(Version)_ModOnly.zip" />
+
+        <RemoveDir Directories="$(_ModStaging)" />
+        <MakeDir Directories="$(_ModPluginStaging)" />
+
+        <ItemGroup>
+            <_ModOnlyFiles Include="$(OutputPath)\**\*.*"
+                           Exclude="$(OutputPath)\**\*.zip;$(OutputPath)\**\*.pdb;$(OutputPath)\**\*.deps.json;$(OutputPath)\**\*.csv;$(OutputPath)\**\*.vortex_backup;$(OutputPath)\**\*.vortex_new;$(OutputPath)\SaveBackup\**\*.*;$(OutputPath)\_dump\**\*.*;$(OutputPath)\Locations\**\*.*" />
+        </ItemGroup>
+
+        <Copy SourceFiles="@(_ModOnlyFiles)"
+              DestinationFiles="@(_ModOnlyFiles->'$(_ModPluginStaging)\%(RecursiveDir)%(Filename)%(Extension)')" />
+
+        <!-- CHANGELOG.md never reaches OutputPath, so the glob above misses it. -->
+        <Copy Condition="Exists('$(MSBuildProjectDirectory)\CHANGELOG.md')"
+              SourceFiles="$(MSBuildProjectDirectory)\CHANGELOG.md"
+              DestinationFolder="$(_ModPluginStaging)" />
+
+        <!-- Root of this archive is the player's BepInEx\ folder. -->
+        <Copy SourceFiles="@(RootDoc)" DestinationFiles="@(RootDoc->'$(_ModStaging)\%(Link)')" />
+
+        <Error Condition="!Exists('$(_ModPluginStaging)\$(MSBuildProjectName).dll')"
+               Text="Mod-only ZIP is missing the mod DLL." />
+        <Error Condition="!Exists('$(_ModStaging)\Accessibility-Mod-README.md')"
+               Text="Mod-only ZIP is missing its root documentation." />
+
+        <ZipDirectory Overwrite="true"
+                      SourceDirectory="$(_ModStaging)"
+                      DestinationFile="$(_ModReleasesDir)\$(MSBuildProjectName)_v$(Version)_ModOnly.zip" />
+        <Delete Files="$(_PlainZip)" />
+        <RemoveDir Directories="$(_ModStaging)" />
+        <Message Importance="high" Text="Mod-only release: $(MSBuildProjectName)_v$(Version)_ModOnly.zip" />
     </Target>
 
     <Target Name="ZipWithBepInEx" AfterTargets="ZipOutputPath" Condition="'$(Storefront)' != 'gog'">
         <PropertyGroup>
             <_FullStaging>$(TEMP)\GYK_staging_full\$(MSBuildProjectName)</_FullStaging>
+            <_PluginStaging>$(_FullStaging)\BepInEx\plugins\$(MSBuildProjectName)</_PluginStaging>
             <_BepInExDist>$(MSBuildThisFileDirectory)..\..\libs\bepinex-dist</_BepInExDist>
             <_BepInExDistX86>$(MSBuildThisFileDirectory)..\..\libs\bepinex-dist-x86</_BepInExDistX86>
             <_ReleasesDir>$(MSBuildThisFileDirectory)..\AAA_Releases</_ReleasesDir>
@@ -96,24 +180,57 @@
                  zip.target: Vortex leftovers and build by-products must not ship. -->
             <_ModFiles Include="$(OutputPath)\**\*.*"
                        Exclude="$(OutputPath)\**\*.zip;$(OutputPath)\**\*.pdb;$(OutputPath)\**\*.deps.json;$(OutputPath)\**\*.csv;$(OutputPath)\**\*.vortex_backup;$(OutputPath)\**\*.vortex_new;$(OutputPath)\SaveBackup\**\*.*;$(OutputPath)\_dump\**\*.*;$(OutputPath)\Locations\**\*.*" />
+            <!-- The two speech libraries as they sit in the staging dir, named from the same
+                 %(Link) metadata that put them in OutputPath in the first place. Each bundle keeps
+                 exactly one set; see the comment above the first ZipDirectory. -->
+            <_StagedPrism Include="@(PrismFile->'$(_PluginStaging)\%(Link)')" />
+            <_StagedTolk Include="@(TolkFile->'$(_PluginStaging)\%(Link)')" />
         </ItemGroup>
 
         <Copy SourceFiles="@(_BepInExFiles)"
               DestinationFiles="@(_BepInExFiles->'$(_FullStaging)\%(RecursiveDir)%(Filename)%(Extension)')" />
         <Copy SourceFiles="@(_ModFiles)"
-              DestinationFiles="@(_ModFiles->'$(_FullStaging)\BepInEx\plugins\$(MSBuildProjectName)\%(RecursiveDir)%(Filename)%(Extension)')" />
+              DestinationFiles="@(_ModFiles->'$(_PluginStaging)\%(RecursiveDir)%(Filename)%(Extension)')" />
 
         <!-- CHANGELOG.md never reaches OutputPath - zip.target copies it into its own staging dir
              directly - so the glob above misses it and this ZIP would ship without it. -->
         <Copy Condition="Exists('$(MSBuildProjectDirectory)\CHANGELOG.md')"
               SourceFiles="$(MSBuildProjectDirectory)\CHANGELOG.md"
-              DestinationFolder="$(_FullStaging)\BepInEx\plugins\$(MSBuildProjectName)" />
+              DestinationFolder="$(_PluginStaging)" />
+
+        <!-- Root of these archives is the GAME folder, the one holding Graveyard Keeper.exe -
+             which is where the player is standing the moment the extract finishes. Copied once
+             here and left alone afterwards: both bundles are zipped out of this same staging dir,
+             and the documentation is identical in each. -->
+        <Copy SourceFiles="@(RootDoc)" DestinationFiles="@(RootDoc->'$(_FullStaging)\%(Link)')" />
 
         <!-- Fail loudly rather than shipping a ZIP that quietly cannot load anything. -->
+        <Error Condition="!Exists('$(_FullStaging)\Accessibility-Mod-README.md')"
+               Text="Bundled ZIP is missing its root documentation." />
         <Error Condition="!Exists('$(_FullStaging)\winhttp.dll')"
                Text="BepInEx bundle is missing winhttp.dll - is libs\bepinex-dist populated? See its README." />
-        <Error Condition="!Exists('$(_FullStaging)\BepInEx\plugins\$(MSBuildProjectName)\$(MSBuildProjectName).dll')"
+        <Error Condition="!Exists('$(_PluginStaging)\$(MSBuildProjectName).dll')"
                Text="BepInEx bundle is missing the mod DLL." />
+
+        <!--
+            Each bundled ZIP carries only the speech library its architecture can actually load.
+            Both are in the staging dir at this point (they were globbed out of OutputPath), so the
+            64-bit bundle drops Tolk here and the 32-bit one below puts it back and drops Prism.
+
+            A player never chooses between the two libraries and never sees them, so an unusable one
+            in the folder is pure weight: Prism is x86-64 and its Linux and macOS builds are 64-bit
+            too, all ~3.5 MB of it dead in a 32-bit install, and Tolk is x86, dead in a 64-bit one.
+            It is not just size either - a folder that contains both invites the guess that the mod
+            picks between them at runtime, when in fact bitness decides and TolkWrapper refuses to
+            start on 64-bit at all.
+
+            The storefront-agnostic ModOnly ZIP still ships both, deliberately: it is the download
+            for players who already have BepInEx, and nothing in it says which store the game came
+            from, so it has to work either way.
+        -->
+        <Delete Files="@(_StagedTolk)" />
+        <Error Condition="!Exists('$(_PluginStaging)\prism.dll')"
+               Text="64-bit bundle is missing prism.dll - is libs\native\prism populated? See its README." />
 
         <ZipDirectory Overwrite="true"
                       SourceDirectory="$(_FullStaging)"
@@ -129,12 +246,19 @@
             winhttp.dll is the ONLY file that differs between BepInEx's win_x86 and win_x64 assets
             (everything else, BepInEx\core\ included, is managed AnyCPU and byte-identical - hashed
             file by file, see libs\bepinex-dist-x86\README.md). So swap that one file in the staging
-            dir already built above and zip it a second time, rather than staging twice: the two
-            archives then cannot drift apart in anything else.
+            dir already built above and zip it a second time, rather than staging twice: apart from
+            the loader and the speech library - the two things that are architecture-specific by
+            definition, and both swapped right here - the archives then cannot drift apart.
         -->
         <Error Condition="!Exists('$(_BepInExDistX86)\winhttp.dll')"
                Text="32-bit loader missing - is libs\bepinex-dist-x86 populated? See its README." />
         <Copy SourceFiles="$(_BepInExDistX86)\winhttp.dll" DestinationFolder="$(_FullStaging)" />
+
+        <!-- Prism out, Tolk back in: the mirror image of the swap made before the ZIP above. -->
+        <Delete Files="@(_StagedPrism)" />
+        <Copy SourceFiles="@(TolkFile)" DestinationFiles="@(TolkFile->'$(_PluginStaging)\%(Link)')" />
+        <Error Condition="!Exists('$(_PluginStaging)\Tolk.dll')"
+               Text="32-bit bundle is missing Tolk.dll - is libs\native\tolk populated? See its README." />
 
         <ZipDirectory Overwrite="true"
                       SourceDirectory="$(_FullStaging)"

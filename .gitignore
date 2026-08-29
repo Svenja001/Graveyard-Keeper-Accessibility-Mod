@@ -48,6 +48,10 @@ libs/native/*
 # This has to come after the "*.dll" rule above to win for prism.dll.
 !libs/native/prism/
 !libs/native/prism/**
+# Tolk ships the same way (LGPL-3.0), for the 32-bit GOG build that Prism has no library for.
+# See libs/native/tolk/README.md.
+!libs/native/tolk/
+!libs/native/tolk/**
 # BepInEx ships inside the bundled release the same way (LGPL-2.1, unmodified upstream binaries —
 # see libs/bepinex-dist/README.md). Without this the WithBepInEx zip could only ever be built on
 # the one machine that has the folder. Same two-line shape as Prism: the directory has to be

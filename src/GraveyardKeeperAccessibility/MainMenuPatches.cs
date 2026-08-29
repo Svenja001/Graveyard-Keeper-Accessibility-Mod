@@ -3623,6 +3623,10 @@ internal static class GUIAccessibility
         _currentGUI = craftGui;
     }
 
+    // Spoken name of a crafting/building tab. The game has no translation for ANY "tab_<id>" key —
+    // every tab is drawn as an icon only — so the old fallback spoke the raw id and the stone-grave
+    // tab came out as "scross". We name them ourselves (tab.<id> in the language files) and only
+    // prettify the id for a tab we have not met.
     private static string CraftTabLabel(CraftTabGUI tab)
     {
         var id = tab?.tab_id ?? "";
@@ -3635,7 +3639,7 @@ internal static class GUIAccessibility
                 return loc;
         }
         catch { }
-        return id;
+        return Loc.Find("tab." + id) ?? id.Replace("_", " ");
     }
 
     /// <summary>Spoken label for a recipe row: name, ingredients, and whether it's craftable.</summary>
@@ -3656,7 +3660,7 @@ internal static class GUIAccessibility
             catch { }
         }
 
-        if (string.IsNullOrWhiteSpace(name)) name = "Recipe";
+        if (string.IsNullOrWhiteSpace(name)) name = Loc.Get("craft.recipe_generic");
 
         var label = name;
 
@@ -3673,8 +3677,10 @@ internal static class GUIAccessibility
             // localize: a "fix_grave_craft_<part>" repair and a "_remove_" removal. Name them.
             if (cd != null)
             {
-                if (!string.IsNullOrEmpty(cd.id) && cd.id.StartsWith("fix_grave_craft_"))
-                    label = cd.id.EndsWith("cross") ? "Repair cross" : "Repair fence";
+                // The game does translate these two ids ("Grabstein reparieren"), and `name` above
+                // already holds that; only step in when the lookup handed the raw id back.
+                if (!string.IsNullOrEmpty(cd.id) && cd.id.StartsWith("fix_grave_craft_") && name == cd.id)
+                    label = Loc.Get(cd.id.EndsWith("cross") ? "grave.repair_cross" : "grave.repair_fence");
                 else if (cd.custom_name == "_remove_")
                     label = Loc.Get("craft.remove_part");
             }
@@ -4823,8 +4829,8 @@ internal static class GUIAccessibility
     {
         AddGraveRatingElement(grave);
         AddGraveBodyElement(grave);
-        AddGravePartElement(grave, "Fence", _graveFenceField, ItemDefinition.ItemType.GraveFence);
-        AddGravePartElement(grave, "Cross", _graveCrossField, ItemDefinition.ItemType.GraveStone);
+        AddGravePartElement(grave, "grave.part.fence", _graveFenceField, ItemDefinition.ItemType.GraveFence);
+        AddGravePartElement(grave, "grave.part.cross", _graveCrossField, ItemDefinition.ItemType.GraveStone);
         Plugin.Log.LogInfo($"[GRAVE] Discovered {Elements.Count} grave part element(s)");
     }
 
@@ -4944,29 +4950,33 @@ internal static class GUIAccessibility
         }
     }
 
-    private static void AddGravePartElement(GraveGUI grave, string name,
+    // <paramref name="nameKey"/> is the localization key for the part's noun ("Fence"/"Zaun"),
+    // not the noun itself: these rows are read aloud, so the word has to come from the language
+    // file or a German player hears "No cross" in the middle of a German sentence.
+    private static void AddGravePartElement(GraveGUI grave, string nameKey,
         System.Reflection.FieldInfo field, ItemDefinition.ItemType type)
     {
         Elements.Add(new GUIElement
         {
             Go = grave.gameObject,
-            Label = GravePartLabel(grave, name, field),
+            Label = GravePartLabel(grave, nameKey, field),
             Type = ElementType.Button,
             // Re-read the part each time so the condition stays current after a redraw.
-            ReadDynamic = () => GravePartLabel(grave, name, field),
+            ReadDynamic = () => GravePartLabel(grave, nameKey, field),
             OnActivate = () => ActivateGravePart(grave, field, type)
         });
     }
 
     // "Fence: wooden fence, condition 42 percent. Press Enter to repair", or "No fence, press
     // Enter to add" when the slot is empty. Condition is the part item's durability (0..1).
-    private static string GravePartLabel(GraveGUI grave, string name, System.Reflection.FieldInfo field)
+    private static string GravePartLabel(GraveGUI grave, string nameKey, System.Reflection.FieldInfo field)
     {
+        var name = Loc.Get(nameKey);
         try
         {
             var item = field?.GetValue(grave) as Item;
             if (item == null || item.IsEmpty())
-                return Loc.Fmt("grave.slot_empty", name.ToLowerInvariant());
+                return Loc.Fmt("grave.slot_empty", name);
 
             int pct = Mathf.RoundToInt(Mathf.Clamp01(item.durability) * 100f);
             var itemName = ScreenReader.StripNguiCodes(item.definition?.GetItemName() ?? name)?.Trim();

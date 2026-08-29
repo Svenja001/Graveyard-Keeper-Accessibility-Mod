@@ -457,7 +457,7 @@ internal static class ObjectNavigator
 
     internal static bool IsWalking => _isWalking;
     internal static bool IsBeaconActive => _beaconActive;
-    internal static bool IsBusy => _isWalking || _beaconActive || _longWalkActive;
+    internal static bool IsBusy => _isWalking || _beaconActive || _longWalkActive || GuidedWalk.IsActive;
 
     // Set true only while we drive an A* GoTo, so the RefreshPlayerGraph patch pads
     // the player-graph bounds for our walks without affecting vanilla pathfinding.
@@ -468,6 +468,7 @@ internal static class ObjectNavigator
         _log = log;
         foreach (var cat in _categoryOrder)
             _byCategory[cat] = new List<NavigationTarget>();
+        GuidedWalk.Init(log);
         _initialized = true;
         _log?.LogInfo("[NAVIGATOR] ObjectNavigator initialized (native pathfinding, categorized)");
     }
@@ -603,6 +604,9 @@ internal static class ObjectNavigator
             // Drive the compass beacon (manual fallback guidance) if one is active.
             if (_beaconActive)
                 UpdateBeacon();
+
+            // Drive turn-by-turn guidance (the player is walking themselves).
+            GuidedWalk.Update();
 
             // Watch the game's own movement state while a single A* walk is in progress. Skipped
             // during a long native follow — that legitimately pauses at waypoints, and its own
@@ -921,6 +925,7 @@ internal static class ObjectNavigator
                 _currentCategory = cat;
                 _selectedIndex = 0;
                 AnnounceCategory();
+                GuidedWalk.NotifySelectionChanged();
                 return;
             }
         }
@@ -960,6 +965,7 @@ internal static class ObjectNavigator
 
         _selectedIndex = (_selectedIndex + 1) % list.Count;
         AnnounceSelected();
+        GuidedWalk.NotifySelectionChanged();
     }
 
     internal static void SelectPrevious()
@@ -971,6 +977,7 @@ internal static class ObjectNavigator
 
         _selectedIndex = (_selectedIndex - 1 + list.Count) % list.Count;
         AnnounceSelected();
+        GuidedWalk.NotifySelectionChanged();
     }
 
     internal static void AnnounceSelected()
@@ -1064,6 +1071,8 @@ internal static class ObjectNavigator
         _rescanRetried = false;
         _rescanRetryPending = false;
         ClearArrivedTarget();
+        // Asking to be walked there replaces any turn-by-turn guidance in progress.
+        GuidedWalk.Stop(announce: false);
 
         // For a faraway target (e.g. the Tavern from home) the A* player graph can't path
         // there in one shot, so auto-walk it in short hops instead of a single GoTo.
@@ -1161,6 +1170,7 @@ internal static class ObjectNavigator
         _rescanRetried = false;
         _rescanRetryPending = false;
         ClearArrivedTarget();
+        GuidedWalk.Stop(announce: false);
         _escapeExitObject = best;
 
         // Ask up front whether a route can exist at all, rather than discovering it through a dozen
@@ -1661,8 +1671,11 @@ internal static class ObjectNavigator
             return;
         }
 
+        // Hand over to turn-by-turn rather than a straight-line bearing: a route the auto-walker
+        // cannot DRIVE is usually still a route the player can WALK (a gate it jams on, a stall it
+        // cannot squeeze past). GuidedWalk drops back to the beacon itself if graph 0 has no route.
         ScreenReader.Say(Loc.Fmt("nav.manual_guidance", target.Label), interrupt: true);
-        StartBeacon(target);
+        GuidedWalk.StartTo(target, announceStart: false, allowBeaconFallback: true);
     }
 
     internal static void StopLongWalk(bool announce)
@@ -1729,6 +1742,414 @@ internal static class ObjectNavigator
         }
     }
 
+    // ---- Guided walk hooks (turn-by-turn manual walking; see GuidedWalk) ----
+    //
+    // GuidedWalk needs the same three things the auto-walker uses — the selected target, the
+    // interaction tile to aim at, and an obstacle-aware graph-0 route — but drives none of them
+    // itself: the player walks. These are the only doors into this class it needs.
+
+    /// <summary>The currently selected navigable object, refreshed first (mirrors WalkToSelected).</summary>
+    internal static bool TryGetSelectedTarget(out NavigationTarget target)
+    {
+        target = default;
+        EnsureFreshList();
+        var list = CurrentList;
+        if (list.Count == 0) return false;
+        if (_selectedIndex >= list.Count) _selectedIndex = 0;
+        target = list[_selectedIndex];
+        return true;
+    }
+
+    /// <summary>The tile to guide the player onto, plus what to face there so vanilla E works.</summary>
+    internal static Vector2 GuidedDestFor(NavigationTarget target, out Vector2? facePos)
+        => InteractionDest(target, out facePos);
+
+    internal static string DistanceWords(float worldDistance) => DistanceText(worldDistance);
+
+    internal static string CompassWord(Vector2 from, Vector2 to) => CompassDirection(from, to);
+
+    // Cached probes for IsWalkableSpot. NNConstraint.Default ALLOCATES a new object on every read
+    // and — the part that matters — constrains to walkable nodes, which makes it the wrong tool
+    // for asking whether a spot is walkable: it happily returns a walkable node several tiles away
+    // and the caller concludes the fence isn't there. These take the nearest node whatever its
+    // state, so node.Walkable is the actual answer. One per graph: see IsWalkableSpot.
+    private static readonly Pathfinding.NNConstraint[] _walkProbe = new Pathfinding.NNConstraint[3];
+    private static readonly float[] _probeNodeSize = new float[3];
+
+    private enum Ground { Unknown, Walkable, Blocked }
+
+    /// <summary>
+    /// May the player stand on this exact spot? Asked of the PLAYER graph (graph 2) first: its
+    /// nodes are 8 units across and it is scanned with the player's own collision diameter, so
+    /// where it has data it answers exactly the question — and it is the graph auto-walk uses for
+    /// anything short, which is why auto-walk gets through gaps that graph 0 calls solid. Graph 0
+    /// (the whole-map NPC navmesh, 76-unit nodes) answers everywhere else.
+    /// </summary>
+    internal static bool IsWalkableSpot(Vector2 p)
+    {
+        var player = ProbeGround(p, AStarTools.PLAYER_GRAPH_N);
+        if (player != Ground.Unknown) return player == Ground.Walkable;
+        return ProbeGround(p, 0) == Ground.Walkable;
+    }
+
+    /// <summary>
+    /// What one graph says about a point: walkable, blocked, or "not my area" — the last of which
+    /// is what a graph returns outside its scanned bounds, and must not be read as a wall.
+    /// </summary>
+    private static Ground ProbeGround(Vector2 p, int graph)
+    {
+        try
+        {
+            var astar = AstarPath.active;
+            if (astar?.graphs == null || astar.graphs.Length <= graph) return Ground.Unknown;
+
+            if (_walkProbe[graph] == null)
+            {
+                _walkProbe[graph] = new Pathfinding.NNConstraint
+                {
+                    graphMask = 1 << graph,
+                    constrainWalkability = false,   // report the node that's really there
+                    constrainTags = false,
+                    constrainArea = false,
+                };
+                // Node size decides how far "the node covering this point" can legitimately be.
+                if (astar.graphs[graph] is Pathfinding.GridGraph gg)
+                {
+                    _probeNodeSize[graph] = gg.nodeSize;
+                    _log?.LogInfo($"[NAVIGATOR] Graph {graph} grid: nodeSize={gg.nodeSize} {gg.width}x{gg.depth}");
+                }
+                if (_probeNodeSize[graph] <= 0f) _probeNodeSize[graph] = TileSize;
+            }
+
+            var nn = astar.GetNearest(new Vector3(p.x, p.y, 0f), _walkProbe[graph]);
+            if (nn.node == null) return Ground.Unknown;
+
+            // Outside this graph's scanned area the nearest node is clamped to its edge, which can
+            // be any distance away — that is "no data here", not "blocked".
+            var np = new Vector2(nn.clampedPosition.x, nn.clampedPosition.y);
+            if (Vector2.Distance(p, np) > _probeNodeSize[graph]) return Ground.Unknown;
+
+            return nn.node.Walkable ? Ground.Walkable : Ground.Blocked;
+        }
+        catch { return Ground.Unknown; }
+    }
+
+    /// <summary>
+    /// Does the whole-map NPC navmesh say this spot is solid? Coarse (76-unit nodes), so this is
+    /// a hint rather than a verdict — but a hint worth having when the player graph is silent.
+    /// </summary>
+    internal static bool IsKnownBlockedOnWorldMesh(Vector2 p) => ProbeGround(p, 0) == Ground.Blocked;
+
+    /// <summary>
+    /// Rescan the PLAYER graph around a point, so walkability questions near the player get
+    /// answered by the graph built from the player's own collision instead of the coarse world
+    /// mesh. Costs a synchronous scan — the same one the game runs before every auto-walk — so it
+    /// is bounded to a box around the player and rate-limited.
+    /// </summary>
+    internal static void RefreshPlayerGraphAround(Vector2 center, float tiles = 8f, bool force = false)
+    {
+        if (!force && Time.realtimeSinceStartup - _lastPlayerGraphRefresh < PlayerGraphRefreshInterval)
+            return;
+        try
+        {
+            _lastPlayerGraphRefresh = Time.realtimeSinceStartup;
+            var box = new Vector2(tiles * TileSize, tiles * TileSize);
+            var started = Time.realtimeSinceStartup;
+            AStarTools.RefreshPlayerGraph(center - box, center + box);
+            // Logged with its cost: this is a synchronous graph scan on the main thread, and if it
+            // ever shows up as a stutter this line is where to look first.
+            _log?.LogInfo($"[NAVIGATOR] Player graph rescanned around {center} (~{tiles:F0} tiles, " +
+                          $"{(Time.realtimeSinceStartup - started) * 1000f:F0}ms)");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Player graph rescan failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Does the PLAYER graph specifically say this spot is solid? That graph models the player's
+    /// own collision at 8-unit resolution, so when it has an opinion it is the last word — worth
+    /// asking separately, because a caller may otherwise let a nearby route vouch for a point that
+    /// is really the wall of a house.
+    /// </summary>
+    internal static bool IsKnownBlockedForPlayer(Vector2 p) =>
+        ProbeGround(p, AStarTools.PLAYER_GRAPH_N) == Ground.Blocked;
+
+    /// <summary>
+    /// Which way the player is TRYING to go, taken from the movement keys they are holding RIGHT
+    /// NOW (<see cref="LazyInput.GetDirection"/>). This is the only honest answer to "are they
+    /// pushing against something": position says nothing (they are not moving), and the character's
+    /// state can read as idle while they lean on a fence. Zero when they are not pressing anything.
+    ///
+    /// Falls back to the character's facing, which the game sets from the same input, if the input
+    /// layer is unavailable for any reason.
+    /// </summary>
+    internal static Vector2 PlayerHeading()
+    {
+        try
+        {
+            var keys = LazyInput.GetDirection();
+            if (keys.sqrMagnitude > 0.0001f) return keys.normalized;
+        }
+        catch { }
+
+        try
+        {
+            var ch = MainGame.me?.player?.components?.character;
+            if (ch == null) return Vector2.zero;
+            var d = ch.direction;
+            return d.sqrMagnitude < 0.0001f ? Vector2.zero : d.normalized;
+        }
+        catch { return Vector2.zero; }
+    }
+
+    /// <summary>Are they holding a movement key at all?</summary>
+    internal static bool PlayerIsPressingMove()
+    {
+        try { return LazyInput.GetDirection().sqrMagnitude > 0.0001f; }
+        catch { return false; }
+    }
+
+    /// Which graph answered the last guided route: 0 = coarse world mesh, 2 = fine player graph.
+    internal static int LastGuidedRouteGraph { get; private set; }
+
+    /// <summary>
+    /// Is the game currently walking the player (their own keys, or ours)? Used by the guided walk
+    /// to tell "pushing into a wall" — walking state, no movement — from simply standing still.
+    /// </summary>
+    internal static bool PlayerIsWalking()
+    {
+        try { return MainGame.me?.player?.components?.character?.IsInMovingState() ?? false; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Ask for a walking route and hand the waypoints to <paramref name="onDone"/> (null on
+    /// failure). Graph 0 (the whole-map NPC navmesh) answers most of it; when it has nothing —
+    /// doors, building interiors, short hops onto an interaction tile — the PLAYER graph is asked
+    /// instead, which is exactly what auto-walk falls back on and why auto-walk reaches places
+    /// turn-by-turn used to declare unreachable. Standalone: touches none of the long-walk state,
+    /// so a guided walk and an auto-walk can never confuse each other.
+    /// Returns false if no query could be started at all.
+    /// </summary>
+    internal static bool RequestGuidedRoute(Vector2 from, Vector2 to, bool preferPlayerGraph,
+                                            Action<List<Vector2>> onDone)
+    {
+        // Which graph to ask FIRST. The player graph (graph 2) has 8-unit nodes and is built from
+        // the player's own collision, so it knows every fence, gate and farm plot; the world mesh
+        // (graph 0) has 76-unit nodes and covers the map. Auto-walk picks between them by distance
+        // and is reliable, so turn-by-turn now does the same: near targets, and anything after
+        // walking into something, get the fine graph.
+        float dist = Vector2.Distance(from, to);
+        bool fineFirst = preferPlayerGraph || dist <= LongWalkStartDistance;
+
+        if (fineFirst)
+        {
+            // SnapToWalkable rescans the player graph over player->target and pulls the destination
+            // onto a real node — exactly what auto-walk does before its own A*. PadPlayerGraph is
+            // the other half of that, and its absence here was the bug: the game scans only a thin
+            // rectangle between the two points plus about two tiles, so a way round that leaves
+            // that strip — through the gate of a fenced yard, say — simply is not in the graph, and
+            // the query answers "no path" while the player can plainly walk it. Auto-walk pads;
+            // this now pads too.
+            Vector2 fineDest;
+            PadPlayerGraph = true;
+            try { fineDest = SnapToWalkable(to); }
+            finally { PadPlayerGraph = false; }
+            _lastPlayerGraphRefresh = Time.realtimeSinceStartup;
+
+            return StartRouteQuery(from, fineDest, AStarTools.PLAYER_GRAPH_N, route =>
+            {
+                if (route != null) { onDone(route); return; }
+
+                // Still nothing. Before handing the job to a graph that cannot see fences, scan a
+                // proper area around the player and ask the fine one once more.
+                RefreshPlayerGraphAround(from, WideGuidedRescanTiles, force: true);
+                if (StartRouteQuery(from, fineDest, AStarTools.PLAYER_GRAPH_N, wider =>
+                {
+                    if (wider != null) { onDone(wider); return; }
+                    var coarse = TrySnapGraph0(to, out var s2, out _) ? s2 : to;
+                    if (!StartRouteQuery(from, coarse, 0, onDone)) onDone(null);
+                })) return;
+
+                var fallback = TrySnapGraph0(to, out var s, out _) ? s : to;
+                if (!StartRouteQuery(from, fallback, 0, onDone)) onDone(null);
+            });
+        }
+
+        // Far away: the world mesh is the only one that spans the distance. If it has nothing,
+        // fall back to the fine graph around the player.
+        var snapped = TrySnapGraph0(to, out var s0, out _) ? s0 : to;
+        return StartRouteQuery(from, snapped, 0, route =>
+        {
+            if (route != null) { onDone(route); return; }
+            if (!RefreshPlayerGraphFor(from, to) ||
+                !StartRouteQuery(from, to, AStarTools.PLAYER_GRAPH_N, onDone))
+                onDone(null);
+        });
+    }
+
+    /// One async path query on one graph. Null to the callback on any failure.
+    private static bool StartRouteQuery(Vector2 from, Vector2 to, int graph, Action<List<Vector2>> onDone)
+    {
+        try
+        {
+            if (AstarPath.active == null) return false;
+
+            var path = Pathfinding.ABPath.Construct(
+                new Vector3(from.x, from.y, 0f),
+                new Vector3(to.x, to.y, 0f),
+                p =>
+                {
+                    try
+                    {
+                        if (p == null || p.error || p.vectorPath == null || p.vectorPath.Count < 2)
+                        {
+                            _log?.LogInfo($"[NAVIGATOR] Guided route on graph {graph}: no path");
+                            onDone(null);
+                            return;
+                        }
+                        var pts = new List<Vector2>(p.vectorPath.Count);
+                        foreach (var w in p.vectorPath) pts.Add(new Vector2(w.x, w.y));
+                        _log?.LogInfo($"[NAVIGATOR] Guided route on graph {graph}: {pts.Count} waypoints");
+                        LastGuidedRouteGraph = graph;
+                        onDone(pts);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log?.LogWarning($"[NAVIGATOR] Guided route callback failed: {ex.Message}");
+                        onDone(null);
+                    }
+                });
+
+            var constraint = Pathfinding.NNConstraint.Default;
+            constraint.graphMask = 1 << graph;
+            path.nnConstraint = constraint;
+
+            AstarPath.StartPath(path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Guided route request on graph {graph} failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    // The player-graph rescan is synchronous (AstarPath.Scan on graph 2), so it is rate-limited:
+    // the guided walk may ask for a route several times a minute, and the game already does this
+    // scan on every auto-walk.
+    private static float _lastPlayerGraphRefresh;
+    private const float PlayerGraphRefreshInterval = 2f;
+    // How much ground to scan when the fine graph's first answer is "no path": enough to contain
+    // the way round a fenced yard rather than just the strip between here and there.
+    private const float WideGuidedRescanTiles = 16f;
+
+    private static bool RefreshPlayerGraphFor(Vector2 from, Vector2 to)
+    {
+        if (Time.realtimeSinceStartup - _lastPlayerGraphRefresh < PlayerGraphRefreshInterval)
+            return true;   // recent enough; the existing scan almost certainly still covers this
+        try
+        {
+            _lastPlayerGraphRefresh = Time.realtimeSinceStartup;
+            // PadPlayerGraph widens the scanned rectangle (see RefreshPlayerGraph_Prefix) so the
+            // search has room to go around a wall instead of only along the straight line.
+            PadPlayerGraph = true;
+            try { AStarTools.RefreshPlayerGraph(from, to); }
+            finally { PadPlayerGraph = false; }
+            _log?.LogInfo($"[NAVIGATOR] Player graph rescanned for guided route {from} -> {to}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Player graph refresh failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Silently drop whatever the mod was driving so the player has their own legs back. Never
+    /// announces: the guided walk speaks its own opening line right after.
+    /// </summary>
+    internal static void StopMovementForGuidedWalk()
+    {
+        _longWalkActive = false;
+        _beaconActive = false;
+        _routePending = false;
+        _routeNeedsRecompute = false;
+        _exitAssisting = false;
+        _fallbackPending = false;
+        _escalatePending = false;
+        _isWalking = false;
+        _walkWatchdog = 0;
+        ReleaseScriptControl();
+    }
+
+    internal static void StartBeaconFor(NavigationTarget target) => StartBeacon(target);
+
+    /// <summary>
+    /// How far a point is from an object's actual outline, rather than from the anchor the game
+    /// sorts it by. For anything large — a farm plot, a building, a workbench — those are metres
+    /// apart, which is why "am I there yet" measured against the anchor can still say no while the
+    /// player is standing flat against the thing.
+    /// </summary>
+    internal static float DistanceToObjectEdge(WorldGameObject obj, Vector2 p)
+    {
+        try
+        {
+            if (obj == null || obj.is_removed) return float.MaxValue;
+            var b = obj.GetTotalBounds();
+            if (b.size.sqrMagnitude <= 0.0001f) return Vector2.Distance(p, obj.pos);
+            return Mathf.Sqrt(b.SqrDistance(new Vector3(p.x, p.y, b.center.z)));
+        }
+        catch { return float.MaxValue; }
+    }
+
+    /// <summary>Is the player inside a building right now (the game's own environment flag)?</summary>
+    internal static bool PlayerIsInsideBuilding()
+    {
+        try
+        {
+            var ch = MainGame.me?.player?.components?.character;
+            return ch != null && ch.cur_environment == BaseCharacterComponent.Environment.Inside;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>The nearest door, for guiding someone out of a building they are shut inside.</summary>
+    internal static bool TryNearestDoorTarget(out NavigationTarget door)
+    {
+        var d = NearestDoor();
+        door = d ?? default;
+        return d != null;
+    }
+
+    /// <summary>
+    /// The player walked themselves all the way in. Do what an auto-walk arrival does — face the
+    /// object and bias the game's interaction pick onto it — so plain E works without nudging.
+    /// </summary>
+    internal static void NotifyGuidedArrival(NavigationTarget target, Vector2? facePos)
+    {
+        var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+        FaceGuidedArrival(target, facePos);
+        ScreenReader.Say(Loc.Fmt("nav.arrived_at", target.Label,
+                                 DistanceText(Vector2.Distance(playerPos, target.Position))),
+                         interrupt: true);
+    }
+
+    /// <summary>
+    /// The silent half of an arrival: face the object and bias the game's interaction onto it, so
+    /// plain E works. Split out for arrivals that want to say something of their own (reaching a
+    /// door on the way somewhere else).
+    /// </summary>
+    internal static void FaceGuidedArrival(NavigationTarget target, Vector2? facePos)
+    {
+        _walkFacePos = facePos ?? target.Position;
+        FacePlayerAtTarget();
+        SetArrivedTarget(target.Object);
+    }
+
     // ---- Compass beacon (manual fallback guidance) -------------------------
 
     private static void StartBeacon(NavigationTarget target)
@@ -1736,6 +2157,7 @@ internal static class ObjectNavigator
         // The player walks manually in beacon mode, so make sure scripted control is released
         // (a failed auto-walk hop can leave the player frozen otherwise).
         ReleaseScriptControl();
+        GuidedWalk.Stop(announce: false);   // one manual guidance mode at a time
         _isWalking = false;
         _beaconActive = true;
         _beaconTarget = target;
@@ -2521,9 +2943,12 @@ internal static class ObjectNavigator
     /// </summary>
     internal static void CancelNavigation()
     {
+        // Order matters: Escape means "stop what is happening to me". Something actually moving the
+        // player is always that; the guidance MODE is only what Escape means when nothing is.
         if (_longWalkActive) StopLongWalk(announce: true);
         else if (_beaconActive) StopBeacon();
         else if (_isWalking) StopWalking();
+        else if (GuidedWalk.IsEnabled) GuidedWalk.Disable(announce: true);
     }
 
     /// <summary>
@@ -2534,6 +2959,7 @@ internal static class ObjectNavigator
     /// </summary>
     internal static void ResetNavStateOnSceneChange()
     {
+        GuidedWalk.Stop(announce: false);
         _astarFailedForWalk = false;
         _rescanRetried = false;
         _rescanRetryPending = false;
@@ -2591,6 +3017,7 @@ internal static class ObjectNavigator
     {
         try
         {
+            GuidedWalk.Suspend();
             _longWalkActive = false;
             _beaconActive = false;
             _isWalking = false;
@@ -2650,6 +3077,8 @@ internal static class ObjectNavigator
         if (!playerEnabled && affectCinematic)
         {
             _gameOwnsPlayer = true;
+            // Turn-by-turn never touches the body, so it just has to shut up and let the scene run.
+            GuidedWalk.Stop(announce: false);
             if (_isWalking || _longWalkActive || _beaconActive)
             {
                 // Drop every walk flag so our monitors stop poking the player, but leave

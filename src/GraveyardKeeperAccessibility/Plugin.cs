@@ -619,6 +619,7 @@ public class Plugin : BaseUnityPlugin
             //   PageUp / PageDown            -> previous / next object in category
             //   Ctrl+PageUp / Ctrl+PageDown  -> previous / next category
             //   Home / Ctrl+Home             -> announce / walk to selected
+            //   Ctrl+B                       -> turn-by-turn directions on / off (walk it yourself)
             //   Escape (while walking)       -> stop walking
             if (Input.GetKeyDown(KeyCode.PageDown))
             {
@@ -630,11 +631,21 @@ public class Plugin : BaseUnityPlugin
                 if (ctrl) ObjectNavigator.PreviousCategory();
                 else ObjectNavigator.SelectPrevious();
             }
+            // While turn-by-turn guidance is running, Home repeats the step you are on (which also
+            // names the target and what is left) — that is what you need at that moment, and the
+            // selected object is unchanged anyway.
+            else if (Input.GetKeyDown(KeyCode.Home) && !ctrl && GuidedWalk.IsActive)
+                GuidedWalk.RepeatStep();
             else if (Input.GetKeyDown(KeyCode.Home) && !ctrl)
                 ObjectNavigator.AnnounceSelected();
             else if (Input.GetKeyDown(KeyCode.Home) && ctrl)
                 ObjectNavigator.WalkToSelected();
-            else if (Input.GetKeyDown(KeyCode.Escape) && ObjectNavigator.IsBusy)
+            else if (Input.GetKeyDown(KeyCode.B) && ctrl)
+                GuidedWalk.Toggle();
+            // Escape stops guidance even when it is idle between targets — it is a mode now, and
+            // one stop key has to be able to switch it off.
+            else if (Input.GetKeyDown(KeyCode.Escape) &&
+                     (ObjectNavigator.IsBusy || GuidedWalk.IsEnabled))
                 ObjectNavigator.CancelNavigation();
             else if (Input.GetKeyDown(KeyCode.Q) && !ctrl)
                 DayTimeAnnouncer.Announce();

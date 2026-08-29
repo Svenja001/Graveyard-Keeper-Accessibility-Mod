@@ -20,8 +20,12 @@ All three binaries come from the `dynamic/release` folder of that release's plat
 | `libprism.so` | `prism-linux-x64.zip` | ELF x86-64 |
 | `libprism.dylib` | `prism-macos-universal.zip` | Mach-O universal (x86-64 + arm64) |
 
-One release zip serves every storefront and we cannot know which OS it will be installed on,
-so all three ship (~3.5 MB) and `PrismWrapper.NativeLibraryName()` picks one at runtime.
+We cannot know which OS a download will be installed on, so all three ship (~3.5 MB) and
+`PrismWrapper.NativeLibraryName()` picks one at runtime.
+
+The one download that carries **none** of them is `_WithBepInEx_GOG_32bit.zip`: every file here is
+64-bit, and the GOG build of the game is a 32-bit process. That bundle ships Tolk instead — see
+`libs/native/tolk/README.md`, which also explains why the two can never both be initialised.
 
 ⚠️ **Only the Windows path is verified.** The Linux and macOS libraries are bundled
 speculatively — nobody has confirmed that BepInEx 5 even loads on this game's native Mac and
