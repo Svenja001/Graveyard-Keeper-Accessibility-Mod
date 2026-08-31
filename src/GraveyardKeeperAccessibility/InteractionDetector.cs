@@ -1489,6 +1489,12 @@ internal static class InteractionDetector
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["mf_alchemy_survey"] = "station.mf_alchemy_survey",
+            // The witch hill portal's pedestals, where the sextant and the salty fork go. The game
+            // names them "Marmorpodest" / "Marble stand" — a decorative-sounding name that says
+            // nothing about the portal it opens, so in the crafting-station list a player had no
+            // way to tell that this is the thing the quest means.
+            ["marble_stand_active"] = "station.marble_stand_portal",
+            ["marble_stand_inactive"] = "station.marble_stand_portal",
         };
 
     // Objects the game ships with no translation at all and no craft/alias to borrow a name from,
@@ -1570,6 +1576,14 @@ internal static class InteractionDetector
                 if (!string.IsNullOrEmpty(wgo.obj_def.id) &&
                     StationNameOverrides.TryGetValue(wgo.obj_def.id, out var clearNameKey))
                     return Loc.Get(clearNameKey);
+
+                // Beds are named in-game after their BLANKET, not after the bed: the house bed is
+                // "Gewöhnliche Bettdecke" ("Ordinary bedspread") and the keeper's-room ones are
+                // "Blaue Bettdecke", "Rote Bettdecke" and so on. Nothing in that name says "bed",
+                // so a player looking for somewhere to sleep could not recognise one in a list.
+                // Say what it is; the cover's colour is decoration and navigates nobody anywhere.
+                if (ObjectNavigator.IsSleepingBed(wgo))
+                    return Loc.Get("obj.bed");
 
                 // Try to use the object id, localized to a readable name where possible.
                 // Furniture a build desk placed by script is spawned under an id the game never

@@ -51,6 +51,7 @@ internal enum NavCategory
     Mushrooms,
     Beehives,
     Gatherables,
+    GardenBeds,
     Breakables,
     Destructibles,
     Fences,
@@ -102,6 +103,7 @@ internal static class ObjectNavigator
         NavCategory.Mushrooms,
         NavCategory.Beehives,
         NavCategory.Gatherables,
+        NavCategory.GardenBeds,
         NavCategory.Breakables,
         NavCategory.Destructibles,
         NavCategory.Fences,
@@ -3375,6 +3377,10 @@ internal static class ObjectNavigator
                 var label = GetObjectLabelSafe(obj);
                 if (category == NavCategory.LoadedPallets || category == NavCategory.EmptyPallets)
                     label = PalletLabel(obj, label);
+                // Which stage the bed is at — marked out, empty, growing, ready — since the game
+                // gives every stage of one crop the same name.
+                if (category == NavCategory.GardenBeds)
+                    label = GardenBedLabel(obj, label);
                 // Worker zombies read out their efficiency + assignment here, since pressing E on
                 // one picks it up rather than inspecting it. No-op for non-workers.
                 label = InteractionDetector.AppendWorkerInfo(label, obj);
@@ -4474,6 +4480,127 @@ internal static class ObjectNavigator
         return n <= 0 ? baseLabel : Loc.Plural("nav.pallet_crates", n, baseLabel, n);
     }
 
+    /// <summary>
+    /// Every stage of a vegetable/grape bed: the plot marked out at the build desk
+    /// (garden_empty_place), the prepared bed you plant into (garden_empty, garden_empty_stick),
+    /// the growing crop (garden_wheat, garden_hop_growing, …) and the ripe one (garden_beet_ready).
+    /// All of them carry the "garden_" prefix; a few ids merely share it and are NOT beds — the
+    /// two build desks, the graveyard's stone-garden decoration and the garden totem. The vineyard's
+    /// grape beds and the refugee camp's beds (Game Of Crone) are the same thing under their own
+    /// ids; the camp's enclosure fence shares the camp prefix, so its beds are matched by the
+    /// fuller "…garden_bed" prefix rather than "…garden". Orchards and berry patches
+    /// (tree_apple_garden, bush_berry_garden), the bee garden and the zombie garden desk do not
+    /// carry the prefix at all and keep their own categories.
+    ///
+    /// The VILLAGE FARM's fields are excluded (see IsInertGardenBed). They are the farmer's, not
+    /// yours: garden_lentils_ready_village and its siblings are permanently ripe scenery, and
+    /// listing them sent the beacon 8600 units across the map to a crop announced as "ready to
+    /// harvest" that then ignored every keypress.
+    /// </summary>
+    private static bool IsGardenBed(WorldGameObject obj)
+    {
+        var id = obj?.obj_def?.id ?? obj?.obj_id;
+        if (string.IsNullOrEmpty(id)) return false;
+
+        bool isBed;
+        if (id.Equals("garden", StringComparison.OrdinalIgnoreCase) ||
+            id.StartsWith("garden_", StringComparison.OrdinalIgnoreCase))
+        {
+            isBed = id.IndexOf("builddesk", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    id.IndexOf("of_stones", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    id.IndexOf("totem", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+        else
+        {
+            isBed = id.StartsWith("vineyard_garden", StringComparison.OrdinalIgnoreCase) ||
+                    id.StartsWith("refugee_camp_garden_bed", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return isBed && !IsInertGardenBed(obj);
+    }
+
+    /// <summary>
+    /// A garden bed that is pure decoration — the village farm's fields. Told apart structurally
+    /// rather than by the "_village" id suffix, so any other scenery field is caught the same way:
+    /// a real bed always offers at least ONE of the three things a bed can have — an E interaction
+    /// (the prepared bed's planting craft), a tool action (dig the plot open, pull the ripe crop,
+    /// clear a wrecked trellis), or a running craft (a crop growing towards ripe). The farmer's
+    /// fields have none of the three: interaction None, no craft, no tool. Nothing the player does
+    /// can work, enter or change them, so there is nothing to navigate to.
+    /// </summary>
+    private static bool IsInertGardenBed(WorldGameObject obj)
+    {
+        try
+        {
+            var def = obj?.obj_def;
+            if (def == null) return false;
+            if (def.interaction_type != ObjectDefinition.InteractionType.None) return false;
+            if (def.has_craft) return false;
+            var tools = def.tool_actions;
+            return tools == null || tools.no_actions ||
+                   tools.action_tools == null || tools.action_tools.Count == 0;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// A garden bed's list label: its name plus which stage it is at, because the game names every
+    /// stage of one crop the same ("Weizenbeet" whether it is two days old or ready to pull) and
+    /// the whole point of one Beds category is being able to tell, from the list alone, which bed
+    /// wants something from you. Stage is read structurally, not from a table of ids: the marked
+    /// plot is the "_place" construction id, the ripe crop carries "ready", a bed with nothing in
+    /// it is either an "empty" id or (the vineyard/camp beds) still offers its planting craft, and
+    /// anything else is a crop still growing.
+    /// </summary>
+    private static string GardenBedLabel(WorldGameObject obj, string baseLabel)
+    {
+        try
+        {
+            var id = obj?.obj_def?.id ?? obj?.obj_id ?? "";
+
+            // A trampled/destroyed trellis is neither growing nor plantable until it is cleared.
+            if (id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
+                return Loc.Fmt("nav.label_broken", baseLabel, BrokenWord());
+
+            string stateKey;
+            if (id.EndsWith("_place", StringComparison.OrdinalIgnoreCase))
+                stateKey = "garden.state_marked";
+            else if (id.IndexOf("ready", StringComparison.OrdinalIgnoreCase) >= 0)
+                stateKey = "garden.state_ready";
+            else if (id.IndexOf("empty", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     obj?.obj_def?.interaction_type == ObjectDefinition.InteractionType.Craft)
+                stateKey = "garden.state_empty";
+            else
+                stateKey = "garden.state_growing";
+
+            return Loc.Fmt("nav.label_state", baseLabel, Loc.Get(stateKey));
+        }
+        catch { return baseLabel; }
+    }
+
+    /// <summary>
+    /// A bed the player sleeps in — the house bed ("bed"), the starting bed, the mining-hut bed,
+    /// the keeper's-room beds and the non-sleepable decorative copies. Excludes the corpse bed
+    /// (a body container, so it belongs with storage), garden beds and flower beds, which only
+    /// share the word.
+    /// </summary>
+    internal static bool IsSleepingBed(WorldGameObject obj)
+    {
+        var id = obj?.obj_def?.id ?? obj?.obj_id;
+        if (string.IsNullOrEmpty(id)) return false;
+        if (id.IndexOf("garden", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            id.IndexOf("corpse", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            id.IndexOf("flowerbed", StringComparison.OrdinalIgnoreCase) >= 0)
+            return false;
+
+        // "bed" as a word of its own, so nothing that merely contains the letters can match.
+        return id.Equals("bed", StringComparison.OrdinalIgnoreCase) ||
+               id.StartsWith("bed_", StringComparison.OrdinalIgnoreCase) ||
+               id.StartsWith("bed ", StringComparison.OrdinalIgnoreCase) ||
+               id.EndsWith("_bed", StringComparison.OrdinalIgnoreCase) ||
+               id.IndexOf("_bed_", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     private static bool TryClassify(WorldGameObject obj, out NavCategory category)
     {
         category = NavCategory.Other;
@@ -4637,6 +4764,33 @@ internal static class ObjectNavigator
             obj.obj_id.IndexOf("roof", StringComparison.OrdinalIgnoreCase) >= 0)
         {
             category = NavCategory.Roofs;
+            return true;
+        }
+
+        // Garden beds — every stage of one, from the plot you just marked out to the crop that is
+        // ready to pull. The game scatters them across three different buckets because each stage
+        // looks like a different kind of object: the marked plot (garden_empty_place) is a shovel
+        // node and landed in Gatherables, the prepared bed (garden_empty / garden_empty_stick) has
+        // a Craft interaction — planting seeds — and landed among the crafting stations, the
+        // growing crop has neither and was listed nowhere at all, and the ripe crop is a Hand node
+        // and landed back in Gatherables. A blind farmer therefore had to hunt through three lists
+        // to work one field. Collect them all in one category and let the label carry the stage
+        // (see GardenBedLabel). Checked before the interaction_type switch so the planting Craft
+        // can't claim the prepared bed first.
+        if (IsGardenBed(obj))
+        {
+            category = NavCategory.GardenBeds;
+            return true;
+        }
+
+        // Beds you sleep in. They are RunScript objects with no craft and (for the ones the game
+        // placed rather than you) no removal craft, so the RunScript branch below dropped them into
+        // the catch-all Other — the one list a player never browses — even though the branch's own
+        // comment lists beds as built furniture. File them with the rest of the furniture.
+        // See IsSleepingBed for what counts (garden beds and the corpse bed are not beds).
+        if (IsSleepingBed(obj))
+        {
+            category = NavCategory.Buildables;
             return true;
         }
 
@@ -5226,6 +5380,10 @@ internal static class ObjectNavigator
         category == NavCategory.Mushrooms ||
         category == NavCategory.Beehives ||
         category == NavCategory.Gatherables ||
+        // Garden beds are the same kind of thing: static outdoor nodes you walk to and work with
+        // a tool (dig / plant / harvest), culled the moment they leave the screen. Without the
+        // keep-while-culled reach a blind farmer could only find a bed already on screen.
+        category == NavCategory.GardenBeds ||
         category == NavCategory.Breakables ||
         category == NavCategory.Destructibles;
 

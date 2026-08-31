@@ -1,3 +1,36 @@
+## 0.2.1 | 31 August 2026
+
+**Three things that were filed in the wrong place, or under the wrong name.**
+
+- **Garden beds have a category of their own.** A bed changes what kind of object it is at every
+  stage of its life, and the tracker used to follow the game rather than the gardener: the plot you
+  had just marked out was a shovel node and sat in Gatherables, the prepared bed was a crafting
+  station (planting seeds is a craft), the growing crop was in no list at all, and the ripe crop was
+  back in Gatherables. Working one field meant hunting through three lists. Every stage now lands in
+  a single **Garden beds** category — the plain beds, the ones with sticks, the vineyard and the
+  refugee camp's beds.
+
+  Because the game gives every stage of a crop the same name, each entry now says which stage it is:
+  *still to dig*, *empty, plant here*, *growing*, *ready to harvest*. Beds stay listed while they are
+  off screen, at the same reach as the other things you walk out to and work, so you can find one
+  from across your plot instead of only when it is already in front of you.
+
+  **The village farm's fields are not in the list.** They belong to the farmer, and the game leaves
+  them permanently ripe as scenery — there is no way to pick them. They looked exactly like your own
+  ripe crop, so the list offered them and walking to one across the whole map ended at a bed that
+  ignored every keypress. Only beds you can actually do something at are listed now.
+
+- **The portal pedestal on the witch hill says what it is.** The game calls it "Marble pedestal",
+  which sounds like scenery and gave no hint that this is where the things to end the game go to
+  open the portal. It now reads as the portal's marble stand. It stays under crafting stations,
+  which is what it is when you stand at it.
+
+- **Your bed is called a bed.** The game names beds after their blanket — the one in your house is
+  "Common bedspread", and the keeper's-room ones are "Blue bedspread", "Red bedspread" and so on —
+  so nothing in the spoken name said *bed*, and looking for somewhere to sleep turned up nothing.
+  Beds now read as "Bed", and they moved out of the Other list, where they had been sitting with the
+  scenery, into Built objects with the rest of the furniture.
+
 ## 0.2.0 | 29 August 2026
 
 **Walk there yourself, one direction at a time.** Auto-walk (Ctrl+Home) does the walking for you,
