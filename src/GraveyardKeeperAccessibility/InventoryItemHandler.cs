@@ -168,7 +168,7 @@ internal static class InventoryItemHandler
             // Stable sort: chest items first, then the player's inventory.
             foreach (var elem in discovered.OrderBy(e => e.SortRank))
             {
-                _log?.LogInfo($"[INVENTORY] Adding item cell: '{elem.Label}'");
+                _log?.LogDebug($"[INVENTORY] Adding item cell: '{elem.Label}'");
                 elements.Add(elem);
             }
         }

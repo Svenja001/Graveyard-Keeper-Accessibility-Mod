@@ -1,4 +1,4 @@
-namespace GraveyardKeeperAccessibility;
+﻿namespace GraveyardKeeperAccessibility;
 
 internal struct NavigationTarget
 {
@@ -247,6 +247,24 @@ internal static class ObjectNavigator
     // errors. We then pull the destination toward the player and retry until it lands on reachable
     // navmesh (the island's edge nearest the target), walk there, and report the remaining gap.
     private static int _pullbackTries = 0;
+    // One fine-player-graph route attempt per long walk, after graph 0 has given up. See HandleNoRoute.
+    private static bool _fineRouteTried;
+    // The PLAYER, not the target, is the end with no node on the NPC navmesh — set by
+    // RequestGraph0Route when the start will not snap. Pulling the destination in cannot help then;
+    // see HandleNoRoute.
+    private static bool _startOffWorldMesh;
+    // Escape leg: a short first hop back onto the NPC navmesh before the real route. See
+    // TryEscapeLegToWorldMesh. The original destination is parked here while the hop runs.
+    // The route currently being driven, and whether it came from the WORLD mesh (graph 0, which
+    // knows the roads) or from the fine player graph. Kept so a wall recovery can resume the route
+    // it was already on instead of throwing it away — see StopInsideWall.
+    private static List<Vector3> _currentRoute;
+    private static bool _routeIsWorldMesh;
+
+    private static bool _escapeLegActive;
+    private static NavigationTarget _escapeLegTarget;
+    private static Vector2 _escapeLegRealDest;   // _longWalkDest parked while the hop borrows it
+    private static int _escapeLegsUsed;
     private static Vector2 _longWalkDest;            // route end (approach point near the target)
     // Partial-route chaining: when the target is unreachable on the navmesh (e.g. an NPC inside
     // a building), graph 0 returns a path to the closest reachable node — the entrance/outside.
@@ -465,6 +483,33 @@ internal static class ObjectNavigator
     // the player-graph bounds for our walks without affecting vanilla pathfinding.
     internal static bool PadPlayerGraph { get; private set; }
 
+    /// <summary>
+    /// How much slack to add on every side of the player-graph scan (see
+    /// <c>Patches.RefreshPlayerGraph_Prefix</c>).
+    ///
+    /// WHY IT IS NOT ONE NUMBER: the game scans the player graph over a thin rectangle between the
+    /// player and the destination, so a route that has to leave that strip is simply not in the
+    /// graph and the search answers "no path" for somewhere the player can plainly walk. Five tiles
+    /// of slack covers going round a fence. It does not cover going round a BUILDING, which is what
+    /// the graveyard asks for: walking from the graves to the mortuary door, both A* attempts and
+    /// the graph-0 escalation all failed, and then turn-by-turn guidance found a perfectly good
+    /// 243-waypoint route the moment it rescanned a wider box. Nothing was in the way that a player
+    /// could not walk around; the way around was outside the search area.
+    ///
+    /// A wide scan is not free — a 16-tile box measured 113ms — so it is spent only on the retry
+    /// after a walk has already failed once, where the alternative is giving up.
+    /// </summary>
+    internal static float PlayerGraphPadUnits =>
+        _padOverrideUnits ?? (_widePlayerGraphPad ? WidePlayerGraphPad : NormalPlayerGraphPad);
+
+    /// Set for one scan when a caller needs its own box size — see TryEscapeLegByExploring, which
+    /// scans a square round the player rather than a strip toward anything.
+    private static float? _padOverrideUnits;
+
+    private static bool _widePlayerGraphPad;
+    private const float NormalPlayerGraphPad = 5f * TileSize;
+    private const float WidePlayerGraphPad = 14f * TileSize;
+
     internal static void Init(ManualLogSource log)
     {
         _log = log;
@@ -569,7 +614,12 @@ internal static class ObjectNavigator
                 {
                     _rescanRetryPending = false;
                     _log?.LogInfo($"[NAVIGATOR] Retrying walk to {_rescanRetryTarget.Label} after navmesh rescan");
-                    WalkToTarget(_rescanRetryTarget);
+                    // The first attempt already failed with the normal bounds, so widen them for
+                    // this one — see WidePlayerGraphPad. Costs one bigger graph scan, on a path
+                    // whose only other outcome is giving up.
+                    _widePlayerGraphPad = true;
+                    try { WalkToTarget(_rescanRetryTarget); }
+                    finally { _widePlayerGraphPad = false; }
                 }
             }
             // A* failed on a short walk — retry through the fence-aware graph-0 route (gates)
@@ -580,12 +630,35 @@ internal static class ObjectNavigator
                 _escalatePending = false;
                 StartLongWalk(_shortWalkTarget);
             }
-            // Run a queued straight-line fallback (A* couldn't find a path).
+            // Run a queued straight-line fallback (A* couldn't find a path). Same rule as the
+            // glide: a Kinematic body on a two-point path goes through whatever is between here and
+            // there, so the line has to be clear before we drive the player down it.
             else if (_fallbackPending)
             {
                 _fallbackPending = false;
-                StartWalk(_fallbackDest, _fallbackLabel, MovementComponent.GoToMethod.Direct);
+                var from = PlayerBodyPos(MainGame.me?.player);
+                if (StraightLineIsWalkable(from, _fallbackDest))
+                {
+                    StartWalk(_fallbackDest, _fallbackLabel, MovementComponent.GoToMethod.Direct);
+                }
+                else
+                {
+                    _isWalking = false;
+                    ReleaseScriptControl();
+                    _log?.LogWarning($"[NAVIGATOR] Direct fallback to {_fallbackLabel} would pass through geometry; guiding instead");
+                    ScreenReader.Say(Loc.Fmt("nav.manual_guidance", _fallbackLabel), interrupt: true);
+                    // This fallback only runs for a target with no world object behind it (a
+                    // landmark point), so hand guidance the destination itself rather than a
+                    // half-filled target struct.
+                    GuidedWalk.StartTo(
+                        new NavigationTarget { Label = _fallbackLabel, Position = _fallbackDest },
+                        announceStart: false, allowBeaconFallback: true);
+                }
             }
+
+            // Stop a walk of ours at the face of a wall rather than let it slide through — and log
+            // it either way. See WatchForWallCrossing.
+            WatchForWallCrossing();
 
             // Watch for every kind of world switch and hand them all to the same handler.
             DetectWorldTransitions();
@@ -749,6 +822,7 @@ internal static class ObjectNavigator
             // The object set and the zone set both change across a transition, so drop the caches
             // that assume they didn't. Both are rebuilt lazily on the refresh this just queued.
             InvalidateZoneCache();
+            StockPointFilter.Invalidate();
             WorldObjectRegistry.RequestResync(reason);
         }
 
@@ -1071,6 +1145,9 @@ internal static class ObjectNavigator
         // arrival sets its own).
         _astarFailedForWalk = false;
         _rescanRetried = false;
+        _wallRecoveries = 0;
+        _currentRoute = null;
+        _routeIsWorldMesh = false;
         _rescanRetryPending = false;
         ClearArrivedTarget();
         // Asking to be walked there replaces any turn-by-turn guidance in progress.
@@ -1170,6 +1247,9 @@ internal static class ObjectNavigator
         // Fresh user walk: clear the "A* already failed" guards (mirrors WalkToSelected).
         _astarFailedForWalk = false;
         _rescanRetried = false;
+        _wallRecoveries = 0;
+        _currentRoute = null;
+        _routeIsWorldMesh = false;
         _rescanRetryPending = false;
         ClearArrivedTarget();
         GuidedWalk.Stop(announce: false);
@@ -1257,14 +1337,25 @@ internal static class ObjectNavigator
 
     // ---- Long-distance auto-walk (native full-path follow) -----------------
 
-    private static void StartLongWalk(NavigationTarget target)
+    /// <param name="afterEscapeLeg">
+    /// True when this is the real walk being resumed after an escape leg put the player back on the
+    /// NPC navmesh. Two things follow. It keeps <see cref="_escapeLegsUsed"/>, so a second failure
+    /// cannot start another hop and loop; a walk the player asks for themselves always gets a fresh
+    /// budget. And it stays SILENT: the destination was announced when the player asked for it a
+    /// second or two ago, and the hop is an implementation detail of that one walk, not a new one.
+    /// </param>
+    private static void StartLongWalk(NavigationTarget target, bool afterEscapeLeg = false)
     {
         _longWalkActive = true;
         _longWalkTarget = target;
         _longWalkStuckTicks = 0;
         _routeNeedsRecompute = false;
         _exitAssisting = false;
+        _escapeLegActive = false;
+        if (!afterEscapeLeg) _escapeLegsUsed = 0;
         _pullbackTries = 0;
+        _fineRouteTried = false;
+        _startOffWorldMesh = false;
         _routeReachesTarget = true;
         _finalPartial = false;
         _bestEndGap = float.MaxValue;
@@ -1272,8 +1363,10 @@ internal static class ObjectNavigator
         var pp = MainGame.me?.player?.pos ?? Vector2.zero;
         _longWalkProgressPos = pp;
         _longWalkAnnouncePos = pp;
-        ScreenReader.Say(Loc.Fmt("nav.walking_to_dir", target.Label, DirectionTo(target), DistanceText(Vector2.Distance(pp, target.Position))), interrupt: true);
-        _log?.LogInfo($"[NAVIGATOR] Long walk started to {target.Label}");
+        if (!afterEscapeLeg)
+            ScreenReader.Say(Loc.Fmt("nav.walking_to_dir", target.Label, DirectionTo(target), DistanceText(Vector2.Distance(pp, target.Position))), interrupt: true);
+        _log?.LogInfo($"[NAVIGATOR] Long walk started to {target.Label}" +
+                      (afterEscapeLeg ? " (resumed after escape leg, not re-announced)" : ""));
 
         // Ask the whole-map NPC navmesh for an obstacle-aware route to the interaction tile;
         // OnRouteComputed injects it into the native follower.
@@ -1303,6 +1396,22 @@ internal static class ObjectNavigator
                     _log?.LogInfo($"[NAVIGATOR] Snapped route dest {to} -> {snappedTo} ({snapDist:F0}u, graph 0)");
                 to = snappedTo;
             }
+            else
+            {
+                _log?.LogInfo($"[NAVIGATOR] Route dest {to} has no walkable graph-0 node");
+            }
+
+            // And ask the same of the START. Graph 0's nodes are 76 units — nearly a whole tile —
+            // so among packed graves, or standing in an alcove, there is no walkable node under the
+            // player at all, and then EVERY query from here errors no matter where it is pointed.
+            // That is not a fact the old log could show: a walk out of the graveyard burned five
+            // "pulling dest toward player" retries that were moving the end that was never the
+            // problem, and the player was left on the beacon. Recording it lets HandleNoRoute skip
+            // straight to the graph that can see the gaps.
+            _startOffWorldMesh = !TrySnapGraph0(from, out _, out _);
+            if (_startOffWorldMesh)
+                _log?.LogWarning($"[NAVIGATOR] Player at {from} is off the NPC navmesh " +
+                                 "(no walkable graph-0 node) — graph-0 routing cannot work from here");
 
             var path = Pathfinding.ABPath.Construct(
                 new Vector3(from.x, from.y, 0f),
@@ -1334,6 +1443,13 @@ internal static class ObjectNavigator
         {
             if (p == null || p.error || p.vectorPath == null || p.vectorPath.Count < 2)
             {
+                // A* says WHY it failed, and the reason names the end that broke ("Couldn't find a
+                // close node to the start point" vs the end point vs a genuinely searched-out graph).
+                // Without it the log only ever said "unreachable", which is the one thing that was
+                // never in doubt.
+                var why = p?.errorLog;
+                if (!string.IsNullOrEmpty(why))
+                    _log?.LogInfo($"[NAVIGATOR] Graph-0 route failed: {why.Replace('\n', ' ').Trim()}");
                 HandleNoRoute();
                 return;
             }
@@ -1374,7 +1490,13 @@ internal static class ObjectNavigator
     /// physics-based, collision-aware movement — the same system NPCs use to thread village gates
     /// — so the player no longer jams at narrow passages the way our leg-by-leg driving did.
     /// </summary>
-    private static void StartNativePathWalk(List<Vector3> waypoints)
+    /// <param name="checkAgainstWorldMesh">
+    /// Whether to vet the route against graph 0 first. True for a graph-0 route, whose own legs must
+    /// stay on graph-0 walkable ground. FALSE for a route from the fine player graph: that one is
+    /// legitimately threading gaps graph 0 calls solid — that is the entire reason it was asked —
+    /// so checking it against graph 0 would reject every route it ever produces.
+    /// </param>
+    private static void StartNativePathWalk(List<Vector3> waypoints, bool checkAgainstWorldMesh = true)
     {
         try
         {
@@ -1384,6 +1506,19 @@ internal static class ObjectNavigator
             // Copy with z=0 — a waypoint with z>=1000 is a teleport marker in the follower.
             var path = new List<Vector3>(waypoints.Count);
             foreach (var w in waypoints) path.Add(new Vector3(w.x, w.y, 0f));
+
+            // The follower walks the route as straight lines between waypoints, and it does it with
+            // the body Kinematic, so a leg that cuts across a corner takes the player THROUGH it
+            // rather than jamming. Check the route before handing it over — once, here, rather than
+            // watching the player every frame, because the route is the thing that is either right
+            // or wrong and a per-frame probe under a moving body misreads walking close to a wall.
+            var corner = checkAgainstWorldMesh ? FirstRouteLegThroughGeometry(path) : null;
+            if (corner.HasValue)
+            {
+                _log?.LogWarning($"[NAVIGATOR] Graph-0 route cuts through solid ground near {corner.Value}; guiding instead");
+                BeaconBail("route would pass through geometry");
+                return;
+            }
 
             var finalDest = (Vector2)path[path.Count - 1];
 
@@ -1409,6 +1544,10 @@ internal static class ObjectNavigator
                 target_gd_point: null);
 
             character.cur_astar_path = path;
+            _currentRoute = path;
+            // checkAgainstWorldMesh is only ever true for a graph-0 route, so it doubles as "this
+            // route came from the road network" — the thing a wall recovery must not discard.
+            _routeIsWorldMesh = checkAgainstWorldMesh;
 
             _isWalking = true;
             _walkWatchdog = 0;
@@ -1424,6 +1563,51 @@ internal static class ObjectNavigator
             BeaconBail("inject failed");
         }
     }
+
+    /// <summary>
+    /// Walk the route the game's follower is about to be given and return the first point on it
+    /// that graph 0 — the very graph the route came from — calls solid, or null if it is clean.
+    ///
+    /// A graph-0 node is 76 units across, so a route between two waypoints several nodes apart can
+    /// pass over ground neither endpoint knew about. Asked of graph 0 and ONLY graph 0 on purpose:
+    /// the player graph calls every village gate blocked (that is why routes get escalated to
+    /// graph 0 in the first place), so asking it here would reject every route through town. Where
+    /// graph 0 has no data at all the answer is "clear" — the same rule as
+    /// <see cref="StraightLineIsWalkable"/>, and for the same reason.
+    /// </summary>
+    private static Vector2? FirstRouteLegThroughGeometry(List<Vector3> path)
+    {
+        try
+        {
+            if (path == null || path.Count < 2) return null;
+
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                Vector2 a = path[i], b = path[i + 1];
+                var delta = b - a;
+                float length = delta.magnitude;
+                if (length <= RouteProbeStep) continue;
+                var dir = delta / length;
+
+                // Endpoints are route nodes and walkable by construction; only the span between
+                // them can hide a wall, so sample strictly inside it.
+                for (float t = RouteProbeStep; t < length - RouteProbeStep * 0.5f; t += RouteProbeStep)
+                {
+                    var p = a + dir * t;
+                    if (IsKnownBlockedOnWorldMesh(p)) return p;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // A probe that cannot run must never be the reason auto-walk stops working.
+            _log?.LogWarning($"[NAVIGATOR] Route clearance probe failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// Slightly under one graph-0 node (76 units), so no node on a leg can be stepped over.
+    private const float RouteProbeStep = 64f;
 
     private static void OnNativeWalkComplete()
     {
@@ -1446,6 +1630,20 @@ internal static class ObjectNavigator
 
         if (!_longWalkActive) return;
         var target = _longWalkTarget;
+
+        // Escape-leg arrival: back on the NPC navmesh. Pick the real walk up again from here without
+        // saying anything — to the player this is one continuous walk that took a moment to get
+        // going, so re-announcing the destination is just the same sentence twice. It keeps the
+        // escape budget, so if this spot is somehow still off the navmesh the fine-graph route and
+        // the beacon take over rather than another hop.
+        if (_escapeLegActive)
+        {
+            _escapeLegActive = false;
+            var resumed = _escapeLegTarget;
+            _log?.LogInfo($"[NAVIGATOR] Escape leg done; resuming walk to {resumed.Label}");
+            StartLongWalk(resumed, afterEscapeLeg: true);
+            return;
+        }
 
         // Exit-assist arrival: at the door. Face it and remind the player to step outside.
         if (_exitAssisting)
@@ -1565,8 +1763,19 @@ internal static class ObjectNavigator
         // Target on a graph-0 island (e.g. the house): pull the destination toward the player and
         // retry. The first point that routes is the reachable navmesh nearest the target; we walk
         // there and OnNativeWalkComplete reports the remaining gap to the real target.
+        //
+        // Only when the destination is the end that failed. If the PLAYER has no walkable graph-0
+        // node under them, dragging the destination closer changes nothing — every query still
+        // errors at the start — and each retry is a wasted path search before the graph that could
+        // actually answer gets asked. A walk out of the graveyard spent five of them, converging on
+        // the same point twice over, and then beaconed.
         var player = MainGame.me?.player;
-        if (player != null && _pullbackTries < MaxPullbackTries)
+        if (_startOffWorldMesh && !_fineRouteTried &&
+            TryFineGraphRoute("player is off the NPC navmesh; pulling the destination cannot help",
+                              FallBackToEscapeOrBeacon))
+            return;
+
+        if (player != null && !_startOffWorldMesh && _pullbackTries < MaxPullbackTries)
         {
             var pp = player.pos;
             var toPlayer = pp - _longWalkDest;
@@ -1581,16 +1790,422 @@ internal static class ObjectNavigator
             }
         }
 
-        // Graph-0 can't reach the target. For a NEARBY target this is the tell-tale of a building
-        // interior — the house/mortuary sit on a graph-0 island disconnected from the outdoor
-        // navmesh, and the player graph frequently has no node near the object either (e.g. the
-        // bed inside the house: "No walkable player-graph node near target"). Rather than dumping a
-        // blind player onto the manual compass beacon, glide there in a straight line: during a
-        // scripted walk the body is Kinematic (control disabled), so it slides to the spot without
-        // jamming on the walls, and inside a single room the line to the target is clear. Bounded to
-        // short hops — a FAR graph-0 failure would try to glide across the whole map through walls,
-        // so that still beacons. An outdoor target behind a fence never reaches here (graph-0 routes
-        // it through the gate), so this doesn't clip through outdoor fences.
+        // Before giving up on driving at all: ask the FINE graph.
+        //
+        // Graph 0 is the NPC navmesh and its nodes are 76 units — nearly a whole tile. In a place
+        // packed with objects there is no walkable node left in the gaps, so it reports "no route"
+        // for ground a player walks through without thinking. The graveyard is exactly that: from
+        // among the graves, both A* attempts AND graph 0 failed to reach the mortuary door, and
+        // then turn-by-turn guidance found an ordinary 243-waypoint route on the PLAYER graph,
+        // whose 8-unit nodes fit between the headstones. The route was always there; nothing was
+        // asking the graph that could see it.
+        //
+        // So try that route and drive it, exactly like a graph-0 one. Once per walk — if the fine
+        // graph cannot find one either, we really are out of options and fall through below.
+        if (!_fineRouteTried && TryFineGraphRoute("graph 0 gave up", FallBackToEscapeOrBeacon))
+            return;
+
+        FallBackToEscapeOrBeacon();
+    }
+
+    /// <summary>
+    /// Everything aimed AT the destination has failed. Before handing the player a compass bearing,
+    /// look around: <see cref="TryEscapeLegByExploring"/>.
+    ///
+    /// The gate used to be "the player cannot snap to a graph-0 node", and that was wrong in the one
+    /// place it mattered. At the graveyard chest dock the player snaps perfectly well — to a node on
+    /// an ISOLATED island — so the escape leg never ran there at all and the walk went straight to
+    /// the pullback loop and the beacon. Total routing failure is the honest signal; how the player's
+    /// own node happens to snap says nothing about whether they are stuck.
+    /// </summary>
+    private static void FallBackToEscapeOrBeacon()
+    {
+        if (_escapeLegsUsed < MaxEscapeLegs && TryEscapeLegByExploring()) return;
+        FallBackToGlideOrBeacon();
+    }
+
+    /// One exploration per walk. If it does not get the player somewhere a route exists, a second
+    /// would flood the same ground again; the glide and the beacon take over instead.
+    private const int MaxEscapeLegs = 1;
+
+    /// How far the exploration may wander, as PATH length in tiles (not straight-line distance).
+    /// The player got out of the graveyard pocket by hand in under four tiles; twelve leaves room
+    /// for a pocket whose way out doubles back.
+    private const int EscapeFloodTiles = 12;
+
+    /// Grid-graph connection costs are nodeSize * 1000 (GridGraph.SetUpOffsetsAndCosts), so a cost
+    /// unit is a thousandth of a world unit and a path-length budget converts straight across.
+    private const int EscapeFloodMaxGScore = (int)(EscapeFloodTiles * TileSize) * 1000;
+
+    /// Slack added round the player-graph scan for the exploration, on every side. Eight tiles gives
+    /// a 16-tile box - the size the perf note measured at 113ms - and comfortably contains a way out
+    /// that the known case found in four.
+    private const float EscapeGraphPadUnits = 8f * TileSize;
+
+    /// Do not bother hopping for less than this: a walk shorter than a tile and a half is the 1-tile
+    /// nudge guided walk already loops on, and it would burn the one exploration this walk gets.
+    private const float EscapeMinProgress = 1.5f * TileSize;
+
+    /// <summary>
+    /// Look around, then walk to wherever local exploration got closest to the target, and resume.
+    ///
+    /// WHY EXPLORING RATHER THAN AIMING. Every other attempt in this class is a point-to-point
+    /// search aimed AT the destination, over a player graph the game rebuilds as a thin strip
+    /// between the player and that destination (AStarTools.RefreshPlayerGraph). Inside a pocket that
+    /// is unanswerable twice over: the way out is a dogleg, and the nodes for its first leg are not
+    /// in the strip, so they do not exist while the question is being asked. The player solved it by
+    /// hand in seconds - walked to a nearby grave, and from there a route existed. The log has both
+    /// halves: from the chest dock and from (1984,-1112) every graph said "no path", and from
+    /// (2300.9,-1118.3), under four tiles further east, the fine graph immediately returned 355
+    /// waypoints and drove the whole way to the target.
+    ///
+    /// So this does what the player did. It rescans the player graph as a BOX round the player
+    /// (<see cref="EscapeGraphPadUnits"/>), floods it with a <c>ConstantPath</c> - which searches
+    /// outward from a start with no destination at all and hands back every node it reached - and
+    /// walks to whichever reached node lies nearest the real target. That node is reachable by
+    /// construction, so the hop cannot fail the way an aimed search does.
+    ///
+    /// DO NOT go back to picking the escape point geometrically. Two versions did and both failed:
+    /// nearest walkable graph-0 node (0.9 tiles, an isolated island node, changed nothing), then
+    /// nearest node on the destination's graph-0 Area - which also misses, because graph 0 still
+    /// gave up at (2300.9,-1118.3), the very spot that worked. Being on the NPC navmesh is not the
+    /// property that matters; being somewhere the FINE graph can route from is, and only walking the
+    /// fine graph can tell you that.
+    /// </summary>
+    /// <returns>True if an exploration was started (the caller must not do anything else).</returns>
+    private static bool TryEscapeLegByExploring()
+    {
+        var pl = MainGame.me?.player;
+        if (pl == null) return false;
+        var from = pl.pos;
+        var goal = _longWalkDest;
+
+        try
+        {
+            if (AstarPath.active == null) return false;
+
+            // A box round the player, not a strip toward the goal - the way out may lead away from
+            // it. Costly, so it happens once, only after everything aimed at the target has failed.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            _padOverrideUnits = EscapeGraphPadUnits;
+            PadPlayerGraph = true;
+            try { AStarTools.RefreshPlayerGraph(from, from); }
+            catch (Exception ex) { _log?.LogWarning($"[NAVIGATOR] Escape rescan failed: {ex.Message}"); }
+            finally { PadPlayerGraph = false; _padOverrideUnits = null; }
+
+            var flood = Pathfinding.ConstantPath.Construct(
+                new Vector3(from.x, from.y, 0f), EscapeFloodMaxGScore, p =>
+                {
+                    _routePending = false;
+                    if (!_longWalkActive) return;
+                    OnEscapeFloodComplete(p as Pathfinding.ConstantPath, from, goal);
+                });
+
+            var constraint = Pathfinding.NNConstraint.Default;
+            constraint.graphMask = 1 << AStarTools.PLAYER_GRAPH_N;
+            flood.nnConstraint = constraint;
+
+            // Counted here, not on commit: the flood itself is the expensive part, so a walk that
+            // explores and finds nowhere better must not be able to pay for it twice.
+            _escapeLegsUsed++;
+            _routePending = true;
+            AstarPath.StartPath(flood);
+            _log?.LogInfo($"[NAVIGATOR] Nothing routes to {_longWalkTarget.Label}; exploring on foot " +
+                          $"from {from} (rescan {sw.ElapsedMilliseconds}ms)");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _routePending = false;
+            _log?.LogWarning($"[NAVIGATOR] Escape exploration failed to start: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The exploration finished. Walk to the reached spot that gets nearest the real target.
+    /// </summary>
+    private static void OnEscapeFloodComplete(Pathfinding.ConstantPath flood, Vector2 from, Vector2 goal)
+    {
+        var nodes = flood?.allNodes;
+        if (flood == null || flood.error || nodes == null || nodes.Count == 0)
+        {
+            _log?.LogInfo("[NAVIGATOR] Exploration reached nowhere; falling back");
+            FallBackToGlideOrBeacon();
+            return;
+        }
+
+        float here = Vector2.Distance(from, goal);
+        float bestGain = 0f;
+        var best = from;
+        bool found = false;
+
+        foreach (var node in nodes)
+        {
+            if (node == null || !node.Walkable) continue;
+            var np = (Vector3)node.position;
+            var at = new Vector2(np.x, np.y);
+            float gain = here - Vector2.Distance(at, goal);
+            if (gain <= bestGain) continue;
+            bestGain = gain;
+            best = at;
+            found = true;
+        }
+
+        // Nothing reachable is meaningfully closer than where we stand. On the navmesh this is a
+        // sealed pocket - so stop believing the navmesh and ask physics instead.
+        if (!found || bestGain < EscapeMinProgress || Vector2.Distance(from, best) < EscapeMinProgress)
+        {
+            _log?.LogInfo($"[NAVIGATOR] Explored {nodes.Count} reachable spots; none gets closer to " +
+                          $"{_longWalkTarget.Label} (best gain {bestGain / TileSize:F1} tiles)");
+            if (TrySqueezeOutOfPocket(from, goal, nodes)) return;
+            FallBackToGlideOrBeacon();
+            return;
+        }
+
+        _escapeLegTarget = _longWalkTarget;
+        _escapeLegRealDest = _longWalkDest;
+        _escapeLegActive = true;
+        _longWalkDest = best;
+        _routeReachesTarget = true;
+        _finalPartial = false;
+        _log?.LogInfo($"[NAVIGATOR] Explored {nodes.Count} reachable spots; escape leg to {best} " +
+                      $"({Vector2.Distance(from, best) / TileSize:F1} tiles away, " +
+                      $"{bestGain / TileSize:F1} tiles closer) before {_escapeLegTarget.Label}");
+
+        _routePending = true;
+        if (StartRouteQuery(from, best, AStarTools.PLAYER_GRAPH_N, route =>
+            {
+                _routePending = false;
+                if (!_longWalkActive) return;
+                if (route != null && route.Count >= 2)
+                {
+                    var wps = new List<Vector3>(route.Count);
+                    foreach (var w in route) wps.Add(new Vector3(w.x, w.y, 0f));
+                    _log?.LogInfo($"[NAVIGATOR] Escape leg: {wps.Count} points");
+                    // checkAgainstWorldMesh: false - the whole point is that graph 0 calls this
+                    // ground solid; vetting the route against it would reject every one.
+                    StartNativePathWalk(wps, checkAgainstWorldMesh: false);
+                    return;
+                }
+                // Should not happen: the node came out of a flood from here, so it is reachable.
+                _log?.LogInfo("[NAVIGATOR] Escape leg: no route to the explored spot; falling back");
+                RestoreWalkAfterFailedEscape();
+                FallBackToGlideOrBeacon();
+            }))
+            return;
+
+        _routePending = false;
+        RestoreWalkAfterFailedEscape();
+        FallBackToGlideOrBeacon();
+    }
+
+    /// <summary>
+    /// Put BOTH halves of the parked walk back. Restoring the label alone left _longWalkDest
+    /// pointing at the escape point, so the beacon aimed at that instead of at the thing the player
+    /// actually asked for.
+    /// </summary>
+    private static void RestoreWalkAfterFailedEscape()
+    {
+        _escapeLegActive = false;
+        _longWalkTarget = _escapeLegTarget;
+        _longWalkDest = _escapeLegRealDest;
+    }
+
+    /// How far to look for ground outside the pocket. The gap is by definition right next to the
+    /// player, so this stays short — a long straight glide is exactly what must not happen here.
+    private const int EscapeSqueezeTiles = 6;
+
+    /// A candidate must snap to a node this close to the probe point. Without it, GetNearest happily
+    /// returns a walkable node on the far side of the map and the "way out" is nonsense.
+    private const float EscapeSqueezeSnapSlack = 0.75f * TileSize;
+
+    /// How much "level geometry" the squeeze may cross in one unbroken run. A bush or a fence post
+    /// is a fraction of a tile on the line; a cliff face or a building shell keeps going. One tile
+    /// separates them without needing a list of object names.
+    private const float EscapeSqueezePassableThickness = 1f * TileSize;
+
+    /// <summary>
+    /// Cross a gap the navmesh says is shut, because the player can physically walk through it.
+    ///
+    /// THE SITUATION, measured. Flooding the player graph from the graveyard chest dock reached
+    /// **134 nodes** — at 8 units a node, under one tile of area — and the same 134 from a second
+    /// spot a tile away. The player is sealed into a sub-tile pocket ON THE GRAPH. They are not
+    /// sealed in reality: they walked out by hand both times. Graph 2 is scanned with a collision
+    /// radius fatter than the player's own body, so the gap between two graves closes on the navmesh
+    /// while the real collider fits through — and a player pressing into a headstone SLIDES round it,
+    /// which no graph models at all. That is why every graph-based attempt failed and no better
+    /// search could have helped: they were all asking a graph in which the exit does not exist.
+    ///
+    /// So this asks physics. It looks for a spot that (a) is on a DIFFERENT graph-2 component from
+    /// the pocket, so it is genuinely outside, (b) is somewhere a player could stand — nothing solid
+    /// at that point — and (c) has no level geometry on the straight line to it. Then it glides
+    /// there: two waypoints through the native follower, which walks them Kinematic, so the too-tight
+    /// gap is crossed.
+    ///
+    /// The wall/prop distinction in <see cref="StraightLineIsWalkable"/> is what makes that safe and
+    /// is not negotiable: sliding past a GRAVE is something the player does by hand, passing through
+    /// a BUILDING SHELL is not. Kept short (<see cref="EscapeSqueezeTiles"/>) so it can only ever be
+    /// the step through the gap, never a shortcut across the map.
+    /// </summary>
+    /// <returns>True if a squeeze was started (the caller must not do anything else).</returns>
+    private static bool TrySqueezeOutOfPocket(Vector2 from, Vector2 goal, List<Pathfinding.GraphNode> pocket)
+    {
+        if (pocket == null || pocket.Count == 0) return false;
+        uint pocketArea = pocket[0].Area;
+        float here = Vector2.Distance(from, goal);
+
+        for (int ring = 1; ring <= EscapeSqueezeTiles; ring++)
+        {
+            float bestGain = 0f;
+            var best = from;
+            bool found = false;
+
+            int samples = 8 * ring;
+            for (int i = 0; i < samples; i++)
+            {
+                float a = (float)(2.0 * Math.PI * i / samples);
+                var cand = from + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * (ring * TileSize);
+
+                if (!TryPlayerGraphNode(cand, out var node, out var nodePos)) continue;
+                if (node == null || !node.Walkable) continue;
+                if (node.Area == pocketArea) continue;                              // still inside
+                if (Vector2.Distance(cand, nodePos) > EscapeSqueezeSnapSlack) continue;
+                if (SolidAt(nodePos) != null) continue;                             // cannot stand there
+                // A bush's worth of solid may be crossed, a cliff face may not — see the parameter's
+                // note. Without this every way out of the woods is vetoed by scenery.
+                if (!StraightLineIsWalkable(from, nodePos, EscapeSqueezePassableThickness)) continue;
+
+                float gain = here - Vector2.Distance(nodePos, goal);
+                if (gain <= bestGain) continue;
+                bestGain = gain;
+                best = nodePos;
+                found = true;
+            }
+
+            if (!found || bestGain < EscapeMinProgress) continue;
+
+            _escapeLegTarget = _longWalkTarget;
+            _escapeLegRealDest = _longWalkDest;
+            _escapeLegActive = true;
+            _longWalkDest = best;
+            _routeReachesTarget = true;
+            _finalPartial = false;
+            _log?.LogInfo($"[NAVIGATOR] Pocket is {pocket.Count} nodes on graph area {pocketArea}; " +
+                          $"squeezing out to {best} ({Vector2.Distance(from, best) / TileSize:F1} tiles, " +
+                          $"{bestGain / TileSize:F1} tiles closer) before {_escapeLegTarget.Label}");
+
+            // Two points: the native follower walks that as a straight Kinematic line, which is the
+            // only thing that gets through a gap the graph does not have.
+            StartNativePathWalk(
+                new List<Vector3> { new Vector3(from.x, from.y, 0f), new Vector3(best.x, best.y, 0f) },
+                checkAgainstWorldMesh: false);
+            return true;
+        }
+
+        _log?.LogInfo($"[NAVIGATOR] No way out of the pocket within {EscapeSqueezeTiles} tiles that a " +
+                      "player could walk; falling back");
+        return false;
+    }
+
+    /// <summary>
+    /// The nearest player-graph (fine, 8-unit) node to a world point, plus its own position. Same
+    /// shape as <see cref="TryGraph0Node"/>; the caller must have scanned the graph over the area it
+    /// is asking about, since graph 2 only ever holds the last box that was scanned.
+    /// </summary>
+    private static bool TryPlayerGraphNode(Vector2 p, out Pathfinding.GraphNode node, out Vector2 nodePos)
+    {
+        node = null;
+        nodePos = p;
+        try
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return false;
+
+            var constraint = Pathfinding.NNConstraint.Default;
+            constraint.graphMask = 1 << AStarTools.PLAYER_GRAPH_N;
+
+            var nn = astar.GetNearest(new Vector3(p.x, p.y, 0f), constraint);
+            if (nn.node == null) return false;
+            node = nn.node;
+            nodePos = new Vector2(nn.clampedPosition.x, nn.clampedPosition.y);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] TryPlayerGraphNode failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Ask the fine player graph for a route to the current long-walk destination and drive it.
+    ///
+    /// Graph 0 is the NPC navmesh and its nodes are 76 units — nearly a whole tile. Where objects
+    /// are packed together there is no walkable node left in the gaps, so it reports "no route" for
+    /// ground a player walks across without thinking. The graveyard is exactly that: from among the
+    /// graves both A* attempts AND graph 0 failed to reach the mortuary door, and turn-by-turn
+    /// guidance then found an ordinary 243-waypoint route on the PLAYER graph, whose 8-unit nodes
+    /// fit between the headstones. The route was always there; nothing was asking the graph that
+    /// could see it.
+    /// </summary>
+    /// <returns>True if a query was started (the caller must not do anything else).</returns>
+    private static bool TryFineGraphRoute(string reason, Action onFail)
+    {
+        var from = MainGame.me?.player?.pos;
+        if (!from.HasValue) return false;
+
+        _fineRouteTried = true;
+        var to = _longWalkDest;
+
+        // Forced, and with the wide bounds: a route that has to go around a building leaves the thin
+        // strip the game scans by default, and the rate-limited refresh would skip the rescan.
+        _widePlayerGraphPad = true;
+        PadPlayerGraph = true;
+        try { AStarTools.RefreshPlayerGraph(from.Value, to); }
+        catch (Exception ex) { _log?.LogWarning($"[NAVIGATOR] Fine-graph refresh failed: {ex.Message}"); }
+        finally { PadPlayerGraph = false; _widePlayerGraphPad = false; }
+
+        _routePending = true;
+        _log?.LogInfo($"[NAVIGATOR] {reason}; trying the fine player graph {from.Value} -> {to}");
+        if (StartRouteQuery(from.Value, to, AStarTools.PLAYER_GRAPH_N, route =>
+            {
+                _routePending = false;
+                if (!_longWalkActive) return;
+                if (route != null && route.Count >= 2)
+                {
+                    var wps = new List<Vector3>(route.Count);
+                    foreach (var w in route) wps.Add(new Vector3(w.x, w.y, 0f));
+                    _routeReachesTarget = true;
+                    _finalPartial = false;
+                    _log?.LogInfo($"[NAVIGATOR] Fine player-graph route found: {wps.Count} points");
+                    StartNativePathWalk(wps, checkAgainstWorldMesh: false);
+                    return;
+                }
+                _log?.LogInfo("[NAVIGATOR] Fine player graph has no route either");
+                onFail();
+            }))
+            return true;
+
+        _routePending = false;
+        return false;
+    }
+
+    /// <summary>
+    /// Last resorts once no graph can produce a route: a short straight-line glide if the target is
+    /// close enough for one to be safe, otherwise turn-by-turn guidance.
+    /// </summary>
+    private static void FallBackToGlideOrBeacon()
+    {
+        // For a NEARBY target a total routing failure is the tell-tale of a building interior — the
+        // house/mortuary sit on a graph-0 island disconnected from the outdoor navmesh, and the
+        // player graph frequently has no node near the object either (e.g. the bed inside the
+        // house: "No walkable player-graph node near target"). Rather than dumping a blind player
+        // onto the manual compass beacon, glide there in a straight line: during a scripted walk the
+        // body is Kinematic (control disabled), so it slides to the spot without jamming on the
+        // walls, and inside a single room the line to the target is clear. StraightLineIsWalkable
+        // refuses the glide if a wall is actually in the way. Bounded to short hops — a FAR failure
+        // would try to glide across the whole map, so that still beacons.
         var pl = MainGame.me?.player;
         if (pl != null && Vector2.Distance(pl.pos, _longWalkTarget.Position) <= LongWalkStartDistance)
         {
@@ -1638,6 +2253,22 @@ internal static class ObjectNavigator
         _escalatePending = false;
         _shortWalkTarget = target;   // so on_complete biases vanilla E onto it
         _walkFacePos = facePos;      // face it on arrival so plain E interacts
+
+        // The glide is a straight line driven through a Kinematic body, so nothing physically stops
+        // it: if the line crosses a wall, the player is dragged through the wall. A sighted player
+        // cannot do that and neither may this — even at the cost of the auto-walk. Checked here,
+        // after SnapToWalkable, because that call is what refreshes the player graph over the whole
+        // player->target span, so the navmesh half of the test has data to answer with.
+        // _shortWalkTarget is assigned first so the probe knows not to count the target itself.
+        var here = PlayerBodyPos(MainGame.me?.player);
+        if (!StraightLineIsWalkable(here, dest))
+        {
+            _log?.LogWarning($"[NAVIGATOR] Direct glide to {target.Label} would pass through geometry; guiding instead");
+            ScreenReader.Say(Loc.Fmt("nav.manual_guidance", target.Label), interrupt: true);
+            GuidedWalk.StartTo(target, announceStart: false, allowBeaconFallback: true);
+            return;
+        }
+
         // No fresh "Walking to…" — StartLongWalk already announced this walk; a second would double up.
         StartWalk(dest, target.Label, MovementComponent.GoToMethod.Direct);
     }
@@ -1687,6 +2318,7 @@ internal static class ObjectNavigator
         _routePending = false;
         _routeNeedsRecompute = false;
         _exitAssisting = false;
+        _escapeLegActive = false;
         ReleaseScriptControl();
         _isWalking = false;
         if (announce)
@@ -1792,6 +2424,584 @@ internal static class ObjectNavigator
         var player = ProbeGround(p, AStarTools.PLAYER_GRAPH_N);
         if (player != Ground.Unknown) return player == Ground.Walkable;
         return ProbeGround(p, 0) == Ground.Walkable;
+    }
+
+    /// <summary>
+    /// May the player be dragged along this straight line, or does it pass through a wall?
+    ///
+    /// WHY THIS EXISTS: auto-walk drives the player with control disabled, which makes the game
+    /// switch their Rigidbody2D to Kinematic (UpdateBodyPhysics). That is deliberate and load-bearing
+    /// — a Dynamic body jams against every fence rail and gate on a long route, which is what made
+    /// auto-walk useless before — but a Kinematic body is not stopped by anything, so a movement the
+    /// game is asked to make in a STRAIGHT LINE goes through whatever is in the way. Following an
+    /// A* route that is fine: the route only runs over ground the navmesh says is walkable, and the
+    /// gates it threads are the same ones NPCs walk through. Issuing GoToMethod.Direct is not: the
+    /// game builds a two-point path (current position, destination) and slides the player down it.
+    /// A sighted player cannot walk through a wall, so neither may this.
+    ///
+    /// The test is PHYSICS ONLY — see <see cref="SolidAt"/>. The first version also sampled the
+    /// navmesh and refused a line that crossed a blocked node, and that broke the one thing the
+    /// glide exists for: walking from the door of the house to the bed. It could not have worked.
+    /// A glide only ever happens BECAUSE the navmesh failed — the house interior sits on a
+    /// disconnected island the player graph cannot path across — so asking that same navmesh
+    /// whether the line is clear will always say no. Confirmed in a play session: every glide to
+    /// the bed and to an inner door was vetoed, and the walks the player actually clipped through
+    /// were long native routes, which this check never sees.
+    ///
+    /// On a refusal the caller falls back to turn-by-turn guidance, which walks the player there
+    /// under their own control and cannot clip anything.
+    /// </summary>
+    /// <param name="passableThickness">
+    /// How much solid the line may cross before it counts as a wall, measured as the length of an
+    /// UNBROKEN blocked run along the line. Zero — the default — means any level geometry at all
+    /// stops the walk, which is right for a glide across open ground.
+    ///
+    /// The squeeze out of a pocket passes about a tile, and it must, because "level geometry" is a
+    /// far blunter category than its name suggests: it means only that the collider has no
+    /// WorldGameObject behind it, so a decorative <c>bush_1_simple</c> is a wall while the
+    /// harvestable <c>bush_3_berry(Clone)</c> standing next to it is a prop. The walk home from the
+    /// village died on exactly that — the clearance probe showed 3.3 tiles of open ground south and
+    /// 3.2 west, and every candidate that way was vetoed by a bush. A run length tells the two apart
+    /// without a list of names: a bush is a fraction of a tile thick on the line, a cliff face or a
+    /// building shell goes on and on.
+    /// </param>
+    private static bool StraightLineIsWalkable(Vector2 from, Vector2 to, float passableThickness = 0f)
+    {
+        var delta = to - from;
+        float length = delta.magnitude;
+        if (length <= WallProbeStep) return true;
+        var dir = delta / length;
+
+        float run = 0f;
+        string runName = null;
+        Vector2 runAt = from;
+
+        // Skip the first and last step: the player commonly starts pressed against a prop, and the
+        // destination is by definition right up against the thing being walked to.
+        for (float t = WallProbeStep; t < length - WallProbeStep; t += WallProbeStep)
+        {
+            var p = from + dir * t;
+            var solid = SolidAt(p, out bool isWall);
+            if (solid == null || !isWall)
+            {
+                run = 0f;            // a prop, or clear; a scripted walk has always slid past those
+                continue;
+            }
+
+            if (run <= 0f) { runAt = p; runName = solid; }
+            run += WallProbeStep;
+            if (run <= passableThickness) continue;
+
+            _log?.LogInfo($"[NAVIGATOR] Straight line rejected: wall '{runName}' fills " +
+                          $"{run / TileSize:F2} tiles from {runAt}");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// A quarter tile, so a wall thinner than the sampling stride cannot be stepped over.
+    private const float WallProbeStep = 0.25f * TileSize;
+
+    // Reused so the probes below allocate nothing.
+    private static readonly Collider2D[] _overlapBuffer = new Collider2D[16];
+
+    /// <summary>
+    /// The name of the solid thing occupying this exact spot, or null if a player could stand there.
+    ///
+    /// An OVERLAP test, deliberately, not a linecast. A linecast from A to B reports every collider
+    /// whose edge the segment crosses, which includes ones it merely grazes — walking past a tree,
+    /// along a fence, or through a doorway all register. That is why the first version of this check
+    /// vetoed the walk from the door to the bed: the line brushed the furniture. "Is this point
+    /// inside something solid" has no such ambiguity, and it is the actual question — a player
+    /// cannot stand inside a wall.
+    ///
+    /// "Solid" means what it means for the player: a non-trigger collider on a layer the player's
+    /// own collider is not set to ignore. Zone volumes and script triggers stop nobody, the player's
+    /// own colliders are not an obstacle to themselves, and the object being walked TO is never in
+    /// the way — arriving at a chest means ending up against it.
+    /// </summary>
+    private static string SolidAt(Vector2 p) => SolidAt(p, out _);
+
+    /// <summary>
+    /// <see cref="SolidAt(Vector2)"/>, also telling the caller whether what it found is a WALL —
+    /// level geometry with no WorldGameObject behind it — or a prop.
+    ///
+    /// The distinction is what keeps this useful. Level geometry is the building shells, the cliff
+    /// faces and the ground colliders: things no player ever passes, and the things the play log
+    /// caught auto-walk sliding through (the tavern's <c>collider</c>, <c>landslide (1)</c>,
+    /// <c>steep_small_diag (6)</c>). Props are chairs, tables, trees, fence rails — the scenery a
+    /// scripted walk has always slid past, and the whole reason the body is held Kinematic in the
+    /// first place. Refusing to walk past a chair would take the door-to-bed walk away again, which
+    /// is exactly the regression this pass exists to undo, so only walls stop a walk. Props are
+    /// still reported to the log.
+    /// </summary>
+    private static string SolidAt(Vector2 p, out bool isWall)
+    {
+        isWall = false;
+        try
+        {
+            var player = MainGame.me?.player;
+            int playerLayer = PlayerCollisionLayer(player);
+
+            int n = Physics2D.OverlapPointNonAlloc(p, _overlapBuffer);
+            string prop = null;
+            for (int i = 0; i < n; i++)
+            {
+                var col = _overlapBuffer[i];
+                if (col == null || col.isTrigger) continue;
+                if (playerLayer >= 0 &&
+                    Physics2D.GetIgnoreLayerCollision(playerLayer, col.gameObject.layer)) continue;
+
+                var wgo = col.GetComponentInParent<WorldGameObject>();
+                if (wgo != null)
+                {
+                    if (wgo == player || wgo.is_player) continue;
+                    if (_shortWalkTarget.Object != null && wgo == _shortWalkTarget.Object) continue;
+                    if (_longWalkTarget.Object != null && wgo == _longWalkTarget.Object) continue;
+                    // Remember it, but keep looking: a wall at the same point outranks a prop.
+                    prop ??= $"{col.gameObject.name} (object {wgo.obj_id})";
+                    continue;
+                }
+
+                isWall = true;
+                return $"{col.gameObject.name} (level geometry)";
+            }
+            return prop;
+        }
+        catch (Exception ex)
+        {
+            // A probe that cannot run must not be the reason a blind player loses auto-walk.
+            _log?.LogWarning($"[NAVIGATOR] Solidity probe failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    // ---- Wall guard --------------------------------------------------------
+
+    private static Vector2 _wallWatchLastPos;
+    private static bool _hasWallWatchPos;
+    private static Vector2 _lastClearPlayerPos;
+    private static bool _hasLastClearPos;
+    private static int _insideWallTicks;
+    private static float _lastWallReportAt = float.NegativeInfinity;
+
+    /// <summary>
+    /// How long the player has to be INSIDE a wall before the walk is called off. About a quarter of
+    /// a second, which at walking speed is the better part of a tile — far longer than clipping the
+    /// corner of a cliff, and well short of crossing a building.
+    /// </summary>
+    private const int InsideWallTicksToStop = 12;
+
+    /// <summary>
+    /// Catch an auto-walk that is dragging the player through a wall, and undo it.
+    ///
+    /// WHAT DID NOT WORK, and why this is shaped the way it is. The first version looked a third of
+    /// a tile ahead along the direction of travel and stopped when it found something solid. That
+    /// reads plausibly and is useless in practice: the player walks parallel to cliffs and building
+    /// fronts for most of a cross-map journey, and the direction of travel wobbles enough to point
+    /// into them. Adding a navmesh second opinion and a three-frame persistence rule did not save
+    /// it — in one session it stopped the walk to the tavern ten tiles short and killed the walk to
+    /// the village four times over, at <c>steep_vert_L</c>, <c>steep_2</c> and <c>steep_end_L</c>,
+    /// which are the ordinary cliff edges the road runs beside. Six wrong stops, against one real
+    /// wall crossing in the same session. A blind player stranded mid-journey by "no clear path" is
+    /// worse off than one who briefly clipped a cliff corner.
+    ///
+    /// So the guard no longer predicts. It waits until the player is demonstrably INSIDE level
+    /// geometry — not near it, not pointing at it — and has been for <see cref="InsideWallTicksToStop"/>
+    /// frames, which no graze survives. Then it puts them back on the last spot where they were in
+    /// the clear and hands them to turn-by-turn guidance.
+    ///
+    /// Putting them back is the part that makes stopping safe at all. Simply ending the walk inside
+    /// a wall hands control back with the body turning Dynamic inside a collider, and the player is
+    /// wedged in a pocket nothing can path out of. The last clear position is somewhere they stood
+    /// under their own weight a fraction of a second ago, so it is walkable by construction.
+    ///
+    /// Props — chairs, trees, fence rails, anything with a WorldGameObject behind it — never count.
+    /// Sliding past those is what auto-walk has always done and what lets it thread a gate.
+    /// </summary>
+    private static void WatchForWallCrossing()
+    {
+        // Only while WE are driving. Cutscenes move the player through anything by design.
+        if (!_weDisabledControl || _gameOwnsPlayer)
+        {
+            _hasWallWatchPos = false;
+            _hasLastClearPos = false;
+            _insideWallTicks = 0;
+            return;
+        }
+
+        var player = MainGame.me?.player;
+        if (player == null) { _hasWallWatchPos = false; return; }
+
+        var pos = PlayerBodyPos(player);
+        if (!_hasWallWatchPos)
+        {
+            _wallWatchLastPos = pos;
+            _hasWallWatchPos = true;
+            return;
+        }
+
+        var prev = _wallWatchLastPos;
+        _wallWatchLastPos = pos;
+
+        float moved = (pos - prev).sqrMagnitude;
+        if (moved > TeleportJumpDistance * TeleportJumpDistance)
+        {
+            // A teleport, not a walk. Nothing before it is a safe place to be put back to.
+            _hasLastClearPos = false;
+            _insideWallTicks = 0;
+            return;
+        }
+
+        try
+        {
+            var inside = SolidAt(pos, out bool insideWall);
+
+            if (!insideWall)
+            {
+                // In the clear (a prop underfoot still counts as clear — see above). Remember it as
+                // somewhere it is safe to be put back to.
+                if (inside != null && Time.unscaledTime - _lastWallReportAt > 5f)
+                {
+                    _lastWallReportAt = Time.unscaledTime;
+                    _log?.LogInfo($"[NAVIGATOR] Passing through prop '{inside}' during {WalkDescription()}");
+                }
+                _lastClearPlayerPos = player.pos;
+                _hasLastClearPos = true;
+                _insideWallTicks = 0;
+                return;
+            }
+
+            if (++_insideWallTicks < InsideWallTicksToStop) return;
+
+            // Second opinion from the world navmesh, and it is what decides whether this is a wall
+            // at all. Not every solid collider blocks a walk: the graveyard turned up a bare
+            // `collider` that BOTH pathfinders route straight through and that a player walks
+            // through by hand, and stopping there left them stranded mid-graveyard having to steer
+            // themselves back on course — the exact opposite of the point. If the route stands on
+            // ground the NPC navmesh calls walkable, the collider is scenery the game does not
+            // treat as an obstacle, and it is not ours to overrule.
+            //
+            // Being inside a collider AND off the navmesh is the combination that means the walk
+            // has genuinely carried the player somewhere nobody can stand.
+            if (!IsKnownBlockedOnWorldMesh(pos))
+            {
+                if (Time.unscaledTime - _lastWallReportAt > 5f)
+                {
+                    _lastWallReportAt = Time.unscaledTime;
+                    _log?.LogInfo(
+                        $"[NAVIGATOR] Inside '{inside}' at {pos} during {WalkDescription()}, but the " +
+                        "navmesh calls this walkable — carrying on");
+                }
+                _insideWallTicks = 0;
+                return;
+            }
+
+            // TRUST THE ROAD. The check above asks the right question of the wrong thing: it probes
+            // the PLAYER'S BODY, not the route. Graph 0's nodes are 76 units, so a body centre a few
+            // units off the line lands on a blocked neighbour while the route itself runs over
+            // walkable ground — and then the guard stops a walk the game's own NPC navmesh is happy
+            // with. Measured on the road to the village: `steep_R (17)` at (9540.3,-898.2), the same
+            // collider again five units later, `steep_R (20)` seventy units on, then
+            // `steep_yellow_small_1` and `steep_vert_R` further along — the cliff edging the road,
+            // hit over and over while walking the road correctly. Three attempts in a row died that
+            // way and the player could not reach the village at all.
+            //
+            // So if we are following a graph-0 route and are still ON it, the collider is scenery the
+            // route legitimately passes and it is not ours to overrule. The guard keeps its teeth
+            // everywhere it was earned: a Direct glide, an escape hop, or a route we have wandered
+            // away from all leave this false.
+            if (_routeIsWorldMesh && NearRouteBeingFollowed(pos, out float offRoute))
+            {
+                if (Time.unscaledTime - _lastWallReportAt > 5f)
+                {
+                    _lastWallReportAt = Time.unscaledTime;
+                    _log?.LogInfo($"[NAVIGATOR] Inside '{inside}' at {pos} during {WalkDescription()}, " +
+                                  $"but still on the road route ({offRoute / TileSize:F1} tiles off) — carrying on");
+                }
+                _insideWallTicks = 0;
+                return;
+            }
+
+            _log?.LogWarning(
+                $"[NAVIGATOR] Inside wall '{inside}' at {pos} for {_insideWallTicks} frames during " +
+                $"{WalkDescription()}, and off the navmesh; stopping and stepping back out");
+            StopInsideWall();
+        }
+        catch { /* the guard must never be the thing that breaks a walk */ }
+    }
+
+    /// How far off the route still counts as "on it". A graph-0 waypoint sits on a 76-unit node
+    /// centre and the probe uses the body collider centre, so a tile and a half of slack is ordinary
+    /// walking, not wandering.
+    private const float OnRouteSlack = 1.5f * TileSize;
+
+    /// <summary>
+    /// Is the player still on the route being driven? Distance to the nearest SEGMENT, not to the
+    /// nearest waypoint — waypoints on a long road route are most of a tile apart, so measuring to
+    /// the points alone reports a player walking perfectly down the middle of a leg as being off it.
+    /// </summary>
+    private static bool NearRouteBeingFollowed(Vector2 pos, out float distance)
+    {
+        distance = float.MaxValue;
+        var route = _currentRoute;
+        if (route == null || route.Count < 2) return false;
+
+        float slackSq = OnRouteSlack * OnRouteSlack;
+        float bestSq = float.MaxValue;
+
+        for (int i = 1; i < route.Count; i++)
+        {
+            var a = new Vector2(route[i - 1].x, route[i - 1].y);
+            var b = new Vector2(route[i].x, route[i].y);
+            var ab = b - a;
+            float lenSq = ab.sqrMagnitude;
+            var closest = lenSq <= 0.0001f
+                ? a
+                : a + ab * Mathf.Clamp01(Vector2.Dot(pos - a, ab) / lenSq);
+
+            float sq = (pos - closest).sqrMagnitude;
+            if (sq >= bestSq) continue;
+            bestSq = sq;
+            if (bestSq <= slackSq) break;   // close enough; no need to measure the rest
+        }
+
+        distance = Mathf.Sqrt(bestSq);
+        return bestSq <= slackSq;
+    }
+
+    private static string WalkDescription()
+    {
+        string what = _longWalkActive ? "long walk" : (_isWalking ? "short walk" : "scripted move");
+        string target = _longWalkActive ? _longWalkTarget.Label : _shortWalkTarget.Label;
+        return $"{what} to '{target}'";
+    }
+
+    /// <summary>
+    /// Recover a walk that has carried the player into a wall: put them back where they last stood
+    /// in the clear, then find a different way there.
+    ///
+    /// It used to hand straight over to turn-by-turn guidance, and that was the wrong end of the
+    /// problem — the player would be dropped mid-graveyard and have to steer themselves back onto
+    /// the route, which is precisely the work auto-walk exists to save them. Backing out and asking
+    /// the FINE graph for another route does the same thing they were doing by hand: its 8-unit
+    /// nodes see the gaps between graves that the 76-unit NPC mesh does not, so the way round is
+    /// usually right there. Guidance is still the answer if that fails too, or if this keeps
+    /// happening — <see cref="MaxWallRecoveries"/> stops it looping into the same wall forever.
+    /// </summary>
+    private static void StopInsideWall()
+    {
+        _insideWallTicks = 0;
+        _hasWallWatchPos = false;
+
+        // Step back out BEFORE control is handed back: the body turns Dynamic the moment it is, and
+        // inside a collider that means wedged.
+        if (_hasLastClearPos)
+        {
+            try
+            {
+                var player = MainGame.me?.player;
+                if (player != null)
+                {
+                    var here = player.transform.position;
+                    player.transform.position = new Vector3(_lastClearPlayerPos.x, _lastClearPlayerPos.y, here.z);
+                    player.RefreshPositionCache();
+                    _log?.LogInfo($"[NAVIGATOR] Stepped back out of the wall to {_lastClearPlayerPos}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning($"[NAVIGATOR] Could not step back out of the wall: {ex.Message}");
+            }
+        }
+        _hasLastClearPos = false;
+
+        // Try to carry on from where they now stand, rather than giving the problem back.
+        //
+        // KEEP THE ROAD. This used to go straight to TryFineGraphRoute, and on a cross-map journey
+        // that was worse than the wall it was recovering from. The walk home to the village had a
+        // perfectly good 152-waypoint GRAPH-0 route — the NPC road network, the way a sighted player
+        // goes — and had walked most of it when the guard fired at `steep_vert_L (4)`, one of the
+        // cliff edges the road legitimately runs beside. The recovery threw that route away and
+        // asked the fine player graph, which is scanned as a thin STRIP between the player and the
+        // destination: the only route that exists inside that corridor is the straight one, across
+        // the cliffs. It drove into `steep_L (18)`, recovered the same way, drove into it again, and
+        // beaconed. The road was never in the graph it was searching.
+        //
+        // So: resume the route we were already on, and if that is not possible re-ask the SAME graph
+        // that produced it. The fine graph is the right tool for a short walk among the graves — its
+        // 8-unit nodes see gaps the 76-unit NPC mesh cannot — and the wrong tool for crossing a map.
+        if (_longWalkActive && ++_wallRecoveries <= MaxWallRecoveries)
+        {
+            var pos = MainGame.me?.player?.pos ?? _lastClearPlayerPos;
+
+            if (TryResumeRouteAfterWall(pos)) return;
+
+            if (_routeIsWorldMesh)
+            {
+                _log?.LogInfo($"[NAVIGATOR] Walked into a wall (recovery {_wallRecoveries}); " +
+                              "re-asking the road network rather than dropping to the fine graph");
+                RequestGraph0Route(pos, _longWalkDest);
+                return;
+            }
+
+            if (TryFineGraphRoute($"walked into a wall (recovery {_wallRecoveries})",
+                                  () => BeaconBail("no way round the wall")))
+                return;
+        }
+
+        if (_longWalkActive)
+        {
+            BeaconBail("walked into a wall");
+            return;
+        }
+
+        // A short walk has no route of its own to replace, so escalate it into a long one: that
+        // path tries graph 0 and then the fine graph, which is the same second chance.
+        var target = _shortWalkTarget;
+        _isWalking = false;
+        _fallbackPending = false;
+        _escalatePending = false;
+        if (++_wallRecoveries <= MaxWallRecoveries && (target.Object != null || target.DropGo != null))
+        {
+            _log?.LogInfo($"[NAVIGATOR] Short walk hit a wall; re-routing to {target.Label}");
+            StartLongWalk(target);
+            return;
+        }
+
+        ReleaseScriptControl();
+        ScreenReader.Say(Loc.Fmt("nav.manual_guidance", target.Label), interrupt: true);
+        GuidedWalk.StartTo(target, announceStart: false, allowBeaconFallback: true);
+    }
+
+    /// How far past the nearest waypoint to rejoin a resumed route, so the leg that hit the wall is
+    /// not simply walked again. One waypoint on a graph-0 route is about 77 units.
+    private const int ResumeWaypointSkip = 2;
+
+    /// <summary>
+    /// Pick the route back up beyond the spot that stopped it, instead of asking for a new one.
+    ///
+    /// A wall stop does not mean the route was wrong. The guard needs the player to be inside level
+    /// geometry for 12 frames AND off the world mesh, which a cross-map route can satisfy by clipping
+    /// the corner of a cliff it is legitimately running beside — `steep_vert_L`, `steep_2`,
+    /// `steep_end_L` are the ordinary cliff edges the road passes, and they are exactly the names in
+    /// the log. Throwing away a 152-waypoint road route because of one clipped corner, and replacing
+    /// it with a straight corridor across the same cliffs, is how a good journey became a stuck one.
+    ///
+    /// So step forward past the offending leg and re-inject the tail. Bounded by
+    /// <see cref="MaxWallRecoveries"/> exactly as before, so a route that really does run into a wall
+    /// still gives up rather than grinding at it.
+    /// </summary>
+    private static bool TryResumeRouteAfterWall(Vector2 fromPos)
+    {
+        // Only a road route is worth preserving; a fine-graph route is a straight corridor and
+        // re-asking for one is no worse than resuming it.
+        if (!_routeIsWorldMesh || _currentRoute == null || _currentRoute.Count < 2) return false;
+
+        int nearest = 0;
+        float bestSq = float.MaxValue;
+        for (int i = 0; i < _currentRoute.Count; i++)
+        {
+            var w = new Vector2(_currentRoute[i].x, _currentRoute[i].y);
+            float sq = (w - fromPos).sqrMagnitude;
+            if (sq < bestSq) { bestSq = sq; nearest = i; }
+        }
+
+        // Past the leg that hit, then past any waypoint that is itself sitting in geometry — those
+        // are the ones that would stop the walk again a second later.
+        int start = nearest + ResumeWaypointSkip;
+        while (start < _currentRoute.Count)
+        {
+            var w = new Vector2(_currentRoute[start].x, _currentRoute[start].y);
+            SolidAt(w, out bool isWall);
+            if (!isWall) break;
+            start++;
+        }
+
+        // Nothing meaningful left: let the normal re-route handle the last stretch.
+        if (_currentRoute.Count - start < 2) return false;
+
+        var tail = new List<Vector3>(_currentRoute.Count - start);
+        for (int i = start; i < _currentRoute.Count; i++) tail.Add(_currentRoute[i]);
+
+        _log?.LogInfo($"[NAVIGATOR] Walked into a wall (recovery {_wallRecoveries}); resuming the same " +
+                      $"road route from waypoint {start}/{_currentRoute.Count}");
+
+        // checkAgainstWorldMesh: false — this route already passed that test when it was first
+        // injected, and re-testing it now would judge it by the leg from the stepped-back position,
+        // which is exactly the clipped corner that stopped it.
+        StartNativePathWalk(tail, checkAgainstWorldMesh: false);
+        _routeIsWorldMesh = true;   // it is still the road route; StartNativePathWalk just cleared that
+        return true;
+    }
+
+    /// <summary>
+    /// How many times one walk may back out of a wall and try a different route before the mod
+    /// accepts it cannot drive this one and hands over. Without a cap a route that leads into the
+    /// same wall would be re-driven into it forever.
+    /// </summary>
+    private const int MaxWallRecoveries = 2;
+    private static int _wallRecoveries;
+
+    private static int _playerCollisionLayer = -1;
+    private static Collider2D _playerCollider;
+
+    /// <summary>The layer the player's own solid collider sits on, cached; -1 if undeterminable.</summary>
+    private static int PlayerCollisionLayer(WorldGameObject player)
+    {
+        if (_playerCollisionLayer >= 0) return _playerCollisionLayer;
+        ResolvePlayerCollider(player);
+        return _playerCollisionLayer;
+    }
+
+    private static void ResolvePlayerCollider(WorldGameObject player)
+    {
+        if (_playerCollider != null) return;
+        try
+        {
+            if (player == null) return;
+            foreach (var c in player.GetComponentsInChildren<Collider2D>(true))
+            {
+                if (c == null || c.isTrigger) continue;
+                _playerCollider = c;
+                _playerCollisionLayer = c.gameObject.layer;
+                // Logged once: every solidity probe is taken at this collider's centre, so if the
+                // wrong one is picked (a big sprite-sized box rather than the small body at the
+                // feet) the mod would report walls where the player is plainly in the open. That
+                // mistake is invisible from inside the game and obvious in one line here.
+                try
+                {
+                    var offset = (Vector2)c.bounds.center - (player.pos);
+                    _log?.LogInfo($"[NAVIGATOR] Player body collider '{c.gameObject.name}' " +
+                                  $"({c.GetType().Name}) size {c.bounds.size} offset from pos {offset} " +
+                                  $"on layer {_playerCollisionLayer} ({LayerMask.LayerToName(_playerCollisionLayer)})");
+                }
+                catch { }
+                return;
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Where the player's BODY is, which is not where <c>player.pos</c> is.
+    ///
+    /// A WorldGameObject's position is its sprite anchor; its physical collider sits somewhere else
+    /// — the game itself works around this ("bed interaction basis: pos=(2376, -6216)
+    /// colliderCenter=(2376, -6225.6)"). Probing solidity at the anchor asks about a point that is
+    /// roughly at the player's head, which is how walking up to the front door of a house came out
+    /// as "INSIDE A PROP house_1" while the player's feet were plainly outside on the path.
+    /// </summary>
+    private static Vector2 PlayerBodyPos(WorldGameObject player)
+    {
+        ResolvePlayerCollider(player);
+        try
+        {
+            if (_playerCollider != null) return _playerCollider.bounds.center;
+        }
+        catch { }
+        return player != null ? player.pos : Vector2.zero;
     }
 
     /// <summary>
@@ -2081,6 +3291,7 @@ internal static class ObjectNavigator
         _routePending = false;
         _routeNeedsRecompute = false;
         _exitAssisting = false;
+        _escapeLegActive = false;
         _fallbackPending = false;
         _escalatePending = false;
         _isWalking = false;
@@ -2964,6 +4175,9 @@ internal static class ObjectNavigator
         GuidedWalk.Stop(announce: false);
         _astarFailedForWalk = false;
         _rescanRetried = false;
+        _wallRecoveries = 0;
+        _currentRoute = null;
+        _routeIsWorldMesh = false;
         _rescanRetryPending = false;
         _teleportRescanFramesLeft = 0;
         _hasLastPlayerPos = false;
@@ -3026,11 +4240,15 @@ internal static class ObjectNavigator
             _routePending = false;
             _routeNeedsRecompute = false;
             _exitAssisting = false;
+            _escapeLegActive = false;
             _fallbackPending = false;
             _escalatePending = false;
             _walkWatchdog = 0;
             _longWalkStuckTicks = 0;
             _pullbackTries = 0;
+            _fineRouteTried = false;
+            _startOffWorldMesh = false;
+            _escapeLegsUsed = 0;
             _stalledRecomputes = 0;
             _astarFailedForWalk = false;
             _rescanRetried = false;
@@ -3091,6 +4309,7 @@ internal static class ObjectNavigator
                 _routePending = false;
                 _routeNeedsRecompute = false;
                 _exitAssisting = false;
+                _escapeLegActive = false;
                 _log?.LogInfo("[NAVIGATOR] Cutscene took the player mid-walk; releasing without touching control");
             }
         }
@@ -3136,6 +4355,13 @@ internal static class ObjectNavigator
         _lastRefreshFrame = Time.frameCount;
         _updateCounter = 0;
 
+        // A rebuild is the one heavy thing the mod does, and it runs on its own cadence rather than
+        // every frame, so a per-frame average hides it. Metered here and reported by Perf.
+        long startedAt = Perf.Now();
+        int walked = 0, classified = 0, labelled = 0;
+        _classCacheHits = 0;
+        _labelCacheHits = 0;
+
         try
         {
             var player = MainGame.me?.player;
@@ -3151,7 +4377,9 @@ internal static class ObjectNavigator
             // nav categories feel like they hitched. Snapshotting also makes the walk below safe:
             // labelling an object can spawn or destroy one, which would otherwise mutate the list
             // we're iterating. See WorldObjectRegistry.
+            long phaseAt = Perf.Now();
             WorldObjectRegistry.Snapshot(_scanBuffer);
+            Perf.NoteRefreshPhase(Perf.RefreshPhase.Snapshot, phaseAt);
             var allObjects = _scanBuffer;
             if (allObjects.Count == 0)
                 return;
@@ -3205,6 +4433,7 @@ internal static class ObjectNavigator
                 _byCategory[cat].Clear();
             _pendingInteractionTargets.Clear();
 
+            phaseAt = Perf.Now();
             foreach (var obj in allObjects)
             {
               // Per-object guard: a single malformed object must never abort the whole refresh.
@@ -3235,6 +4464,7 @@ internal static class ObjectNavigator
                 // transform read) is what keeps a rebuild small enough to run on a keypress. Dungeon
                 // objects are exempt: a loaded level is revealed whole, with no distance cap at all.
                 var objPos = obj.pos;
+                walked++;
                 var distance = Vector2.Distance(objPos, playerPos);
                 if (!isDungeonObj && distance > MaxHarvestableNavDistance) continue;
 
@@ -3247,7 +4477,11 @@ internal static class ObjectNavigator
                 // hidden). Without this the veins were dropped here before ever being classified.
                 if (!isDungeonObj && !WorldObjectRegistry.IsDlcAvailable(obj)) continue;
 
-                if (!TryClassify(obj, out var category)) continue;
+                classified++;
+                long classifyAt = Perf.Now();
+                bool got = TryClassifyCached(obj, out var category);
+                Perf.NoteRefreshPhase(Perf.RefreshPhase.Classify, classifyAt);
+                if (!got) continue;
 
                 // The game culls off-screen objects by deactivating their GameObject (they
                 // reactivate on interaction via WorldGameObject.OnWorkAction). For most categories
@@ -3374,7 +4608,9 @@ internal static class ObjectNavigator
                     }
                 }
 
-                var label = GetObjectLabelSafe(obj);
+                labelled++;
+                long labelAt = Perf.Now();
+                var label = GetObjectLabelCached(obj);
                 if (category == NavCategory.LoadedPallets || category == NavCategory.EmptyPallets)
                     label = PalletLabel(obj, label);
                 // Which stage the bed is at — marked out, empty, growing, ready — since the game
@@ -3391,6 +4627,8 @@ internal static class ObjectNavigator
                 // (view) icon) is just as often a plain container the game flagged — the tavern
                 // money box, a delivery crate — which has no business in the quest list, so it goes
                 // to its own Something new category instead. No-op for unarmed objects.
+                Perf.NoteRefreshPhase(Perf.RefreshPhase.Label, labelAt);
+
                 if (InteractionDetector.HasPendingScriptedInteraction(obj))
                 {
                     label = InteractionDetector.WithPendingInteraction(label, obj);
@@ -3495,24 +4733,40 @@ internal static class ObjectNavigator
               catch { /* skip this one object, keep building the rest of the list */ }
             }
 
+            Perf.NoteRefreshPhase(Perf.RefreshPhase.Objects, phaseAt);
+
             // Collapse the scene's duplicate copies of a doorway down to the one that works.
+            phaseAt = Perf.Now();
             DedupeDoorVariants();
+            Perf.NoteRefreshPhase(Perf.RefreshPhase.Doors, phaseAt);
 
             // Active quest targets are gathered separately: they are resolved by
             // obj_id from the save's task list (not by walking the scene), and they
             // bypass the distance cap so a far-off quest objective always shows up.
+            phaseAt = Perf.Now();
             GatherQuestTargets(playerPos);
+
+            // Where to get rid of the corpse you are carrying (Crafting stations).
+            AddCarriedBodyDisposal(playerPos);
+            Perf.NoteRefreshPhase(Perf.RefreshPhase.Quests, phaseAt);
 
             // Fixed landmarks (Tavern, Church, home Graveyard). These are world zones that
             // are always loaded regardless of distance, so they give a blind player a way to
             // set off toward a far destination from anywhere — the compass beacon then guides.
+            phaseAt = Perf.Now();
             GatherLandmarkTargets(playerPos, allObjects);
+            Perf.NoteRefreshPhase(Perf.RefreshPhase.Landmarks, phaseAt);
 
             // Ground drops (bodies/loot) are DropResGameObjects, not WorldGameObjects, so
-            // they need their own scan or they stay invisible to the screen reader. FindObjectsOfType
-            // only returns ACTIVE drops, so outdoor drops culled while you're in an interior are
-            // already excluded — no extra no-x-ray handling is needed here.
+            // they need their own pass or they stay invisible to the screen reader.
+            phaseAt = Perf.Now();
             GatherDropTargets(playerPos);
+            Perf.NoteRefreshPhase(Perf.RefreshPhase.Drops, phaseAt);
+
+            phaseAt = Perf.Now();
+            // Teach the parking-spot filter about any pile-up the naming rule missed, from the
+            // characters this rebuild just listed. Costs one pass over three short lists.
+            NoteCharacterStacks();
 
             foreach (var cat in _categoryOrder)
                 _byCategory[cat].Sort((a, b) => a.Distance.CompareTo(b.Distance));
@@ -3544,10 +4798,39 @@ internal static class ObjectNavigator
                 _selectedIndex = 0;
 
             NoteRefreshSettled();
+            Perf.NoteRefreshPhase(Perf.RefreshPhase.Finish, phaseAt);
         }
         catch (Exception ex)
         {
             _log?.LogError($"[NAVIGATOR] Error refreshing destinations: {ex.Message}");
+        }
+        finally
+        {
+            Perf.NoteRefresh(startedAt, walked, classified, _classCacheHits, labelled, _labelCacheHits);
+        }
+    }
+
+    // Reused so the per-rebuild pile-up check allocates nothing.
+    private static readonly List<(WorldGameObject Obj, Vector2 Pos)> _characterSpots = new(64);
+
+    /// <summary>
+    /// Hand every character this rebuild listed to <see cref="StockPointFilter"/>, which reports
+    /// (and only reports) any spot where several of them are standing on top of one another. That
+    /// is what an off-stage parking point looks like from the outside, so if one ever turns up that
+    /// the tag rules do not recognise, the log names it instead of leaving it to guesswork.
+    /// </summary>
+    private static void NoteCharacterStacks()
+    {
+        _characterSpots.Clear();
+        AddSpots(_byCategory[NavCategory.People]);
+        AddSpots(_byCategory[NavCategory.Enemies]);
+        AddSpots(_byCategory[NavCategory.Vendors]);
+        StockPointFilter.NoteCharacters(_characterSpots);
+
+        static void AddSpots(List<NavigationTarget> from)
+        {
+            foreach (var t in from)
+                if (t.Object != null) _characterSpots.Add((t.Object, t.Position));
         }
     }
 
@@ -3612,8 +4895,11 @@ internal static class ObjectNavigator
 
                 var target = ResolveQuestArrowTarget(def, playerPos);
 
-                // No arrow target set (or its object isn't loaded): nothing to walk to.
+                // No arrow target set (or its object isn't loaded): nothing to walk to. An NPC the
+                // game has parked off-stage is not in the world either — the arrow is stale until
+                // the schedule brings them back, and a sighted player sees no arrow at all.
                 if (target == null || InteractionDetector.IsPlayer(target)) continue;
+                if (StockPointFilter.IsParked(target)) continue;
                 if (!seen.Add(target)) continue;
 
                 var questName = GetQuestLabelSafe(def.id);
@@ -3668,6 +4954,8 @@ internal static class ObjectNavigator
                 });
             }
 
+            AddPendingRiverMeeting(questList, playerPos);
+
             // Objects a quest script armed with a one-shot interaction event (collected by the scene
             // scan, see InteractionDetector.HasPendingScriptedInteraction). This is the game telling
             // the player "interact HERE next" — the same thing a quest arrow says — so mirror them
@@ -3691,6 +4979,26 @@ internal static class ObjectNavigator
     private static readonly (string objId, string labelKey)[] NpcLandmarks =
     {
         ("npc_merchant", "landmark.merchant"),
+    };
+
+    // Permanent map features that are a static WORLD OBJECT rather than an NPC or a zone: the spot
+    // itself is the landmark, and it is there for the whole game. Matched on an obj_id FRAGMENT
+    // (a placed object carries a numbered id, "throw_body_river_1"), map-wide and with no distance
+    // cap, and kept while the object is culled — a landmark's whole job is to be findable from far
+    // away, which is precisely where the game has every static prop deactivated.
+    // (obj_id fragment, spoken label).
+    private static readonly (string objIdFragment, string labelKey)[] ObjectLandmarks =
+    {
+        // The river bank a carried corpse gets thrown off (obj_id "throw_body_river"). Yorick asks
+        // for it once — "throw the neighbour in the river" — but it stays the free way to dispose of
+        // any corpse for the rest of the game, so this is NOT task-gated the way the meeting spots
+        // in TaskGdPointLandmarks are: a player who took that quest long ago still cannot find it.
+        // Nothing in the game marks the place. There is no quest arrow, the dialogue only says "the
+        // river", and the object has no translated name, so it read as a prettified id in the Other
+        // category and dropped out of that list from more than a screen away (Other is neither a
+        // far-reach nor a built category, so a culled one is skipped). See
+        // [[exhumation-grave-disposal]] for the rest of that flow.
+        ("throw_body_river", "landmark.river_body_throw"),
     };
 
     // Building landmarks anchored on their EXTERIOR entrance door (a teleport WGO), not an interior
@@ -3770,6 +5078,150 @@ internal static class ObjectNavigator
         // revisit; only the two tasks differ, hence a row of its own rather than a shared one.
         ("npc_ghost_priest", "s_ev_28_leg_return", "gd_zone_refugees_exit_8", "landmark.ghost_leg_delivery_spot"),
     };
+
+    /// <summary>
+    /// While a corpse is on the player's shoulder, list the river bank under Crafting stations —
+    /// alongside the morgue throw-in and the crematorium, the game's other ways to be rid of a body.
+    /// That is the list you go to when the question is "where do I put this", and it is short.
+    ///
+    /// It is gated on the carried body rather than on the quest that first sends you here, because
+    /// the game registers no task for that step at all: the authored text (task_ghost_body, "Get rid
+    /// of the body from the grave at the lower-right corner. Just throw it in the river.") is cut
+    /// content — all 788 Flow_SetTaskState nodes in the game carry a literal task id and not one of
+    /// them is this, so a task gate could never fire. Yorick only ever says it out loud. The body in
+    /// your hands is the better signal anyway: it covers that first quest and every corpse after it,
+    /// and it goes quiet the moment your hands are free. The permanent Landmarks entry
+    /// (<see cref="ObjectLandmarks"/>) is unaffected and stays listed either way.
+    ///
+    /// Same label as everywhere else the spot appears — one place, one name.
+    /// </summary>
+    private static void AddCarriedBodyDisposal(Vector2 playerPos)
+    {
+        try
+        {
+            if (!InteractionDetector.IsCarryingBody()) return;
+
+            var river = FindLandmarkObject("throw_body_river", playerPos);
+            if (river == null) return;
+
+            _byCategory[NavCategory.Stations].Add(new NavigationTarget
+            {
+                Object = river,
+                Label = Loc.Get("landmark.river_body_throw"),
+                Position = river.pos,
+                Distance = Vector2.Distance(river.pos, playerPos)
+            });
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] carried-body disposal check failed: {ex.Message}");
+        }
+    }
+
+    // The trigger zones that start Gerry's river scene, and the player param that arms them.
+    private const string RiverMeetingParam = "showing_gerry_near_river";
+    private static readonly string[] RiverMeetingZones = { "gd_zone_gerry_up", "gd_zone_gerry_down" };
+
+    /// <summary>
+    /// After you throw your first corpse in the river, Gerry turns up on the bank to comment on it
+    /// (and that scene is what opens the NPC list). It does NOT play on the throw. The game runs a
+    /// three-step flag relay: Yorick's visit after your first burial arms Gerry's own
+    /// <c>on_showing_gerry_near_river</c>; the throw spends that and sets the PLAYER param
+    /// <c>showing_gerry_near_river</c>; and only walking into the invisible <c>gd_zone_gerry_up</c> /
+    /// <c>_down</c> GDZone spends THAT and spawns him.
+    ///
+    /// A sighted player never notices the last step — the zones sit right by the throw spot, so they
+    /// cross one the moment they wander off and the scene feels immediate. A blind player arrives by
+    /// auto-walk, throws, and stands still, so nothing ever fires and the questline stalls with no
+    /// hint that anything is pending. There is no task and no quest arrow to expose (see the comment
+    /// on the carried-body entry above), so read the param the relay itself uses and offer the zone
+    /// as somewhere to walk. ExactPoint: this is a collider you must be INSIDE, not an object to
+    /// stand next to.
+    ///
+    /// The FindObjectsOfType sweep is the expensive way to find a zone, which is why it is gated on
+    /// the param first: it only runs in the minutes between that throw and that meeting, once a save.
+    /// </summary>
+    private static void AddPendingRiverMeeting(List<NavigationTarget> questList, Vector2 playerPos)
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player == null || player.GetParam(RiverMeetingParam) < 1f) return;
+
+            Vector2? best = null;
+            float bestSqr = float.MaxValue;
+            foreach (var zone in UnityEngine.Object.FindObjectsOfType<GDZone>(true))
+            {
+                if (zone == null) continue;
+                bool match = false;
+                foreach (var n in RiverMeetingZones)
+                    if (zone.name.StartsWith(n, StringComparison.OrdinalIgnoreCase)) { match = true; break; }
+                if (!match) continue;
+
+                Vector2 p = zone.transform.position;
+                float dx = p.x - playerPos.x, dy = p.y - playerPos.y;
+                float sqr = dx * dx + dy * dy;
+                if (sqr >= bestSqr) continue;
+                bestSqr = sqr;
+                best = p;
+            }
+            if (best == null) return;
+
+            questList.Add(new NavigationTarget
+            {
+                Label = Loc.Get("quest.gerry_river_meeting"),
+                Position = best.Value,
+                Distance = Vector2.Distance(best.Value, playerPos),
+                ExactPoint = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] pending river meeting check failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The world object nearest the player whose obj_id contains <paramref name="fragment"/>, for
+    /// <see cref="ObjectLandmarks"/>, or null when the scene holds none.
+    ///
+    /// Deliberately accepts a CULLED object: the game deactivates every static prop that leaves the
+    /// screen, and a landmark exists to be walked to from across the map. An object the GAME switched
+    /// off — a dead scene variant — has a deactivated ANCESTOR instead and is still rejected, the same
+    /// test the Doors category uses (see <see cref="IsCameraCulled"/>). Nearest rather than first so
+    /// that if the map ever holds several of one kind, the one offered is the one worth walking to.
+    /// </summary>
+    private static WorldGameObject FindLandmarkObject(string fragment, Vector2 playerPos)
+    {
+        WorldGameObject best = null;
+        float bestSqr = float.MaxValue;
+
+        var objects = WorldObjectRegistry.Objects;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            var obj = objects[i];
+            if (obj == null || obj.is_removed) continue;
+            if (string.IsNullOrEmpty(obj.obj_id)) continue;
+            if (obj.obj_id.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+            Vector2 p;
+            try { p = obj.pos; } catch { continue; }
+            float dx = p.x - playerPos.x, dy = p.y - playerPos.y;
+            float sqr = dx * dx + dy * dy;
+            if (sqr >= bestSqr) continue;
+
+            try
+            {
+                if (!obj.gameObject.activeInHierarchy && !IsCameraCulled(obj)) continue;
+            }
+            catch { continue; }
+
+            bestSqr = sqr;
+            best = obj;
+        }
+
+        return best;
+    }
 
     /// <summary>
     /// True while <paramref name="taskId"/> is a Visible (active) task on <paramref name="npcId"/> —
@@ -4003,6 +5455,23 @@ internal static class ObjectNavigator
             {
                 var wgo = WorldMap.GetWorldGameObjectByObjId(objId, ignore_not_found_error: true);
                 if (wgo == null || wgo.is_removed || !wgo.gameObject.activeInHierarchy) continue;
+                if (StockPointFilter.IsParked(wgo)) continue;   // parked off-stage, not in the world
+                list.Add(new NavigationTarget
+                {
+                    Object = wgo,
+                    Label = Loc.Get(labelKey),
+                    Position = wgo.pos,
+                    Distance = Vector2.Distance(wgo.pos, playerPos)
+                });
+            }
+
+            // Static world objects that are a destination in their own right (the river throw spot).
+            // Resolved over the registry rather than with WorldMap.GetWorldGameObjectByObjId because
+            // that one demands an exact obj_id, and because a culled object has to stay listed here.
+            foreach (var (fragment, labelKey) in ObjectLandmarks)
+            {
+                var wgo = FindLandmarkObject(fragment, playerPos);
+                if (wgo == null) continue;
                 list.Add(new NavigationTarget
                 {
                     Object = wgo,
@@ -4096,18 +5565,66 @@ internal static class ObjectNavigator
         {
             var wgos = zone.GetZoneWGOs();
             if (wgos == null) return null;
-            WorldGameObject best = null;
-            float bestSq = float.MaxValue;
+
+            // The anchor has to be somewhere the zone actually IS. A zone's member list is built
+            // once, by testing each object's position against the zone's colliders
+            // (WorldZone.DoesObjectBelongToZone) — and it is never rebuilt when an object moves. So
+            // the list keeps members that have since been carried somewhere else entirely: an NPC
+            // teleported to the off-map parking row, and above all a building's INTERIOR, which this
+            // game stages in a far-off corner of the world under coordinates that have nothing to do
+            // with where the building stands.
+            //
+            // Taking the nearest member without that check is what put "The village" at (7876, 2250)
+            // — about 30 tiles northeast of the player — while the village and its tavern are 120
+            // tiles due east. Auto-walk then set off confidently in the wrong direction. A bounds
+            // test costs nothing per candidate and rules all of that out; the zone's own geometry is
+            // the only honest answer to "where is this place".
+            var bounds = zone.GetBounds();
+            bool haveBounds = bounds.size.x > 0f && bounds.size.y > 0f;
+            Vector2 aim = haveBounds ? (Vector2)bounds.center : playerPos;
+
+            // Aim for the MIDDLE of the place, not its nearest edge.
+            //
+            // "The village" is an area some 80 tiles across. Anchoring it on whichever of its
+            // objects happened to be closest to the player put it on whatever edge the player was
+            // facing — from the keeper's yard that is the high ground to the north, reached by
+            // scrambling over the cliffs (steep_vert_L, steep_2, steep_end_L in the walk log)
+            // instead of by the road everyone actually uses. The tavern, a landmark of its own
+            // inside the same village, routed correctly along the road the whole time, which is
+            // what "it should take the same way to both" means.
+            //
+            // A landmark for a PLACE should also stay put: with the nearest-edge rule the announced
+            // distance to the village changed every few steps, because the anchor was moving too.
+            var target = aim;
+
+            WorldGameObject best = null, bestAnywhere = null;
+            float bestSq = float.MaxValue, bestAnywhereSq = float.MaxValue;
             foreach (var w in wgos)
             {
                 if (w == null || w.is_removed) continue;
-                float sq = (w.pos - playerPos).sqrMagnitude;
+                var wp = w.pos;
+                float sq = (wp - target).sqrMagnitude;
+
+                if (sq < bestAnywhereSq) { bestAnywhereSq = sq; bestAnywhere = w; }
+
+                if (haveBounds && !bounds.Contains(new Vector3(wp.x, wp.y, bounds.center.z))) continue;
                 if (sq < bestSq) { bestSq = sq; best = w; }
             }
-            return best;
+
+            var chosen = best ?? (haveBounds ? null : bestAnywhere);
+
+            // Logged once per zone: an anchor in the wrong part of a large area sends auto-walk off
+            // in the wrong direction, and there is no way to see that from inside the game.
+            if (chosen != null && _loggedZoneAnchors.Add(zone.id))
+                _log?.LogInfo($"[NAVIGATOR] Zone '{zone.id}' anchored on {chosen.obj_id} at {chosen.pos} " +
+                              $"(centre {aim}, bounds {bounds.min} .. {bounds.max})");
+
+            return chosen;
         }
         catch { return null; }
     }
+
+    private static readonly HashSet<string> _loggedZoneAnchors = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Find a building's exterior entrance door — the teleport WGO whose custom_tag resolves to
@@ -4290,14 +5807,26 @@ internal static class ObjectNavigator
     {
         try
         {
-            var drops = UnityEngine.Object.FindObjectsOfType<DropResGameObject>();
-            if (drops == null || drops.Length == 0) return;
+            // DropsList.me.drops is the game's OWN live list of every ground drop — it adds on
+            // spawn and removes in its Update the frame a drop is collected, so it is exact and
+            // free to read. This used to be FindObjectsOfType<DropResGameObject>(), which walks
+            // every object of every type in the scene natively: measured at ~55ms per call in a
+            // loaded save (the registry's re-sync sweep costs the same), and a destination rebuild
+            // runs one to twelve times a second. It was the single most expensive thing the mod
+            // did. Never put a scene sweep back here.
+            var drops = DropsList.me?.drops;
+            if (drops == null || drops.Count == 0) return;
 
             var itemList = _byCategory[NavCategory.Items];
 
             foreach (var drop in drops)
             {
                 if (drop == null || drop.is_collected) continue;
+                // FindObjectsOfType returned only ACTIVE objects, and this pass relied on that for
+                // its no-x-ray behaviour: a drop lying outdoors is deactivated while the player is
+                // in an interior and must stay unlisted. DropsList keeps culled drops, so make the
+                // same test explicitly.
+                if (!drop.gameObject.activeInHierarchy) continue;
 
                 var res = drop.res;
                 if (res == null || res.IsEmpty() || res.definition == null) continue;
@@ -4601,9 +6130,84 @@ internal static class ObjectNavigator
                id.IndexOf("_bed_", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
+    /// <summary>
+    /// <see cref="TryClassify"/> with its answer remembered per object.
+    ///
+    /// WHY: classification is by far the most expensive thing a destination rebuild does. It is a
+    /// long ladder of case-insensitive obj_id substring tests, GameBalance lookups, craft-list
+    /// walks and tool_action checks, and the rebuild runs it over every object within
+    /// <see cref="MaxHarvestableNavDistance"/> — thousands of them outdoors — one to twelve times a
+    /// second. Computing it once per object instead turns that into a dictionary lookup.
+    ///
+    /// SAFE because the verdict is a pure function of the object's obj_id and its definition, and
+    /// the cache is keyed on the obj_id it was computed for: a change_wgo craft (a dug grave plot
+    /// becoming a grave, a barrel becoming its smashed remains, a garden bed advancing a stage)
+    /// swaps the obj_id on the same WorldGameObject, which invalidates the entry by itself. The two
+    /// classifications that depend on the individual object's RUNTIME state rather than its id are
+    /// excluded by <see cref="HasVolatileClass"/> and recomputed every time.
+    /// </summary>
+    private static bool TryClassifyCached(WorldGameObject obj, out NavCategory category)
+    {
+        string objId = null;
+        try { objId = obj.obj_id; } catch { }
+
+        if (string.IsNullOrEmpty(objId) || HasVolatileClass(objId))
+            return TryClassify(obj, out category);
+
+        if (WorldObjectRegistry.TryGetClassCode(obj, out int cached))
+        {
+            _classCacheHits++;
+            category = (NavCategory)(cached & 0xFFFF);
+            return (cached & ClassifiedBit) != 0;
+        }
+
+        bool found = TryClassify(obj, out category);
+        WorldObjectRegistry.StoreClassCode(obj, ((int)category & 0xFFFF) | (found ? ClassifiedBit : 0));
+        return found;
+    }
+
+    /// <summary>Marks a cached code as "TryClassify returned true", above the category bits.</summary>
+    private const int ClassifiedBit = 1 << 16;
+
+    /// <summary>
+    /// obj_ids whose category can change while the obj_id does not, so their verdict must never be
+    /// cached:
+    ///
+    ///   * a pallet flips between LoadedPallets and EmptyPallets as crates are put on and taken off
+    ///     (<see cref="PalletCrateCount"/> reads the live inventory), and
+    ///   * a zombie-mine fence counts as a mine part only while it carries a craft or a docked
+    ///     worker (<see cref="IsZombieMinePart"/> reads <c>has_linked_worker</c>), and a fence is
+    ///     also the one thing whose repairable state is read off its live craft list.
+    ///
+    /// Both are a handful of objects in a save, so recomputing them costs nothing.
+    /// </summary>
+    private static bool HasVolatileClass(string objId)
+    {
+        // Memoised per id. Two case-insensitive substring scans do not sound like much, but this
+        // runs over every object in reach on every rebuild, and Mono's OrdinalIgnoreCase compare
+        // folds case character by character — the very cost the classification cache exists to
+        // remove. A few hundred distinct ids means this dictionary stops growing almost at once.
+        if (_volatileClassById.TryGetValue(objId, out bool v)) return v;
+        v = objId.IndexOf("pallet", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            objId.IndexOf("fence", StringComparison.OrdinalIgnoreCase) >= 0;
+        _volatileClassById[objId] = v;
+        return v;
+    }
+
+    private static readonly Dictionary<string, bool> _volatileClassById = new(StringComparer.Ordinal);
+    private static int _classCacheHits;
+
     private static bool TryClassify(WorldGameObject obj, out NavCategory category)
     {
         category = NavCategory.Other;
+
+        // The river throw spot is listed by hand, not by the scene scan: permanently in Landmarks
+        // (ObjectLandmarks) and, while you are actually carrying a corpse, under Crafting stations
+        // with the other places a body can be got rid of (AddCarriedBodyDisposal). Left to the scan
+        // it also landed in Other, so standing near the bank offered the same spot three times.
+        if (!string.IsNullOrEmpty(obj.obj_id) &&
+            obj.obj_id.IndexOf("throw_body_river", StringComparison.OrdinalIgnoreCase) >= 0)
+            return false;
 
         // The dungeon exit (the portal back up to the cellar) is a WorldGameObject whose obj_id
         // contains "dungeon_exit" — the game's own door constant
@@ -4651,7 +6255,10 @@ internal static class ObjectNavigator
         // teleport interaction_type). Skip the non-usable arrival anchors
         // (e.g. teleport_point, interaction_type None) — you can't walk through those,
         // they are only where you land, and listing them clutters the door list.
-        if (obj.name.IndexOf("teleport", StringComparison.OrdinalIgnoreCase) >= 0)
+        // Via the registry rather than obj.name: Unity allocates a fresh string out of native code
+        // on every name read, and this runs over every object in reach on every rebuild. The
+        // verdict is cached per object for its lifetime (see WorldObjectRegistry.HasTeleportName).
+        if (WorldObjectRegistry.HasTeleportName(obj))
         {
             if (obj.obj_def != null &&
                 obj.obj_def.interaction_type == ObjectDefinition.InteractionType.None)
@@ -5872,6 +7479,84 @@ internal static class ObjectNavigator
     /// </summary>
     private static string BrokenWord() => Loc.Get("nav.broken_repair_it");
 
+    /// <summary>
+    /// <see cref="GetObjectLabelSafe"/> with its answer remembered per object.
+    ///
+    /// WHY: naming was, after the classification cache landed, the single most expensive thing a
+    /// destination rebuild did — 38ms of a 55ms rebuild, about 27µs each across ~1800 objects, twice
+    /// a second, forever. Like classification it is a long ladder of case-insensitive obj_id
+    /// matching plus localisation lookups, and for almost every object in the world the answer is
+    /// the same every time.
+    ///
+    /// WHAT IS NOT CACHED, and this is the whole safety of it: a name that can change while the
+    /// object stays the same object. Getting one of those wrong does not make the mod slow, it makes
+    /// it SAY something false to somebody who cannot check it against the screen — telling a player
+    /// a grave is empty when there is a body in it. See <see cref="HasVolatileLabel"/>.
+    ///
+    /// Cached per OBJECT, never per obj_id: a door is named after where it leads, and that comes
+    /// from its own custom_tag (InteractionDetector.GetDoorLabel), so two doors sharing an obj_id
+    /// can legitimately have different names. The registry also drops the entry if the object's
+    /// obj_id changes underneath it, which is how a barrel becoming its smashed remains re-names
+    /// itself, and every name is dropped if the player switches language.
+    ///
+    /// The live extras the rebuild appends AFTER this — a pallet's crate count, a garden bed's
+    /// growth stage, a worker zombie's efficiency, the "wants to talk" marker — are applied outside
+    /// the cache and so stay live for free.
+    /// </summary>
+    private static string GetObjectLabelCached(WorldGameObject obj)
+    {
+        string objId = null, defId = null;
+        try { objId = obj?.obj_id; defId = obj?.obj_def?.id; } catch { }
+
+        // Both ids, because the grave-stage branch reads `obj_def?.id ?? obj_id` and the two are
+        // only USUALLY the same string. Testing one of them would leave a grave that answers to the
+        // other permanently stuck on whichever wording it had the first time it was named.
+        if (string.IsNullOrEmpty(objId) || HasVolatileLabel(objId))
+            return GetObjectLabelSafe(obj);
+        if (defId != null && !string.Equals(defId, objId, StringComparison.Ordinal) &&
+            HasVolatileLabel(defId))
+            return GetObjectLabelSafe(obj);
+
+        if (WorldObjectRegistry.TryGetLabel(obj, out var cached))
+        {
+            _labelCacheHits++;
+            return cached;
+        }
+
+        var label = GetObjectLabelSafe(obj);
+        WorldObjectRegistry.StoreLabel(obj, label);
+        return label;
+    }
+
+    /// <summary>
+    /// obj_ids whose spoken name is read off the object's LIVE state, so it must be built fresh
+    /// every time. There are exactly two such branches in <see cref="GetObjectLabelSafe"/>, and both
+    /// were found by reading it rather than guessed at:
+    ///
+    ///   * <c>grave_empty</c> / <c>grave_ground</c> — the name is "Empty grave" or "Grave with a
+    ///     body" depending on <see cref="HoldsBody"/>, and burying someone does not change the id.
+    ///   * zombie mines — <see cref="MineLabel"/> names the mine by its resource AND its staffing.
+    ///     That includes any <c>steep_*</c> id, because <see cref="IsZombieQuarryMine"/> decides
+    ///     whether a cliff face is a quarry by reading its active craft and <c>has_linked_worker</c>,
+    ///     so an ordinary cliff becomes a mine the moment a zombie is docked on it.
+    ///
+    /// Everything else in that function reads the obj_id, the definition or the custom_tag, none of
+    /// which change without the object becoming a different object.
+    /// </summary>
+    private static bool HasVolatileLabel(string objId)
+    {
+        if (_volatileLabelById.TryGetValue(objId, out bool v)) return v;
+        v = objId == "grave_empty" || objId == "grave_ground" ||
+            objId.IndexOf("steep_", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            objId.IndexOf("mine_zombie", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            objId.IndexOf("zombie_mine", StringComparison.OrdinalIgnoreCase) >= 0;
+        _volatileLabelById[objId] = v;
+        return v;
+    }
+
+    private static readonly Dictionary<string, bool> _volatileLabelById = new(StringComparer.Ordinal);
+    private static int _labelCacheHits;
+
     private static string GetObjectLabelSafe(WorldGameObject obj)
     {
         try
@@ -5907,6 +7592,16 @@ internal static class ObjectNavigator
                 obj.obj_id.IndexOf("broken", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return Loc.Get("nav.broken_morgue");
+            }
+
+            // ...and the real one. "throw_body_river" has no translation in any language, so it read
+            // as the prettified id ("Throw body river"), which says nothing about what it is for.
+            // Same label as its Landmarks entry (see ObjectLandmarks), so the two agree wherever the
+            // player meets it.
+            if (obj != null && !string.IsNullOrEmpty(obj.obj_id) &&
+                obj.obj_id.IndexOf("throw_body_river", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return Loc.Get("landmark.river_body_throw");
             }
 
             // A placed zombie mine is a cluster of objects that ALL localize to the generic

@@ -886,8 +886,7 @@ internal static class GUIAccessibility
         }
 
         var buttons = gui.GetComponentsInChildren<UIButton>(true);
-        Plugin.Log.LogInfo($"[DiscoverElements] Found {buttons.Length} UIButton components in {gui.GetType().Name}");
-        Plugin.Log.LogInfo($"[DiscoverElements] Button names: {string.Join(", ", buttons.Select(b => b.name))}");
+        Plugin.Log.LogDebug($"[DiscoverElements] Found {buttons.Length} UIButton components in {gui.GetType().Name}");
 
         foreach (var button in buttons)
         {
@@ -936,18 +935,22 @@ internal static class GUIAccessibility
                 text = ScreenReader.StripNguiCodes(ownLabel.text);
             }
 
-            // Fallback: use button name if no UILabel found or label is empty
+            // Fallback: the button's own GameObject name, which is an English name the artists
+            // typed ("close button") and the game never translates — so a German player heard
+            // "close button" in the middle of otherwise German speech. Translate the handful of
+            // generic ones we know; anything else still falls back to the raw name, which at least
+            // says something.
             if (string.IsNullOrWhiteSpace(text))
             {
-                text = button.name;
+                text = LocalizeRawButtonName(button.name);
                 if (string.IsNullOrWhiteSpace(text) || text.Length <= 1)
                 {
-                    Plugin.Log.LogInfo($"[DiscoverElements] Skipping button '{button.name}' - no valid label");
+                    Plugin.Log.LogDebug($"[DiscoverElements] Skipping button '{button.name}' - no valid label");
                     continue;
                 }
             }
 
-            Plugin.Log.LogInfo($"[DiscoverElements] Adding button: '{text}' (name: {button.name})");
+            Plugin.Log.LogDebug($"[DiscoverElements] Adding button: '{text}' (name: {button.name})");
             Elements.Add(new GUIElement
             {
                 Go = button.gameObject,
@@ -1033,14 +1036,14 @@ internal static class GUIAccessibility
                     // Replace inactive element with active one
                     if (!existing.Go.activeInHierarchy && elementGO.activeInHierarchy)
                     {
-                        Plugin.Log.LogInfo($"[DiscoverElements] Replacing inactive '{text}' with active version");
+                        Plugin.Log.LogDebug($"[DiscoverElements] Replacing inactive '{text}' with active version");
                         existing.Go = elementGO;
                     }
                 }
                 else if (!Elements.Any(e => e.Go == elementGO))
                 {
                     // Add new element
-                    Plugin.Log.LogInfo($"[DiscoverElements] Adding label as button: '{text}' from parent: {parent?.name ?? "null"}");
+                    Plugin.Log.LogDebug($"[DiscoverElements] Adding label as button: '{text}' from parent: {parent?.name ?? "null"}");
                     Elements.Add(new GUIElement
                     {
                         Go = elementGO,
@@ -1051,8 +1054,45 @@ internal static class GUIAccessibility
             }
             else
             {
-                Plugin.Log.LogInfo($"[DiscoverElements] Skipping label '{text}' - parent not clickable: {parent?.name ?? "null"}");
+                Plugin.Log.LogDebug($"[DiscoverElements] Skipping label '{text}' - parent not clickable: {parent?.name ?? "null"}");
             }
+        }
+    }
+
+    /// <summary>
+    /// A spoken label for a UIButton that carries no UILabel of its own, so all we have is the
+    /// GameObject name the artists typed. Those names are English and the game never translates
+    /// them, so they leaked into every other language verbatim — the chest window's only button
+    /// read as "close button" in a German game.
+    ///
+    /// Prefab clones get a suffix ("close button (1)"), so the suffix is stripped before matching.
+    /// Unknown names are returned unchanged: a raw name is still better than dropping a button the
+    /// player may need to press.
+    /// </summary>
+    private static string LocalizeRawButtonName(string rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName)) return rawName;
+
+        var name = rawName.Trim();
+        // "close button (1)" -> "close button"
+        int clone = name.IndexOf(" (", StringComparison.Ordinal);
+        if (clone > 0 && name.EndsWith(")", StringComparison.Ordinal)) name = name.Substring(0, clone);
+
+        switch (name.ToLowerInvariant())
+        {
+            case "close button":
+            case "close_button":
+            case "close":
+            case "btn_close":
+                return Loc.Get("common.close");
+            // Genuinely anonymous ones (the autopsy and soul-extractor windows each have a couple).
+            // "button" says nothing, but it is pressable, so name it as a control rather than
+            // hiding it.
+            case "button":
+            case "btn":
+                return Loc.Get("menu.unnamed_button");
+            default:
+                return rawName;
         }
     }
 
@@ -3502,7 +3542,7 @@ internal static class GUIAccessibility
         string id = (ids != null && index < ids.Count) ? ids[index] : null;
         if (string.IsNullOrEmpty(id)) id = need?.id;
 
-        string desc = DescribeItemId(id) ?? "ingredient";
+        string desc = DescribeItemId(id) ?? Loc.Get("craft.ingredient");
 
         // Required amount (the recipe's per-craft need, e.g. "2 malt, gold quality").
         try
@@ -3522,6 +3562,25 @@ internal static class GUIAccessibility
         {
             var def = GameBalance.me.GetDataOrNull<ItemDefinition>(id);
             var name = ScreenReader.StripNguiCodes(def?.GetItemName() ?? id)?.Trim();
+
+            // Nothing came back but the raw id — so speaking it would put an English id in the
+            // middle of another language ("Sloth, takes brain"). Two more places to look before
+            // settling for that, and BOTH are needed for the soul healer's seven organs:
+            //   * the game's own string table under the bare id. GetItemName can only be asked via
+            //     an ItemDefinition, and these ids have none, so a perfectly good translation
+            //     ("flesh" = "Fleisch", and likewise fat / skin / blood) was going unread.
+            //   * failing that, the id as a multiquality GROUP, which is all the game has for
+            //     heart / brain / intestine.
+            if (string.IsNullOrWhiteSpace(name) || name == id)
+            {
+                // Neither is given a quality tier: they name a family, not one item.
+                var direct = InteractionDetector.Translate(id);
+                if (!string.IsNullOrEmpty(direct)) return direct;
+
+                var group = MultiqualityGroupName(id);
+                if (!string.IsNullOrEmpty(group)) return group;
+            }
+
             if (string.IsNullOrWhiteSpace(name)) name = id;
 
             var tier = InventoryItemHandler.QualityTierName(def);
@@ -3529,6 +3588,61 @@ internal static class GUIAccessibility
             return name;
         }
         catch { return id; }
+    }
+
+    // Group id -> spoken name, or null when the id is not a group (cached either way: the miss is
+    // what costs, and a null answer means "don't scan items_data for this again"). Dropped on a
+    // language change by Loc.Reload — a cached name is in the language it was resolved in.
+    private static readonly Dictionary<string, string> _groupNames = new(StringComparer.Ordinal);
+
+    internal static void ForgetItemGroupNames() => _groupNames.Clear();
+
+    /// <summary>
+    /// The spoken name for a MULTIQUALITY GROUP id — an id that stands for a family of items rather
+    /// than one item, and so has no <see cref="ItemDefinition"/> and no translation of its own.
+    ///
+    /// Organs are the case that forced this: <c>SinItem.GetOrganIdBySin</c> hands the soul healer
+    /// exactly these ids, and for three of the seven the game's tables name only
+    /// <c>heart:heart_0_0</c>, <c>heart:heart_1_1</c> and so on — one entry per skull score — with
+    /// nothing under plain <c>heart</c>, <c>brain</c> or <c>intestine</c>. (The other four,
+    /// <c>flesh</c> / <c>fat</c> / <c>skin</c> / <c>blood</c>, do have a bare entry; that one is
+    /// reached by the direct lookup in the caller, which has to be tried first.)
+    ///
+    /// Every variant in a group shares one display name, so the first one that has a real name
+    /// answers for the group. This is the same resolution the game does in
+    /// <c>Item.CheckIsSetupProperly</c>: scan <c>items_data</c> for ids starting "&lt;group&gt;:".
+    /// Doing it this way rather than adding our own words keeps all eleven languages right and needs
+    /// no lang key per organ.
+    /// </summary>
+    private static string MultiqualityGroupName(string groupId)
+    {
+        if (string.IsNullOrEmpty(groupId)) return null;
+        if (_groupNames.TryGetValue(groupId, out var cached)) return cached;
+
+        string found = null;
+        try
+        {
+            var prefix = groupId + ":";
+            foreach (var def in GameBalance.me.items_data)
+            {
+                if (def?.id == null || !def.id.StartsWith(prefix, StringComparison.Ordinal)) continue;
+
+                // GetItemName echoes the id back when the game has no string for that variant
+                // either; that is no better than what we already had, so keep looking.
+                var name = ScreenReader.StripNguiCodes(def.GetItemName())?.Trim();
+                if (string.IsNullOrWhiteSpace(name) || name == def.id || name == groupId) continue;
+
+                found = name;
+                break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogWarning($"[NAMES] multiquality group lookup for '{groupId}' failed: {ex.Message}");
+        }
+
+        _groupNames[groupId] = found;
+        return found;
     }
 
     /// <summary>Predicted output-quality odds for the current ingredient choices.</summary>
@@ -5397,12 +5511,17 @@ internal static class GUIAccessibility
     // land back on it by identity rather than guessing at an index that just moved.
     private static void RefreshCurrentGUI(int focusIndex, string prefix = null,
         string keepGroup = null, int keepOffset = 0, GameObject keepFocusOn = null,
-        bool announce = true)
+        bool announce = true, bool rediscover = true)
     {
         if (_currentGUI == null) return;
 
-        Elements.Clear();
-        DiscoverElements(_currentGUI);
+        // The caller may already have re-discovered to measure what moved; discovery is the
+        // expensive half of this (it walks and re-labels every cell), so don't repeat it.
+        if (rediscover)
+        {
+            Elements.Clear();
+            DiscoverElements(_currentGUI);
+        }
 
         // After a move a side may have just become empty — mention it so the player knows.
         var emptyDesc = InventoryItemHandler.DescribeEmptyPanels(_currentGUI);
@@ -5496,10 +5615,16 @@ internal static class GUIAccessibility
     // announcement with the new running balance so the player hears the cost/gain of the
     // deal they're building, then the now-current row. An optional prefix goes in front of
     // both (e.g. "8 bread moved" after a whole-stack move) so it's all one uninterrupted Say.
-    private static void RefreshVendorAfterMove(VendorGUI vendor, int focusIndex, string prefix = null)
+    private static void RefreshVendorAfterMove(VendorGUI vendor, int focusIndex, string prefix = null,
+        bool rediscover = true)
     {
-        Elements.Clear();
-        DiscoverElements(vendor);
+        // The caller may already have re-discovered to measure what moved; discovery is the
+        // expensive half of this (it walks and re-labels every cell), so don't repeat it.
+        if (rediscover)
+        {
+            Elements.Clear();
+            DiscoverElements(vendor);
+        }
 
         string balance = null;
         try
@@ -5516,13 +5641,15 @@ internal static class GUIAccessibility
         if (active.Count == 0)
         {
             SelectedIndex = -1;
-            ScreenReader.Say(balance ?? Loc.Get("common.empty"));
+            ScreenReader.Say(Join(prefix, balance ?? Loc.Get("common.empty")));
             return;
         }
 
         SelectedIndex = Mathf.Clamp(focusIndex, 0, active.Count - 1);
         var row = active[SelectedIndex].ReadLabel();
-        ScreenReader.Say(string.IsNullOrEmpty(balance) ? row : $"{balance}. {row}");
+        // The lead-in ("Moved 5 wood") first: it is the answer to what the player just pressed,
+        // and it used to be dropped on the floor here while the chest path spoke its own.
+        ScreenReader.Say(Join(prefix, string.IsNullOrEmpty(balance) ? row : $"{balance}. {row}"));
     }
 
     // Spoken running balance of the assembled offer. GetTotalBalance is the player's net:
@@ -5706,7 +5833,9 @@ internal static class GUIAccessibility
         PressCellWithMoveAllStack(elem.Cell);
 
         // Both windows redraw their grids in place, so our cell list is stale: re-discover before
-        // measuring what actually moved.
+        // measuring what actually moved. This IS the refresh the announcement below needs, so it
+        // is handed on with rediscover:false — running it twice doubled the cost of every press,
+        // and re-labelling a full chest plus a full inventory is the slow part of a move.
         Elements.Clear();
         DiscoverElements(_currentGUI);
         int after = GroupItemTotal(GetActiveElements(), prevGroup, itemId);
@@ -5717,9 +5846,9 @@ internal static class GUIAccessibility
             : Loc.Get("inventory.nothing_moved");
 
         if (_currentGUI is VendorGUI vendor)
-            RefreshVendorAfterMove(vendor, prevIndex, summary);
+            RefreshVendorAfterMove(vendor, prevIndex, summary, rediscover: false);
         else
-            RefreshCurrentGUI(prevIndex, summary, prevGroup, prevOffset);
+            RefreshCurrentGUI(prevIndex, summary, prevGroup, prevOffset, rediscover: false);
 
         return true;
     }

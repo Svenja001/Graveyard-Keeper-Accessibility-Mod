@@ -1,3 +1,181 @@
+## 0.2.2 | 1 September 2026
+
+**The game runs faster, walking to spods you never should see is fixed, auto-walk stays out of walls and gets through the graveyard, chests
+answer the moment you press, and a batch of things that were still being read out in English — the
+day an NPC names, the soul healer's organs, several buildings — say what they are in your language.**
+
+- **Dialogue, tasks and quests say which day of the week they mean.** Whenever the game names a
+  weekday it does not write it as a word — it draws a little picture of that day's sin instead, and
+  the sentence is written around the picture: "Talk with the Merchant on ...", "Meet me on any ...,
+  on Witch Hill", "no more corpses on ...". The picture is the only place the day exists, so it
+  never reached the speech at all and you heard the raw code the game uses for it, "d4" or "d2".
+
+  All six now read as the day they stand for — "Talk with the Merchant on Day of Gluttony", "Prayer
+  will be available again next Day of Pride" — in the same wording the Q key uses for today's date,
+  so the two agree. This runs on every piece of game text the mod speaks, not just speech bubbles:
+  NPC dialogue and your own replies, task and quest text, the NPC list and the tech tree.
+
+- **The spot where you throw a corpse in the river is a landmark now.** Yorick asks you to dig up the
+  unpleasant neighbour and get rid of him in the river, and then tells you nothing about where that
+  is: there is no quest arrow on it, the dialogue just says "the river", and the place itself had no
+  name of its own, so it read as "Throw body river" in the **Other** list — and only while you were
+  already standing near it, because the game switches off anything off screen and that list drops
+  what is switched off.
+
+  It now sits in **Landmarks**, from anywhere on the map, as *"River bank, throw a body in here"*, and
+  it reads the same wherever else you meet it — including when you simply walk up to it, which
+  still announced the raw id "throw_body_river" after the first fix. It is **not** tied to the
+  quest: throwing a body in the river works for the whole game and is one way to get rid of
+  one, so it stays in the list afterwards — including for players who took that quest long ago
+  and could never find the place again.
+
+  **And while you are carrying a corpse it joins Crafting stations**, next to the morgue throw-in
+  and the crematorium. That is the short list you go to
+  when the question is "where do I put this", and the first time Yorick sends you off with the
+  neighbour it is right there. It appears when a body goes on your shoulder and disappears when your
+  hands are free. It has to work that way round: the game itself never registers this step as a task.
+  The text for one was written — *"Get rid of the body from the grave at the lower-right corner. Just
+  throw it in the river."* — but nothing in the game ever switches it on, so there is no quest entry
+  to hang a marker on. Yorick only says it out loud, once. Going by the body you are carrying covers
+  that first quest and every corpse after it.
+
+  The bank is no longer listed in **Other** as well. Between that, the landmark and the carried-body
+  entry, standing next to it offered you the same spot three times over.
+
+- **Gerry's scene at the river can actually be reached now.** After your first corpse goes in the
+  water, Gerry turns up on the bank to have a word about it — and that scene is what opens the NPC
+  list for the first time. It does not play when you throw. The game arms it in three steps, and the
+  last one is walking into an invisible trigger zone a few steps along the bank. A sighted player
+  crosses it without noticing, the moment they wander off after throwing; if you arrive by auto-walk,
+  throw, and stand still, nothing ever happens and there is no hint that anything is waiting.
+
+  While that scene is pending, the bank now appears under **Quests** as *"River bank, Gerry wants a
+  word about the body"*, and walking to it puts you inside the zone and starts the scene. It shows up
+  only in the window between the throw and the meeting, so it is silent for everyone else.
+
+- **The game runs at full speed again.** On a long session the picture had been falling steadily
+  behind the sound: the world moved in jerks while music and footsteps kept perfect time. That was
+  the mod. Keeping the list of things you can walk to up to date costs real work, and it was doing
+  all of that work again from scratch about twice a second, forever.
+
+  Three things were behind it. It asked the engine to hand over every object in the game just to
+  find the items lying on the ground. It re-decided what kind of thing each of the two thousand-odd
+  objects around you was. And it worked out the spoken name of every one of them — around eighteen
+  hundred names, twice a second, every second.
+
+  All three are fixed. Ground items now come from the list the game itself already keeps. What kind
+  of thing an object is, and what it is called, are worked out once and remembered — until the
+  object turns into something else, which the mod notices. A rebuild has gone from about a sixth of
+  a second to roughly a fortieth, and the mod as a whole from a third of the machine's time to a
+  small fraction of it.
+
+  Nothing you hear has changed: the same objects, in the same lists, under the same names. Names
+  that can change while the object stays the same — whether a grave is empty or has a body in it,
+  how many crates are on a pallet, what stage a garden bed is at, how good a worker zombie is, and
+  whether a cliff face has become a zombie mine — are deliberately never remembered, and are still
+  worked out fresh every time you hear them. Switching the game's language throws the remembered
+  names away.
+
+- **Auto-walk no longer drags you through walls.** To walk you somewhere the mod hands you to the
+  game's own mover with your controls switched off, which is what lets it thread gates and fences
+  the way a villager does instead of jamming on them. The cost of that is that nothing physically
+  stops you — so when the mod could not find a proper route and fell back on walking you there in a
+  dead straight line, that line went through whatever was in the way, house walls included. Coming
+  out the far side of a wall left you standing where the game never expects anyone to be, which is
+  where several other oddities started.
+
+  Straight-line walks are now checked before you are moved at all, and if a wall is in the way the
+  walk is not made. While a walk is running, if it does carry you into something solid, you are put
+  back on the last spot where you stood in the clear and a different route is worked out from there
+  — the mod steers itself back onto the road rather than handing you the problem. If there is
+  genuinely no way round, only then does it say so and switch to turn-by-turn guidance.
+
+  You are never stopped standing inside a wall. Handing your controls back while you are in the
+  middle of one would leave you wedged in a pocket with no way out, so the mod always backs you out
+  first.
+
+  It also stopped arguing with the game about what a wall is. Chairs, tables, trees, fence rails and
+  the odd bit of scenery that has a collider the game itself walks straight through are not
+  obstacles — brushing past them is what lets auto-walk thread the village gates, and it is what
+  gets you from your front door to your bed. Only somewhere the game's own map agrees nobody can
+  stand counts as a wall.
+
+- **Auto-walk works in the graveyard.** Among the graves it used to give up and leave you to walk
+  yourself, even though the way through was plainly there — as you could tell by simply walking it.
+  Two separate reasons, both fixed.
+
+  The game keeps two maps of where you can walk: a coarse one for villagers, and a fine one for you.
+  The coarse one's squares are nearly a whole tile across, so where graves are packed together it
+  has no free square left in the gaps and reports that there is no way through ground you cross
+  without thinking. When it gives up, the mod now asks the fine map — whose squares fit between the
+  headstones — and drives that route instead.
+
+  The second reason was the search area. The game only looks for a route inside a narrow corridor
+  drawn between you and where you are going, so a way round that leaves the corridor is not
+  considered at all. That is fine for stepping round a fence and useless for walking round a
+  building, which is what reaching the morgue door asks for. After a walk fails once, the mod now
+  widens that corridor considerably and tries again.
+
+- **Landmarks for places aim at the middle of the place.** A landmark like the village covers a huge
+  area, and the mod was pointing you at whichever of its objects happened to be nearest — which,
+  from the house meant the high ground on its far side. Auto-walk then set off up over the
+  cliffs while the tavern, a landmark inside the same village, took the road the whole time. It now
+  heads for the middle of an area instead, which is both the sensible destination and a fixed one:
+  the distance it reads out no longer drifts as you walk.
+
+- **The crowd of NPCs standing in the void is hidden.** Graveyard Keeper does not remove a character
+  who is finished for the day; it teleports them off the edge of the map and leaves them standing
+  there. Everyone whose day it is not, every tavern guest between visits, the whole cast. A sighted
+  player never sees that place. The mod did: they were listed under **People** and **Vendors**, they
+  turned up as quest targets, and you could auto-walk to them — off the map, into a part of the
+  world that is not meant to exist, which caused its own bugs.
+
+  It turned out not to be one spot but a whole row of them, one per off-duty cast member — the
+  bishop, the actress, the merchant, the cultist, the inquisitor, the astrologer — side by side,
+  next to the general one everybody else goes to. All of them are now recognised, and so is the mark
+  the game stamps onto a character when it sends it away, which is kept in your save: a character
+  who has been put away says so itself, rather than having to be worked out from where it is
+  standing.
+
+  Anyone parked is invisible to the mod everywhere — the object lists, quest markers, the readout of
+  what is near you, the corpse search and the combat scans. What is NOT hidden: the place your
+  zombies stack wood, which is named almost the same way and which you very much need to find.
+
+- **Moving a whole stack into a chest answers straight away.** Holding Shift and pressing Enter on a
+  stack moves all of it at once, and then tells you how much went — but there was a noticeable pause
+  before it said so. The mod was reading and naming every item in the chest and in your bags twice
+  over for the one press: once to work out how much had moved, and again to say where you now are.
+  It does that once now. It was also writing several hundred lines into its diagnostic log for each
+  of those two passes, which on a machine with the log window open cost more than the work itself;
+  those lines are still there for anyone chasing a bug, but they are off unless asked for.
+
+  The same press at a trader now says what moved as well. It always worked, but the trader screen
+  spoke only the new balance and dropped the "Moved 5 wood" half on the floor.
+
+- **Five more things say what they are instead of reading out a code.** The funeral pyre, the morgue
+  building, both corpse hatches, and a grave once a body is in it were among the handful of objects
+  Graveyard Keeper never named in any language, so they came out as "Mf pyre", "Morgue 1" and
+  "Grave corp". They now read as *Funeral pyre*, *Morgue*, *Corpse hatch* — the outside one the donkey drops
+  a body into and the inside one you clear it through — and *Grave with a body*, which is the game's
+  own wording for it elsewhere.
+
+- **The soul healer names its organs in your language.** Each of the seven sins wants one particular
+  body part, and the row that tells you which one read it out in English — *"Sloth, takes brain"* — in
+  every language. The station asks the game for the part by a name that stands for the whole family
+  of that organ, one for each skull score, and that family name is the one thing the game itself
+  never writes down: it has words for *heart with 2 red and 1 white*, and none for *heart*. Where a
+  word does exist under the bare name — flesh, fat, skin, blood — the mod was not asking for it
+  either, so all seven came out in English.
+
+  Both are fixed, and the words come from the game's own text rather than being written fresh, so
+  every language it ships in is right. This covers the same gap wherever else it shows up, including
+  recipe ingredients that accept any quality.
+
+- **The chest window's close button is no longer English in a German game.** Buttons that carry no
+  writing of their own fall back on the name the artists typed into the game, which is always
+  English and never translated. In a chest that was the only button there is, so it read as "close
+  button" in the middle of otherwise German speech. The common ones are translated now.
+
 ## 0.2.1 | 31 August 2026
 
 **Three things that were filed in the wrong place, or under the wrong name.**

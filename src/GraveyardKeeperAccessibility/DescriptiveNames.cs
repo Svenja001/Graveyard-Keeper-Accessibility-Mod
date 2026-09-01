@@ -33,6 +33,12 @@ internal static class DescriptiveNames
     // Keep most-specific rules above the general ones they'd otherwise be swallowed by.
     private static readonly (string Match, string Key)[] Rules =
     {
+        // --- named spots the game left untranslated -----------------------------------
+        // The river bank you throw a corpse off. The game has no name for it in any language, so
+        // walking up to it announced the raw id ("throw_body_river") even after the navigator
+        // learned the name. Same phrase here, so approaching it and browsing to it agree.
+        ("throw_body_river", "landmark.river_body_throw"),
+
         // --- beehives (before "tree": hives live on trees and carry a tree id) ------------
         ("bees_done",   "obj.beehive_ready"),
         ("bees",        "obj.beehive_tree"),
@@ -181,6 +187,21 @@ internal static class DescriptiveNames
         // Above the bare "empty" exact rule: an empty grave is a grave, not a blank slot.
         ("grave_empty",      "obj.grave_empty"),
         ("grave_ground",     "obj.grave_ground"),
+        // The buried-body stage of a grave. Reuses the phrase ObjectNavigator already speaks for
+        // it, which is the game's own grave_body_hdr wording, so the tracker and a walk-up agree.
+        ("grave_corp",       "grave.with_body"),
+        // The corpse hatches, in/out, above the plain "morgue" rule for the building itself. The
+        // game only ever names their BROKEN variants (morgue_throw_in_broken / _out_broken), so the
+        // working ones arrive here unnamed; each language borrows what the game calls the broken
+        // one. "in" is the outside hatch you drop a body into, "out" the inside one you clear it
+        // through - which is the opposite of what the ids sound like, hence the explicit wording.
+        ("morgue_throw_in",  "obj.morgue_hatch_outside"),
+        ("morgue_throw_out", "obj.morgue_hatch_inside"),
+        ("morgue",           "obj.morgue"),
+        // Where corpses are burnt. The game names only the placement hint (mf_pyre_placed,
+        // "Place for burning corpses"), never the object, so both the built pyre and its burnt-out
+        // remains land here.
+        ("pyre",             "obj.pyre"),
         ("bracken",          "obj.fern"),
         ("hops",             "obj.hops"),
         ("village_wc",       "obj.outhouse"),

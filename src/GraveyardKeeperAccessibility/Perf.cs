@@ -42,6 +42,36 @@ internal static class Perf
     private static readonly long[] _totalTicks = new long[N];   // since last summary
     private static readonly long[] _worstTicks = new long[N];   // worst single frame since summary
 
+    // Destination rebuilds are metered separately from the per-frame sections: they are the mod's
+    // one genuinely heavy operation, they run on their own cadence rather than every frame, and an
+    // average spread over sixty frames' worth of idle Updates says nothing about what one of them
+    // costs. These three numbers are what a report needs — how often, how long, and over how much.
+    /// <summary>The stages of one destination rebuild, so a slow one says WHICH part is slow.</summary>
+    internal enum RefreshPhase
+    {
+        Snapshot,    // copying the registry
+        Objects,     // the per-object walk, end to end
+        Classify,    // ...of which: deciding what kind of thing each object is
+        Label,       // ...of which: naming the ones that made it into a list
+        Doors,       // collapsing duplicate door variants
+        Quests,      // quest arrows and the hand-authored objective tables
+        Landmarks,   // zones, entrances, named world objects
+        Drops,       // ground items
+        Finish,      // sorting and restoring the selection
+        Count
+    }
+
+    private static readonly long[] _refreshPhaseTicks = new long[(int)RefreshPhase.Count];
+
+    private static int _refreshCount;
+    private static long _refreshTicks;
+    private static long _refreshWorstTicks;
+    private static long _refreshObjects;      // objects walked, summed
+    private static long _refreshClassified;   // of those, the ones that survived to classification
+    private static long _refreshCacheHits;    // of those, the ones answered from the classification cache
+    private static long _refreshLabelled;     // objects that made it into a list and had to be named
+    private static long _refreshLabelCacheHits;  // of those, the ones answered from the name cache
+
     private static int _frames;
     private static float _nextSummaryAt;
     private static float _lastSlowFrameWarnAt = float.NegativeInfinity;
@@ -110,7 +140,41 @@ internal static class Perf
                 for (int i = 0; i < N; i++) avg[i] = _totalTicks[i] / _frames;
                 _log?.LogInfo($"[PERF] {_frames} frames | avg {Describe(avg)}");
                 _log?.LogInfo($"[PERF] {_frames} frames | worst {Describe(_worstTicks)} | {WorldObjectRegistry.Objects.Count} objects tracked");
+
+                if (_refreshCount > 0)
+                {
+                    double avgMs = _refreshTicks * _ticksToMs / _refreshCount;
+                    _log?.LogInfo(
+                        $"[PERF] {_refreshCount} destination rebuilds | avg {avgMs:0.0}ms " +
+                        $"| worst {_refreshWorstTicks * _ticksToMs:0.0}ms " +
+                        $"| {_refreshObjects / _refreshCount} objects walked, " +
+                        $"{_refreshClassified / _refreshCount} classified " +
+                        $"({_refreshCacheHits / _refreshCount} from cache), " +
+                        $"{_refreshLabelled / _refreshCount} named " +
+                        $"({_refreshLabelCacheHits / _refreshCount} from cache) each");
+
+                    var phases = new System.Text.StringBuilder(160);
+                    for (int i = 0; i < (int)RefreshPhase.Count; i++)
+                    {
+                        if (phases.Length > 0) phases.Append("  ");
+                        phases.Append((RefreshPhase)i).Append(' ')
+                              .Append((_refreshPhaseTicks[i] * _ticksToMs / _refreshCount).ToString("0.0"))
+                              .Append("ms");
+                    }
+                    _log?.LogInfo($"[PERF] rebuild phases (avg) | {phases}");
+                }
             }
+
+            Array.Clear(_refreshPhaseTicks, 0, (int)RefreshPhase.Count);
+
+            _refreshCount = 0;
+            _refreshTicks = 0;
+            _refreshWorstTicks = 0;
+            _refreshObjects = 0;
+            _refreshClassified = 0;
+            _refreshCacheHits = 0;
+            _refreshLabelled = 0;
+            _refreshLabelCacheHits = 0;
 
             Array.Clear(_totalTicks, 0, N);
             Array.Clear(_worstTicks, 0, N);
@@ -121,6 +185,38 @@ internal static class Perf
             // Diagnostics must never be the thing that breaks the mod.
         }
     }
+
+    /// <summary>
+    /// Record one destination rebuild. <paramref name="startedAt"/> is a
+    /// <see cref="Stopwatch.GetTimestamp"/> taken at the top of the rebuild.
+    /// </summary>
+    internal static void NoteRefresh(long startedAt, int objectsWalked, int objectsClassified,
+                                     int cacheHits, int labelled, int labelCacheHits)
+    {
+        try
+        {
+            long ticks = Stopwatch.GetTimestamp() - startedAt;
+            _refreshCount++;
+            _refreshTicks += ticks;
+            if (ticks > _refreshWorstTicks) _refreshWorstTicks = ticks;
+            _refreshObjects += objectsWalked;
+            _refreshClassified += objectsClassified;
+            _refreshCacheHits += cacheHits;
+            _refreshLabelled += labelled;
+            _refreshLabelCacheHits += labelCacheHits;
+        }
+        catch { }
+    }
+
+    /// <summary>Record the cost of one stage of a rebuild. <paramref name="startedAt"/> from <see cref="Now"/>.</summary>
+    internal static void NoteRefreshPhase(RefreshPhase phase, long startedAt)
+    {
+        try { _refreshPhaseTicks[(int)phase] += Stopwatch.GetTimestamp() - startedAt; }
+        catch { }
+    }
+
+    /// <summary>A timestamp to hand back to <see cref="NoteRefresh"/> / <see cref="NoteRefreshPhase"/>.</summary>
+    internal static long Now() => Stopwatch.GetTimestamp();
 
     private static string Describe(long[] ticks)
     {

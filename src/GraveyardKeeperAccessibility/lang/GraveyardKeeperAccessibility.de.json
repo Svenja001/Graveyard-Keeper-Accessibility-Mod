@@ -477,6 +477,10 @@
   "obj.elevator": "Aufzug",
   "obj.grave_empty": "Leeres Grab",
   "obj.grave_ground": "Erdgrab",
+  "obj.morgue": "Leichenhalle",
+  "obj.morgue_hatch_outside": "Leiche hineinwerfen",
+  "obj.morgue_hatch_inside": "Leiche herauswerfen",
+  "obj.pyre": "Scheiterhaufen",
   "obj.fern": "Farn",
   "obj.hops": "Hopfen",
   "obj.outhouse": "Plumpsklo",
@@ -882,6 +886,8 @@
   "landmark.home": "Zuhause",
   "landmark.church": "Kirche",
   "landmark.merchant": "Händler",
+  "quest.gerry_river_meeting": "Flussufer, Gerry will wegen der Leiche mit dir reden",
+  "landmark.river_body_throw": "Flussufer, Leiche hineinwerfen",
   "landmark.snake_meeting_point": "Treffpunkt mit Schlange",
   "landmark.amulet_delivery_spot": "Übergabeort für das Amulett",
   "landmark.ghost_leg_delivery_spot": "Geist, Übergabeort für das Bein",
@@ -953,6 +959,7 @@
   "gui.name_empty": "{0}. Leer",
 
   "menu.adjust_hint": "Links und rechts ändern die Einstellung",
+  "menu.unnamed_button": "Schaltfläche",
 
   "pause.intro": "Pausenmenü. Das Spiel ist angehalten, Escape kehrt ins Spiel zurück.",
   "pause.resumed": "Zurück im Spiel",

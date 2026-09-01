@@ -656,7 +656,10 @@ internal static class Patches
         {
             if (!ObjectNavigator.PadPlayerGraph) return;
 
-            const float pad = 480f; // ~5 tiles of slack on every side
+            // Normally ~5 tiles of slack on every side; widened to ~14 for a retry after the walk
+            // has already failed once. See ObjectNavigator.PlayerGraphPadUnits for why one figure
+            // cannot do both jobs.
+            float pad = ObjectNavigator.PlayerGraphPadUnits;
             var min = Vector2.Min(from, to) - new Vector2(pad, pad);
             var max = Vector2.Max(from, to) + new Vector2(pad, pad);
             from = min;

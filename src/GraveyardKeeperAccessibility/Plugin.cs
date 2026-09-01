@@ -13,6 +13,7 @@ public class Plugin : BaseUnityPlugin
         Loc.Init(Log);
         ScreenReader.Init(Log);
         WorldObjectRegistry.Init(Log);
+        StockPointFilter.Init(Log);
         Perf.Init(Log);
         MovementFeedback.Init(Log);
         InteractionDetector.Init(Log);

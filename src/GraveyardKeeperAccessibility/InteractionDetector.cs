@@ -189,6 +189,7 @@ internal static class InteractionDetector
                 if (FindNearbyRiverThrowSpot() != null)
                 {
                     ScreenReader.Say(Loc.Get("carry.thrown_in_river"), interrupt: false);
+                    NoteRiverThrowFlags();
                 }
                 else
                 {
@@ -1029,6 +1030,45 @@ internal static class InteractionDetector
     }
 
     /// <summary>
+    /// Log the two flags that decide whether Gerry's river scene is still coming, right after a
+    /// throw. The scene is a three-step relay (Yorick arms Gerry's <c>on_showing_gerry_near_river</c>
+    /// → the throw spends it and sets the player's <c>showing_gerry_near_river</c> → entering
+    /// gd_zone_gerry_up/_down spends that and spawns him), and each step is silent, so a report of
+    /// "no cutscene" is otherwise impossible to place. One line per river throw, a handful a save.
+    /// </summary>
+    private static void NoteRiverThrowFlags()
+    {
+        try
+        {
+            var player = MainGame.me?.player;
+            var gerry = WorldMap.GetWorldGameObjectByObjId("talking_skull", ignore_not_found_error: true);
+            _log?.LogInfo(
+                $"[RIVER] thrown. player showing_gerry_near_river={player?.GetParam("showing_gerry_near_river")}, "
+                + (gerry == null ? "talking_skull NOT FOUND in world"
+                                 : $"gerry on_showing_gerry_near_river={gerry.GetParam("on_showing_gerry_near_river")}"));
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// True while the player is shouldering a corpse. This is the one moment the river-disposal
+    /// spot is an objective rather than scenery, and the game gives us nothing better to key on:
+    /// Yorick asks for the throw in dialogue only, and never registers a task for it (the authored
+    /// text task_ghost_body is cut content — no flow node anywhere sets it). See
+    /// <see cref="ObjectNavigator"/>'s quest gathering, which mirrors the spot into Quests on this.
+    /// </summary>
+    internal static bool IsCarryingBody()
+    {
+        try
+        {
+            var character = MainGame.me?.player?.components?.character;
+            if (character == null || !character.has_overhead) return false;
+            return character.GetOverheadItem()?.definition?.type == ItemDefinition.ItemType.Body;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// The river-disposal spot (obj_id "throw_body_river") the player stands on to chuck a
     /// carried corpse into the water — Yorick's "throw the neighbour in the river" step. Used
     /// to announce a throw distinctly from a plain set-down. See [[exhumation-grave-disposal]].
@@ -1778,7 +1818,7 @@ internal static class InteractionDetector
     /// <summary>
     /// The localized name for an id, or null when the game has no translation for it.
     /// </summary>
-    private static string Translate(string objId)
+    internal static string Translate(string objId)
     {
         if (string.IsNullOrEmpty(objId)) return null;
         try

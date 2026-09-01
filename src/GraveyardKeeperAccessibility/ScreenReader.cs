@@ -193,6 +193,7 @@ internal static class ScreenReader
         {
             text = Regex.Replace(text, @"\((wskull|rskull|skull|cross|gld|slv|brz)\)(?:\s?(-?\d+(?:\.\d+)?))?", TokenToWords);
             text = Regex.Replace(text, StatTokenPattern, StatTokenToWords);
+            text = Regex.Replace(text, DayIconPattern, DayIconToWords);
             // A dropped decorative icon (see StatTokenToWords) leaves a double space or a space in
             // front of the punctuation it sat before; tidy both so the sentence still reads clean.
             text = Regex.Replace(text, @" {2,}", " ");
@@ -202,6 +203,22 @@ internal static class ScreenReader
         if (text.Contains('['))
             text = Regex.Replace(text, @"\[[\da-fA-F]{6}\]|\[-\]|\[/?c\]", "");
         return text;
+    }
+
+    /// <summary>
+    /// The weekday sprites. The game NEVER writes a weekday as words: dialogue, tasks and quest
+    /// text all carry it as an icon — "Talk with the &lt;Merchant&gt; on (d4)", "Meet me on any (d2),
+    /// on &lt;Witch Hill&gt;", "no more corpses on (d6)" — so a blind player got the bare token and no
+    /// day at all. Kept apart from <see cref="StatTokenPattern"/> because these carry no amount:
+    /// folded into that alternation, a following number ("(d2) 100") would be eaten as a count.
+    /// </summary>
+    private const string DayIconPattern = @"\(d([1-6])\)";
+
+    /// <summary>"(d4)" -&gt; "Day of Gluttony"; an unmapped icon is left as the raw token.</summary>
+    private static string DayIconToWords(Match m)
+    {
+        var name = DayTimeAnnouncer.DayNameForIcon(m.Groups[1].Value[0] - '0');
+        return string.IsNullOrEmpty(name) ? m.Value : name;
     }
 
     /// <summary>

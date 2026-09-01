@@ -47,6 +47,18 @@ internal static class DayTimeAnnouncer
     }
 
     /// <summary>
+    /// The weekday a "(d1)"…"(d6)" day icon stands for. Dialogue, task and quest text never
+    /// spell a weekday out — the game writes it as an inline sprite ("Talk with the &lt;Merchant&gt;
+    /// on (d4)", "no more corpses on (d6)") and the player is expected to recognise the picture.
+    /// The icons run in the same sin order the rest of this class uses (Sloth…Pride), so icon N
+    /// is index N-1: the Inquisitor's own line, "Today is a day of wrath! … We can talk next (d2)",
+    /// pins (d2) to Wrath, and the merchant's (d4)/actress's (d5)/bishop's (d6) match their
+    /// entries in <see cref="VisitingNpcDayIndex"/>. Returns null for anything outside 1–6.
+    /// </summary>
+    internal static string DayNameForIcon(int icon)
+        => icon >= 1 && icon <= 6 ? WeekdayDayName(icon - 1) : null;
+
+    /// <summary>
     /// The weekday name for an absolute calendar day number, e.g. day 6 → "Day of Sloth".
     /// Mirrors the game's day → day_of_week → sin cycle so dialogue like "ich komme an Tag 6"
     /// can also speak which day-of-week that falls on.

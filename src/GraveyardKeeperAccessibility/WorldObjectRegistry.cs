@@ -42,15 +42,43 @@ internal static class WorldObjectRegistry
         Computed = 1 << 0,  // the flags below have been filled in
         Excluded = 1 << 1,  // the player themselves, or a prefab/template shell — never announced
         DlcOk = 1 << 2,     // base-game content, or DLC content this player owns
+        TeleportName = 1 << 3, // the GameObject name carries the door/teleport token
+    }
+
+    /// <summary>
+    /// Everything cached per object. One struct in one list rather than several parallel lists, so
+    /// the swap-with-tail bookkeeping in <see cref="RemoveAt"/> / <see cref="Resync"/> stays a
+    /// single assignment and cannot drift out of sync.
+    /// </summary>
+    private struct Facts
+    {
+        public byte Flags;
+
+        /// <summary>
+        /// The obj_id the cached navigation category was computed for, or null if none is cached.
+        /// A built object keeps its identity as a WorldGameObject across a change_wgo craft — a
+        /// grave plot becomes a grave, a barrel becomes its smashed remains — and swaps obj_id in
+        /// place, so the id is what the cache has to be keyed on, not the instance.
+        /// </summary>
+        public string ClassId;
+
+        /// <summary>Caller-owned classification code for <see cref="ClassId"/>. See ObjectNavigator.</summary>
+        public int ClassCode;
+
+        /// <summary>The obj_id the cached spoken name was computed for, or null if none is cached.</summary>
+        public string LabelId;
+
+        /// <summary>The object's spoken name for <see cref="LabelId"/>. See ObjectNavigator.</summary>
+        public string Label;
     }
 
     private static ManualLogSource _log;
 
     // Parallel arrays rather than a list of small objects: the per-frame scanners walk these end to
-    // end, so keeping the flags in a byte[] next to the reference keeps the whole sweep cache-warm
-    // and allocation-free.
+    // end, so keeping the cached facts in a struct list next to the reference keeps the whole sweep
+    // cache-warm and allocation-free.
     private static readonly List<WorldGameObject> _objects = new(4096);
-    private static readonly List<byte> _flags = new(4096);
+    private static readonly List<Facts> _flags = new(4096);
 
     // instanceID -> index in the lists above, so OnDestroy removal is O(1) instead of a linear
     // scan. Removal swaps the last entry into the hole (order is meaningless to every caller).
@@ -104,7 +132,7 @@ internal static class WorldObjectRegistry
 
         _slotOf[id] = _objects.Count;
         _objects.Add(wgo);
-        _flags.Add((byte)Flag.None);
+        _flags.Add(default);
     }
 
     /// <summary>Harmony prefix target: a world object is being torn down.</summary>
@@ -273,12 +301,12 @@ internal static class WorldObjectRegistry
 
         // Carry the already-computed flags across by instance id, so a re-sync doesn't throw away
         // the caching work that is the whole point of this class.
-        var keptFlags = new Dictionary<int, byte>(_objects.Count);
+        var keptFlags = new Dictionary<int, Facts>(_objects.Count);
         for (int i = 0; i < _objects.Count; i++)
         {
             var obj = _objects[i];
             if (obj == null) continue;
-            if (((Flag)_flags[i] & Flag.Computed) == 0) continue;
+            if (((Flag)_flags[i].Flags & Flag.Computed) == 0) continue;
             keptFlags[obj.GetInstanceID()] = _flags[i];
         }
 
@@ -293,7 +321,7 @@ internal static class WorldObjectRegistry
             if (_slotOf.ContainsKey(id)) continue;
             _slotOf[id] = _objects.Count;
             _objects.Add(obj);
-            _flags.Add(keptFlags.TryGetValue(id, out var f) ? f : (byte)Flag.None);
+            _flags.Add(keptFlags.TryGetValue(id, out var f) ? f : default);
         }
 
         // Only interesting when it actually changes something, otherwise this would spam the log
@@ -332,6 +360,130 @@ internal static class WorldObjectRegistry
         return (EnsureFlags(wgo, SlotOf(wgo)) & Flag.DlcOk) != 0;
     }
 
+    /// <summary>
+    /// True when the object's GameObject name carries the "teleport" token that marks a door /
+    /// zone exit. Cached for the object's lifetime (a name never changes) off the single
+    /// <c>wgo.name</c> read <see cref="ComputeFlags"/> already makes, so a caller in a per-object
+    /// loop pays a byte compare instead of a native string allocation.
+    /// </summary>
+    internal static bool HasTeleportName(WorldGameObject wgo)
+    {
+        return (EnsureFlags(wgo, SlotOf(wgo)) & Flag.TeleportName) != 0;
+    }
+
+    // ---- Caller-owned classification cache ---------------------------------
+    //
+    // ObjectNavigator's TryClassify is the mod's most expensive per-object function — a long
+    // sequence of case-insensitive obj_id substring tests, definition lookups and craft-list walks
+    // — and a destination rebuild runs it over every object within reach. Its answer is a pure
+    // function of the object's obj_id and definition (plus the name flag above), so it only has to
+    // be computed once per object, and recomputed only if the object's obj_id changes underneath
+    // it. The registry stores the verdict because it already owns per-object lifetime; the meaning
+    // of the code is entirely the caller's business.
+
+    /// <summary>
+    /// The classification code cached for this object, if one was stored and the object still has
+    /// the obj_id it was stored for.
+    /// </summary>
+    internal static bool TryGetClassCode(WorldGameObject wgo, out int code)
+    {
+        code = 0;
+        int slot = SlotOf(wgo);
+        if (slot < 0 || slot >= _flags.Count) return false;
+
+        var f = _flags[slot];
+        if (f.ClassId == null) return false;
+
+        string id;
+        try { id = wgo.obj_id; } catch { return false; }
+
+        // Reference equality carries the overwhelming majority of hits (an obj_id comes from the
+        // same definition string every time); string.Equals only does real work when it does not.
+        if (!ReferenceEquals(f.ClassId, id) && !string.Equals(f.ClassId, id, StringComparison.Ordinal))
+            return false;
+
+        code = f.ClassCode;
+        return true;
+    }
+
+    /// <summary>Remember <paramref name="code"/> as this object's classification for its current obj_id.</summary>
+    internal static void StoreClassCode(WorldGameObject wgo, int code)
+    {
+        int slot = SlotOf(wgo);
+        if (slot < 0 || slot >= _flags.Count) return;
+
+        string id;
+        try { id = wgo.obj_id; } catch { return; }
+        if (id == null) return;   // half-initialised; classify again next time rather than latching
+
+        var f = _flags[slot];
+        f.ClassId = id;
+        f.ClassCode = code;
+        _flags[slot] = f;
+    }
+
+    // ---- Cached spoken name -------------------------------------------------
+    //
+    // Same idea as the classification cache above, and cached PER OBJECT rather than per obj_id for
+    // a specific reason: a door is named after where it leads, which comes from its own custom_tag,
+    // and two doors can share an obj_id while leading to different places. Keyed per object, each
+    // door keeps its own answer; keyed by id, the mod could announce the tavern door as the way into
+    // the house. Names that change while the object's identity does not are never cached at all —
+    // see ObjectNavigator.HasVolatileLabel.
+
+    /// <summary>The spoken name cached for this object, if the object still has the obj_id it was computed for.</summary>
+    internal static bool TryGetLabel(WorldGameObject wgo, out string label)
+    {
+        label = null;
+        int slot = SlotOf(wgo);
+        if (slot < 0 || slot >= _flags.Count) return false;
+
+        var f = _flags[slot];
+        if (f.LabelId == null) return false;
+
+        string id;
+        try { id = wgo.obj_id; } catch { return false; }
+
+        if (!ReferenceEquals(f.LabelId, id) && !string.Equals(f.LabelId, id, StringComparison.Ordinal))
+            return false;
+
+        label = f.Label;
+        return true;
+    }
+
+    /// <summary>Remember <paramref name="label"/> as this object's spoken name for its current obj_id.</summary>
+    internal static void StoreLabel(WorldGameObject wgo, string label)
+    {
+        int slot = SlotOf(wgo);
+        if (slot < 0 || slot >= _flags.Count) return;
+
+        string id;
+        try { id = wgo.obj_id; } catch { return; }
+        if (id == null) return;
+
+        var f = _flags[slot];
+        f.LabelId = id;
+        f.Label = label;
+        _flags[slot] = f;
+    }
+
+    /// <summary>
+    /// Drop every cached name. Called when the game language changes: a cached name is in whatever
+    /// language it was built in, and nothing about the object itself changes to invalidate it.
+    /// </summary>
+    internal static void InvalidateLabels()
+    {
+        for (int i = 0; i < _flags.Count; i++)
+        {
+            var f = _flags[i];
+            if (f.LabelId == null) continue;
+            f.LabelId = null;
+            f.Label = null;
+            _flags[i] = f;
+        }
+        _log?.LogInfo("[REGISTRY] Cached object names dropped (language changed)");
+    }
+
     private static int SlotOf(WorldGameObject wgo)
     {
         if (wgo == null) return -1;
@@ -357,7 +509,11 @@ internal static class WorldObjectRegistry
         for (int i = 0; i < objects.Count; i++)
         {
             var obj = objects[i];
-            if (obj != null) into.Add(obj);
+            if (obj == null) continue;
+            // Characters the game has parked off-stage stay ACTIVE, so nothing else here drops
+            // them. See StockPointFilter — a sighted player never sees that pile.
+            if (StockPointFilter.IsParked(obj)) continue;
+            into.Add(obj);
         }
     }
 
@@ -377,7 +533,7 @@ internal static class WorldObjectRegistry
         // last sync). It still gets a correct answer, just an uncached one.
         if (slot >= 0 && slot < _flags.Count)
         {
-            var cached = (Flag)_flags[slot];
+            var cached = (Flag)_flags[slot].Flags;
             if ((cached & Flag.Computed) != 0) return cached;
         }
 
@@ -388,7 +544,11 @@ internal static class WorldObjectRegistry
         // permanently mislabel DLC content. Recompute next frame instead — this affects a handful
         // of freshly spawned objects, never the steady state.
         if (stable && slot >= 0 && slot < _flags.Count)
-            _flags[slot] = (byte)(computed | Flag.Computed);
+        {
+            var f = _flags[slot];
+            f.Flags = (byte)(computed | Flag.Computed);
+            _flags[slot] = f;
+        }
 
         return computed;
     }
@@ -407,6 +567,15 @@ internal static class WorldObjectRegistry
                 && (name.Contains("Player")
                     || name.Contains("prefab") || name.Contains("Prefab") || name.Contains("template")))
                 result |= Flag.Excluded;
+
+            // Doors/zone exits are recognised by the "teleport" token in the GameObject NAME — the
+            // game has no interaction_type for them. Decided here so ObjectNavigator's classifier
+            // never has to read the name itself: Unity's name getter marshals a brand new string
+            // out of native code on every access, and that classifier runs over every object within
+            // reach on every destination rebuild. Same one name read as the exclusion test above.
+            if (!string.IsNullOrEmpty(name)
+                && name.IndexOf("teleport", StringComparison.OrdinalIgnoreCase) >= 0)
+                result |= Flag.TeleportName;
 
             if (ObjectNavigator.IsObjectDlcAvailable(wgo))
                 result |= Flag.DlcOk;
@@ -460,6 +629,7 @@ internal static class WorldObjectRegistry
 
             if (IsExcluded(obj, i)) continue;
             if (!IsDlcAvailable(obj, i)) continue;
+            if (StockPointFilter.IsParked(p)) continue;   // off-stage NPC parking spot
 
             try
             {
@@ -502,6 +672,10 @@ internal static class WorldObjectRegistry
 
             if (applyExclusions && IsExcluded(obj, i)) continue;
             if (applyDlcFilter && !IsDlcAvailable(obj, i)) continue;
+            // Never announce, target or path to a character the game has parked off-stage. Applied
+            // unconditionally, including for the combat scans that skip the other filters: a mob
+            // sitting in the stock pile is not in the player's world at all.
+            if (StockPointFilter.IsParked(p)) continue;
 
             try
             {

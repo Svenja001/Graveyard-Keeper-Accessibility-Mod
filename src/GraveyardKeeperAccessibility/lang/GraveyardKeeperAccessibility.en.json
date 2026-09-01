@@ -477,6 +477,10 @@
   "obj.elevator": "Elevator",
   "obj.grave_empty": "Empty grave",
   "obj.grave_ground": "Earth grave",
+  "obj.morgue": "Morgue",
+  "obj.morgue_hatch_outside": "Corpse hatch (outside)",
+  "obj.morgue_hatch_inside": "Corpse hatch (inside)",
+  "obj.pyre": "Funeral pyre",
   "obj.fern": "Fern",
   "obj.hops": "Hops",
   "obj.outhouse": "Outhouse",
@@ -882,6 +886,8 @@
   "landmark.home": "Home",
   "landmark.church": "Church",
   "landmark.merchant": "Merchant",
+  "quest.gerry_river_meeting": "River bank, Gerry wants a word about the body",
+  "landmark.river_body_throw": "River bank, throw a body in here",
   "landmark.snake_meeting_point": "Snake meeting point",
   "landmark.amulet_delivery_spot": "Amulet delivery spot",
   "landmark.ghost_leg_delivery_spot": "Ghost, leg delivery spot",
@@ -953,6 +959,7 @@
   "gui.name_empty": "{0}. Empty",
 
   "menu.adjust_hint": "Left and right change the setting",
+  "menu.unnamed_button": "Button",
 
   "pause.intro": "Pause menu. The game is paused, Escape returns to the game.",
   "pause.resumed": "Back in the game",

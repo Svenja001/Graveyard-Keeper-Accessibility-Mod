@@ -74,10 +74,15 @@ internal static class CorpseScanner
                 finds.Add((dist, DescribeBody(body, LocationOf(obj), obj.pos, playerPos)));
             }
 
-            // Bodies lying on the ground are DropResGameObjects, not WorldGameObjects.
-            foreach (var drop in UnityEngine.Object.FindObjectsOfType<DropResGameObject>())
+            // Bodies lying on the ground are DropResGameObjects, not WorldGameObjects. Read the
+            // game's own live list rather than sweeping the scene — FindObjectsOfType costs ~55ms
+            // in a loaded save, which is a stutter on a keypress. See ObjectNavigator.GatherDropTargets.
+            var drops = DropsList.me?.drops;
+            for (int i = 0; drops != null && i < drops.Count; i++)
             {
+                var drop = drops[i];
                 if (drop == null || drop.is_collected) continue;
+                if (!drop.gameObject.activeInHierarchy) continue;
                 var res = drop.res;
                 if (res == null || res.IsEmpty() || res.definition == null
                     || res.definition.type != ItemDefinition.ItemType.Body)

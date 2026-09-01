@@ -72,8 +72,20 @@ internal static class Loc
     {
         var lang = CurrentGameLang();
         if (_currentLang == lang) return;
+        bool hadLang = _currentLang != null;
         _currentLang = lang;
         _translations = Normalize(lang) == "en" ? _fallback : LoadLang(lang);
+
+        // Object names are cached per object once computed (WorldObjectRegistry), and nothing about
+        // an object changes when the player switches language — so without this the world would keep
+        // being read out in the language it was first named in.
+        if (hadLang)
+        {
+            WorldObjectRegistry.InvalidateLabels();
+            // Same reasoning for the item-group names resolved out of the game's own tables
+            // (organs, recipe ingredient groups) — see GUIAccessibility.MultiqualityGroupName.
+            GUIAccessibility.ForgetItemGroupNames();
+        }
     }
 
     /// <summary>Looks up a spoken string. Falls back to English, then to the key itself.</summary>
