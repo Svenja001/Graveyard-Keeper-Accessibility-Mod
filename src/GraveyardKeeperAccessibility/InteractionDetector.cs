@@ -1584,6 +1584,10 @@ internal static class InteractionDetector
         label = WithPalletInfo(label, wgo);
         label = WithZombieInfo(label, wgo);
         label = WithPendingInteraction(label, wgo);
+        // Whether the player may work this at all yet. Standing at a tree is the moment the game
+        // itself would refuse, with a picture the player cannot see. (What the tree WOULD give is
+        // deliberately not said — a sighted player does not know that before felling it either.)
+        label = WorkUnlock.With(label, wgo?.obj_def);
         // The two "here's how you act on this" clauses go last, so they close the sentence.
         label = WithCleanupInfo(label, wgo);
         label = WithBreakableInfo(label, wgo);
@@ -1624,6 +1628,17 @@ internal static class InteractionDetector
                 // Say what it is; the cover's colour is decoration and navigates nobody anywhere.
                 if (ObjectNavigator.IsSleepingBed(wgo))
                     return Loc.Get("obj.bed");
+
+                // A resource node the game splits into its own work group — small tree vs big tree,
+                // the two mushrooms, the two grades of iron — is named after the group, since that
+                // is the split that decides whether the player may work it at all; a flower is named
+                // after the bloom it gives, which is the only thing telling the nine of them apart.
+                // Only where the game itself has no name for the object, so a real translation wins.
+                if (!string.IsNullOrEmpty(wgo.obj_def.id) && !HasTranslation(wgo.obj_def.id))
+                {
+                    var nodeName = DescriptiveNames.ForNode(wgo);
+                    if (!string.IsNullOrEmpty(nodeName)) return nodeName;
+                }
 
                 // Try to use the object id, localized to a readable name where possible.
                 // Furniture a build desk placed by script is spawned under an id the game never

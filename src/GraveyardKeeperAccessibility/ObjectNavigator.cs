@@ -1,4 +1,4 @@
-﻿namespace GraveyardKeeperAccessibility;
+namespace GraveyardKeeperAccessibility;
 
 internal struct NavigationTarget
 {
@@ -2481,10 +2481,15 @@ internal static class ObjectNavigator
         for (float t = WallProbeStep; t < length - WallProbeStep; t += WallProbeStep)
         {
             var p = from + dir * t;
-            var solid = SolidAt(p, out bool isWall);
-            if (solid == null || !isWall)
+            // Anything solid counts, prop or not. What decides whether the glide may pass is the
+            // THICKNESS of the run below, not what the collider is attached to: a table is a few
+            // units of nothing much and a scripted walk has always slid past it, a building wall is
+            // not. Skipping world objects here was how a walk went through the smith's house — the
+            // house is a world object, and so are canopies and roofs.
+            var solid = SolidAt(p, out _);
+            if (solid == null)
             {
-                run = 0f;            // a prop, or clear; a scripted walk has always slid past those
+                run = 0f;
                 continue;
             }
 
@@ -2628,6 +2633,7 @@ internal static class ObjectNavigator
             _hasWallWatchPos = false;
             _hasLastClearPos = false;
             _insideWallTicks = 0;
+            _crossingName = null;
             return;
         }
 
@@ -2656,17 +2662,29 @@ internal static class ObjectNavigator
 
         try
         {
+            // Anything solid counts here, prop or not.
+            //
+            // This used to ignore every collider that belonged to a WorldGameObject, on the theory
+            // that those are chairs and trees while walls are raw level geometry. That theory is
+            // wrong, and a player's sighted partner watching over their shoulder is how it came out:
+            // walking from the tavern to the smith went straight through his HOUSE, because the
+            // house is a world object — the log recorded it as "passing through prop
+            // 'mf_canopy_1_back_wall (object roof_1)'" and waved it through. Buildings, canopies and
+            // roofs are world objects in this game just as chairs are.
+            //
+            // So the distinction is not what a collider is attached to, it is how big it is. Two
+            // measurements below make that judgement together: IsDeepInsideWall asks whether open
+            // ground is within reach (an edge grazed, versus properly inside something), and the
+            // crossing distance asks how far the run of solid ground has already gone on for (a
+            // prop, versus a building). Neither is enough alone — a decorative coal heap looks like
+            // a wall to the first, and a cliff edge accumulates no distance for the second.
             var inside = SolidAt(pos, out bool insideWall);
 
-            if (!insideWall)
+            NoteCrossing(inside, pos);
+
+            if (inside == null)
             {
-                // In the clear (a prop underfoot still counts as clear — see above). Remember it as
-                // somewhere it is safe to be put back to.
-                if (inside != null && Time.unscaledTime - _lastWallReportAt > 5f)
-                {
-                    _lastWallReportAt = Time.unscaledTime;
-                    _log?.LogInfo($"[NAVIGATOR] Passing through prop '{inside}' during {WalkDescription()}");
-                }
+                // In the clear. Remember it as somewhere it is safe to be put back to.
                 _lastClearPlayerPos = player.pos;
                 _hasLastClearPos = true;
                 _insideWallTicks = 0;
@@ -2675,58 +2693,76 @@ internal static class ObjectNavigator
 
             if (++_insideWallTicks < InsideWallTicksToStop) return;
 
-            // Second opinion from the world navmesh, and it is what decides whether this is a wall
-            // at all. Not every solid collider blocks a walk: the graveyard turned up a bare
-            // `collider` that BOTH pathfinders route straight through and that a player walks
-            // through by hand, and stopping there left them stranded mid-graveyard having to steer
-            // themselves back on course — the exact opposite of the point. If the route stands on
-            // ground the NPC navmesh calls walkable, the collider is scenery the game does not
-            // treat as an obstacle, and it is not ours to overrule.
+            // GRAZING AN EDGE, OR ACTUALLY INSIDE? That is the only question worth asking here, and
+            // the two things this used to ask instead both answered it wrongly.
             //
-            // Being inside a collider AND off the navmesh is the combination that means the walk
-            // has genuinely carried the player somewhere nobody can stand.
-            if (!IsKnownBlockedOnWorldMesh(pos))
+            // It used to let the walk carry on whenever the world navmesh called the spot walkable.
+            // Graph 0's nodes are 76 units and it is simply wrong in places: a whole session's clips
+            // went through on that excuse, including walking through `Sea Collider` and through
+            // `dungeon_wall01_back`, both of which it happily calls walkable.
+            //
+            // It then also let the walk carry on whenever the player was still ON the graph-0 route.
+            // That reasoning assumed what it needed to prove — the route is exactly what drags the
+            // player through the wall, so "the route goes here" can never be the reason it is safe.
+            // With that hatch in place the guard stopped nothing at all: twelve clips in one session,
+            // through the tavern wall, through dungeon walls, through cliffs and through the sea.
+            //
+            // What the hatch was really protecting is genuine, though. The road to the village runs
+            // along a cliff, the player's collider centre dips a few units into the cliff edge as
+            // they walk it, and stopping for that killed three walks in a row. The difference is
+            // DEPTH: brushing an edge leaves open ground half a tile away, being inside a building,
+            // a cliff or the sea does not. So measure that instead — see IsDeepInsideWall.
+            if (!IsDeepInsideWall(pos))
+            {
+                if (Time.unscaledTime - _lastWallReportAt > 5f)
+                {
+                    _lastWallReportAt = Time.unscaledTime;
+                    NearRouteBeingFollowed(pos, out float grazeOffRoute);
+                    _log?.LogInfo(
+                        $"[NAVIGATOR] Brushing the edge of '{inside}' at {pos} during {WalkDescription()} " +
+                        $"({grazeOffRoute / TileSize:F1} tiles off route) — carrying on");
+                }
+                _insideWallTicks = 0;
+                return;
+            }
+
+            // DEEP INSIDE A PROP, OR ACTUALLY INSIDE A BUILDING? Depth alone cannot tell, and the
+            // smithy's decorative coal heap is what proved it: `mf_coal_1_decor` is about a tile and
+            // a third across, so a line through its middle leaves no open ground within reach in any
+            // of the eight directions and reads exactly like a wall. The guard stopped a walk to
+            // Krezvold in the middle of the smithy yard, where the player could simply have carried
+            // on east; the recovery then found no route and the journey was lost. (The same heap was
+            // crossed cleanly on a later attempt whose line clipped its edge — that is how narrow
+            // the margin is on a prop this size.)
+            //
+            // So add the one measurement a prop cannot fake: HOW FAR the player has already been
+            // carried through solid ground in this one continuous run. A heap, a wood panel, a cliff
+            // edge brushed on the road are all a tile or so end to end (measured: 1.27, 0.79, 0.39
+            // tiles). A building, a cliff face or the sea is not — anything the guard exists to catch
+            // keeps accumulating well past two tiles, and the stop then fires the moment it does.
+            //
+            // Under-reacting is the right way to be wrong here: a clipped corner costs nothing,
+            // while a false stop strands a blind player mid-journey — which is exactly what happened.
+            // A player pinned motionless inside something is not this method's problem either; the
+            // long-walk stuck watchdog already covers that, and it needs no distance to fire.
+            if (_crossingDistance < MinCrossingToStop)
             {
                 if (Time.unscaledTime - _lastWallReportAt > 5f)
                 {
                     _lastWallReportAt = Time.unscaledTime;
                     _log?.LogInfo(
-                        $"[NAVIGATOR] Inside '{inside}' at {pos} during {WalkDescription()}, but the " +
-                        "navmesh calls this walkable — carrying on");
+                        $"[NAVIGATOR] Deep inside '{inside}' at {pos} during {WalkDescription()}, but only " +
+                        $"{_crossingDistance / TileSize:F2} tiles into it — prop-sized, carrying on");
                 }
-                _insideWallTicks = 0;
                 return;
             }
 
-            // TRUST THE ROAD. The check above asks the right question of the wrong thing: it probes
-            // the PLAYER'S BODY, not the route. Graph 0's nodes are 76 units, so a body centre a few
-            // units off the line lands on a blocked neighbour while the route itself runs over
-            // walkable ground — and then the guard stops a walk the game's own NPC navmesh is happy
-            // with. Measured on the road to the village: `steep_R (17)` at (9540.3,-898.2), the same
-            // collider again five units later, `steep_R (20)` seventy units on, then
-            // `steep_yellow_small_1` and `steep_vert_R` further along — the cliff edging the road,
-            // hit over and over while walking the road correctly. Three attempts in a row died that
-            // way and the player could not reach the village at all.
-            //
-            // So if we are following a graph-0 route and are still ON it, the collider is scenery the
-            // route legitimately passes and it is not ours to overrule. The guard keeps its teeth
-            // everywhere it was earned: a Direct glide, an escape hop, or a route we have wandered
-            // away from all leave this false.
-            if (_routeIsWorldMesh && NearRouteBeingFollowed(pos, out float offRoute))
-            {
-                if (Time.unscaledTime - _lastWallReportAt > 5f)
-                {
-                    _lastWallReportAt = Time.unscaledTime;
-                    _log?.LogInfo($"[NAVIGATOR] Inside '{inside}' at {pos} during {WalkDescription()}, " +
-                                  $"but still on the road route ({offRoute / TileSize:F1} tiles off) — carrying on");
-                }
-                _insideWallTicks = 0;
-                return;
-            }
-
+            NearRouteBeingFollowed(pos, out float offRoute);
             _log?.LogWarning(
                 $"[NAVIGATOR] Inside wall '{inside}' at {pos} for {_insideWallTicks} frames during " +
-                $"{WalkDescription()}, and off the navmesh; stopping and stepping back out");
+                $"{WalkDescription()} ({offRoute / TileSize:F1} tiles off route), " +
+                $"{_crossingDistance / TileSize:F2} tiles inside it and not near its edge; " +
+                "stopping and stepping back out");
             StopInsideWall();
         }
         catch { /* the guard must never be the thing that breaks a walk */ }
@@ -2736,6 +2772,120 @@ internal static class ObjectNavigator
     /// centre and the probe uses the body collider centre, so a tile and a half of slack is ordinary
     /// walking, not wandering.
     private const float OnRouteSlack = 1.5f * TileSize;
+
+    /// <summary>
+    /// How far from the player's body centre to look for open ground.
+    ///
+    /// A QUARTER of a tile, not a half. Half a tile was too generous and the smith's wall proved it:
+    /// walking to Krezvold the player spent twelve-plus frames — over half a tile of walking —
+    /// inside <c>mf_wood_panel_2_complete</c>, a built wooden panel, and the ring still found open
+    /// ground and waved it through. A panel is a thin wall, and thin walls are most of what a
+    /// building is made of.
+    ///
+    /// 24 units sits just outside the player's own collider (a circle of radius 14), so requiring
+    /// all eight points to be solid still means "boxed in", but now boxed in by something roughly
+    /// half a tile thick rather than a full tile.
+    /// </summary>
+    private const float WallDepthProbe = 0.25f * TileSize;
+
+    /// <summary>
+    /// How far a driven walk may carry the player through solid ground in one continuous run before
+    /// the guard treats it as a wall rather than a prop.
+    ///
+    /// Two tiles, from measurements in the log: the smithy's decorative coal heap is 1.27 tiles end
+    /// to end, a built wood panel 0.79, a cliff edge grazed on the road 0.39. Everything the guard
+    /// exists to catch — a house, a cliff face, the sea — runs far longer than that, so two tiles
+    /// separates them with room to spare while no prop in the game reaches it.
+    /// </summary>
+    private const float MinCrossingToStop = 2f * TileSize;
+
+    /// <summary>
+    /// Is the player properly INSIDE something solid, rather than clipping its edge?
+    ///
+    /// This is what separates the two things that look identical frame by frame: walking the road
+    /// where it runs along a cliff (the body centre dips into the cliff edge for a step or two, with
+    /// the road right there beside it) from being carried through a building wall, a cliff face or
+    /// the sea (solid in every direction).
+    ///
+    /// Eight points at half a tile. If any one of them is open ground, the way out is a step away
+    /// and this is an edge — leave the walk alone. Only when the player is boxed in on all sides has
+    /// the walk genuinely put them somewhere they cannot be. Costs eight point checks, and only on a
+    /// detection that has already survived <see cref="InsideWallTicksToStop"/> frames.
+    ///
+    /// It replaces judging a chair from a house by what the collider is attached to — a chair, a
+    /// fence rail and a tree base all have open ground a step away, and a building does not, whether
+    /// or not the game models that building as a world object. On its own, though, it is only half
+    /// the test: a prop merely BIG enough (the smithy's coal heap, a tile and a third across) boxes
+    /// the probe in just as a wall does, so the caller pairs it with how far the run of solid ground
+    /// has gone on for. See MinCrossingToStop.
+    ///
+    /// A consequence worth stating: a wall thinner than half a tile does not trigger this, because
+    /// the far side reads as open ground. That is the right way to be wrong — under-reacting costs a
+    /// clipped corner, over-reacting strands a blind player mid-journey.
+    /// </summary>
+    // ---- Crossing record (pure diagnostics) --------------------------------
+
+    private static string _crossingName;
+    private static Vector2 _crossingEntry;
+    private static Vector2 _crossingLastPos;
+    private static int _crossingFrames;
+    private static float _crossingDistance;
+
+    /// <summary>
+    /// Log every piece of solid geometry a driven walk passes into and out of, with how long the
+    /// player was inside it and how far they travelled while there.
+    ///
+    /// Purely a record — it changes nothing. It exists because the guard above only ever reports
+    /// after <see cref="InsideWallTicksToStop"/> frames, so everything crossed faster than that
+    /// happened invisibly, and three rounds of tuning were argued from a handful of surviving lines.
+    /// Entry and exit positions give the thickness of what was crossed, which is the number every
+    /// threshold here is really about.
+    /// </summary>
+    private static void NoteCrossing(string solid, Vector2 pos)
+    {
+        try
+        {
+            if (solid != null)
+            {
+                if (_crossingName == null)
+                {
+                    _crossingName = solid;
+                    _crossingEntry = pos;
+                    _crossingFrames = 0;
+                    _crossingDistance = 0f;
+                }
+                else
+                {
+                    _crossingDistance += (pos - _crossingLastPos).magnitude;
+                }
+                _crossingFrames++;
+                _crossingLastPos = pos;
+                return;
+            }
+
+            if (_crossingName == null) return;
+
+            // Out the other side (or back the way we came). Report what it was.
+            float across = (pos - _crossingEntry).magnitude;
+            _log?.LogInfo(
+                $"[NAVIGATOR] Crossed '{_crossingName}' during {WalkDescription()}: {_crossingFrames} frames, " +
+                $"{_crossingDistance / TileSize:F2} tiles walked inside, {across / TileSize:F2} tiles " +
+                $"entry->exit, entry {_crossingEntry} exit {pos}");
+            _crossingName = null;
+        }
+        catch { }
+    }
+
+    private static bool IsDeepInsideWall(Vector2 pos)
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i * Mathf.PI * 0.25f;
+            var p = pos + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * WallDepthProbe;
+            if (SolidAt(p, out _) == null) return false;   // open ground within reach — an edge
+        }
+        return true;
+    }
 
     /// <summary>
     /// Is the player still on the route being driven? Distance to the nearest SEGMENT, not to the
@@ -4617,6 +4767,13 @@ internal static class ObjectNavigator
                 // gives every stage of one crop the same name.
                 if (category == NavCategory.GardenBeds)
                     label = GardenBedLabel(obj, label);
+                // Whether the node can be worked at all yet. A list of trees is otherwise a row of
+                // entries that look alike, and the player learns which ones the game will refuse
+                // only by walking to each in turn. What each one YIELDS is deliberately not here —
+                // it would double the length of every row, and the walk-up readout says it at the
+                // moment the decision is actually made (see ResourceYield).
+                if (IsYieldCategory(category))
+                    label = WorkUnlock.With(label, obj?.obj_def);
                 // Worker zombies read out their efficiency + assignment here, since pressing E on
                 // one picks it up rather than inspecting it. No-op for non-workers.
                 label = InteractionDetector.AppendWorkerInfo(label, obj);
@@ -6977,6 +7134,29 @@ internal static class ObjectNavigator
             return false;
         }
     }
+
+    /// <summary>
+    /// Categories whose entries are worth annotating with what they drop (see
+    /// <see cref="ResourceYield"/>). These are the lists where the mod's family naming leaves every
+    /// entry reading the same — a screen of "Tree", "Tree", "Tree" — and where the drop is the
+    /// thing that decides whether to walk over and swing at it.
+    ///
+    /// Garden beds are deliberately out: <see cref="GardenBedLabel"/> already names the crop and
+    /// the growth stage, so a yield clause would only say it a second time. Breakables stay in the
+    /// list too but rarely qualify — a barrel answers to the sword, not to a harvest tool, and
+    /// ResourceYield only speaks for the four harvest tools.
+    /// </summary>
+    private static bool IsYieldCategory(NavCategory category) =>
+        category == NavCategory.Trees ||
+        category == NavCategory.Stones ||
+        category == NavCategory.Ores ||
+        category == NavCategory.Bushes ||
+        category == NavCategory.Flowers ||
+        category == NavCategory.Mushrooms ||
+        category == NavCategory.Beehives ||
+        category == NavCategory.Gatherables ||
+        category == NavCategory.Breakables ||
+        category == NavCategory.Destructibles;
 
     private static bool IsHarvestableCategory(NavCategory category) =>
         category == NavCategory.Trees ||

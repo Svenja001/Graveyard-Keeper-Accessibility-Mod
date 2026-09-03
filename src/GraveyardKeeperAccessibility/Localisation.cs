@@ -85,6 +85,8 @@ internal static class Loc
             // Same reasoning for the item-group names resolved out of the game's own tables
             // (organs, recipe ingredient groups) — see GUIAccessibility.MultiqualityGroupName.
             GUIAccessibility.ForgetItemGroupNames();
+            // Technology names, cached per resource group — see WorkUnlock.
+            WorkUnlock.Forget();
         }
     }
 

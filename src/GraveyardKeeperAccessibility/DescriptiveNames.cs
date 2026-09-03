@@ -107,6 +107,9 @@ internal static class DescriptiveNames
         ("granite",     "obj.granite"),
         ("boulder",     "obj.boulder"),
         ("rock",        "obj.rock"),
+        // Above "stone": the smithy's decorative stone pile reads as "stone" otherwise, and it is
+        // a decoration you place, not a resource you mine.
+        ("mf_stones",   "obj.decor_stones"),
         ("stone",       "obj.stone"),
 
         // --- fishing spots (river/waterfall/sea decide which fish bite, so keep them apart) --
@@ -214,6 +217,56 @@ internal static class DescriptiveNames
         // Below "sword_rack" (above), which would otherwise lose its weapons to this.
         ("rack",             "obj.rack"),
         ("vase",             "obj.vase"),
+
+        // ---- Objects the game itself never names -------------------------------------------
+        // Collected from a play session's "[NAMES] No translation and no rule for …" lines, which
+        // is what the mod logs when it has to read a raw id aloud. Each entry deliberately matches
+        // the FAMILY rather than the individual id, so the six piles of broken glass, the three
+        // broken barrels and the five tavern guests are one name apiece rather than a numbered
+        // parade. Placement in this list is load-bearing — see the notes on the tighter ones.
+
+        // Buildings. "church" sits below church_candle and church_visitor above, which would
+        // otherwise be swallowed by it; "village_henhouse" must stay above the generic "house".
+        ("smithy",             "obj.smithy"),
+        ("sawmill",            "obj.sawmill"),
+        ("village_henhouse",   "obj.henhouse"),
+        ("village_hut",        "obj.village_hut"),
+        ("storage",            "obj.storage_shed"),
+        ("church",             "obj.church"),
+        ("wall_cellar",        "obj.cellar_wall"),
+        ("big_broken_bridge",  "obj.broken_bridge"),
+        ("turnpike",           "obj.turnpike"),
+        ("gate_wood",          "obj.wooden_gate"),
+
+        // Props and furniture. "pumpkin" sits below garden_pumpkin (the crop) far above, and
+        // "cashbox" below tavern_cashbox, so each keeps the more specific name where it applies.
+        ("campfire",           "obj.campfire"),
+        // Its own name, not obj.cashbox: that one reads "Tavern cashbox" and belongs to the rule
+        // for tavern_cashbox above. This is the bare one found elsewhere.
+        ("cashbox",            "obj.cashbox_plain"),
+        ("flour_bag",          "obj.flour_bag"),
+        ("pumpkin",            "obj.pumpkin"),
+        ("tavern_table",       "obj.tavern_table"),
+        ("table_cultist",      "obj.cultist_table"),
+        ("old_wood_swamp",     "obj.rotten_wood"),
+        ("witch_pylon",        "obj.witch_pyre"),
+        ("mf_wood_panel",      "obj.wood_panel"),
+        ("mf_anvil",           "obj.decor_anvil"),
+
+        // Smashed remains. Above the plain "barrel" family so the barrel wagon keeps its own name.
+        ("camp_barrel_wagon",  "obj.barrel_wagon"),
+        ("barrel0",            "obj.broken_barrel"),
+        ("pile_of_broken_glass", "obj.broken_glass"),
+        ("bookcase",           "obj.broken_bookcase"),
+        ("dungeon_obj_chair",  "obj.broken_chair"),
+        ("dungeon_obj_bench",  "obj.broken_bench"),
+
+        // People the game leaves unnamed.
+        ("npc_tavern_visitor", "obj.tavern_guest"),
+        ("npc_satyr",          "obj.satyr"),
+        ("npc_lilya",          "obj.lilya"),
+        ("stranger",           "obj.stranger"),
+
         ("house",            "obj.house"),
     };
 
@@ -252,6 +305,130 @@ internal static class DescriptiveNames
         ("camp",        "zone.camp"),
     };
 
+    /// <summary>
+    /// Splits INSIDE a resource group, where one group holds nodes that pay out differently.
+    ///
+    /// <see cref="GroupNames"/> follows the game's own grouping, which is right for the question
+    /// "may I work this yet" and wrong for "is walking over there worth it". The wood groups are
+    /// the case: t_wood_small holds the four <c>tree_tiny_*</c> ids, which drop nothing but sticks,
+    /// alongside <c>tree_1_*</c> and <c>tree_2_*</c>, which drop logs. Both were "Small tree", so a
+    /// player who needed wood had a list of a dozen identical entries and no way to tell the
+    /// stick-only ones apart except by chopping one. Naming the three tiers apart — small tree
+    /// (sticks), tree (a log), big tree (two) — gives the same information a sighted player reads
+    /// off the silhouette.
+    ///
+    /// Checked BEFORE the group name, and matched as whole underscore-separated words like every
+    /// other rule list here, so an entry only ever narrows a group, never widens one.
+    /// </summary>
+    private static readonly (string Match, string Key)[] NodeRules =
+    {
+        ("tree_tiny", "obj.tree_small"),
+    };
+
+    /// <summary>
+    /// Names taken from the game's own RESOURCE GROUPS, which split the scenery exactly where the
+    /// player needs it split.
+    ///
+    /// The substring rules above name a whole family at once — every tree is "Tree" — and that is
+    /// right for scenery you only need to recognise. It is wrong for the nodes you WORK, because
+    /// the game gates them by group: small trees and big trees are separate unlocks
+    /// (t_wood_small / t_wood_big, "The idea of the tree" and "Woodcutter"), as are the two
+    /// mushrooms and the two grades of iron. A player hearing "Tree" twelve times cannot tell which
+    /// ones they are allowed to fell, and finds out only by walking there and being refused.
+    ///
+    /// Keyed on the group id rather than on object ids, so it follows the game's own grouping: the
+    /// 15 big-tree ids and the 14 small-tree ids stay correct without listing one of them here, and
+    /// a node the balance moves between groups moves with it.
+    ///
+    /// Only groups whose family name is ambiguous need an entry; where the family rules above
+    /// already say the right thing (a berry bush is "Berry bush" either way), leaving the group out
+    /// keeps the existing name.
+    /// </summary>
+    private static readonly Dictionary<string, string> GroupNames = new(StringComparer.Ordinal)
+    {
+        { "t_wood_small", "obj.tree" },
+        { "t_wood_big",   "obj.tree_large" },
+        { "t_mushroom",   "obj.mushroom_edible" },
+        { "t_mushroom2",  "obj.mushroom_red" },
+        { "t_iron_ore_1", "obj.ore_iron_surface" },
+        { "t_iron_ore_2", "obj.ore_iron_vein" },
+    };
+
+    /// <summary>
+    /// The name for this object's resource group, or null when the group has no name of its own and
+    /// the caller should keep the family name.
+    /// </summary>
+    internal static string ForGroup(ObjectDefinition def)
+    {
+        try
+        {
+            var groups = def?.object_groups;
+            if (groups == null || groups.Count == 0) return null;
+
+            foreach (var group in groups)
+            {
+                if (group?.id == null) continue;
+                if (!GroupNames.TryGetValue(group.id, out var key)) continue;
+                var text = Loc.Find(key);
+                if (!string.IsNullOrEmpty(text)) return text;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Family names that are too vague to be a name, where the node's own DROP says what it is.
+    ///
+    /// Flowers are the case this exists for. The game has nine of them, flower_small_1 through _9,
+    /// and every one is "Blume" by the family rule — but they are three different alchemy
+    /// ingredients in rotation (1/4/7 dandelion, 2/5/8 chamomile, 3/6/9 poppy), and a player
+    /// picking them wants to know which before they bend down. They have no object group, so
+    /// <see cref="ForGroup"/> cannot help; what distinguishes them is exactly what falls out, and
+    /// the game already names that item properly ("Gelbe Blume", "Weiße Blume", "Rote Blume").
+    ///
+    /// Keyed on the lang key the family rule produced, not on the id, so this can never steal a
+    /// more specific name: an apple tree in blossom (decor_tree_apple_1_flower) is claimed by the
+    /// "tree_apple" rule long before "flower", so it keeps being an apple tree.
+    /// </summary>
+    private static readonly HashSet<string> DropNamedKeys = new(StringComparer.Ordinal)
+    {
+        "obj.flower",
+    };
+
+    /// <summary>
+    /// The best name for a resource node: the tier inside its work group where the group lumps
+    /// unlike nodes together (<see cref="NodeRules"/>), else the work group where that splits the
+    /// family (<see cref="ForGroup"/>), else what it drops where the family name says too little.
+    /// Null when the ordinary family name is the right answer.
+    /// </summary>
+    internal static string ForNode(WorldGameObject wgo)
+    {
+        try
+        {
+            var def = wgo?.obj_def;
+            if (def == null) return null;
+
+            var id = def.id;
+            if (string.IsNullOrEmpty(id)) id = wgo.obj_id;
+
+            var narrowed = Match(id, NodeRules);
+            if (!string.IsNullOrEmpty(narrowed)) return narrowed;
+
+            var group = ForGroup(def);
+            if (!string.IsNullOrEmpty(group)) return group;
+
+            var key = MatchKey(id, Rules);
+            if (key == null || !DropNamedKeys.Contains(key)) return null;
+
+            return ResourceYield.SingleDropName(wgo);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>A descriptive name for an untranslated ZONE id, or null when no rule matches.</summary>
     internal static string ForZone(string zoneId)
     {
@@ -286,6 +463,17 @@ internal static class DescriptiveNames
     /// </summary>
     private static string Match(string id, (string Match, string Key)[] rules)
     {
+        var key = MatchKey(id, rules);
+        return key == null ? null : Loc.Find(key);
+    }
+
+    /// <summary>
+    /// The lang KEY of the first rule that matches, rather than its text. Lets a caller ask which
+    /// family claimed an id — <see cref="ForNode"/> needs that to know when a family name is too
+    /// vague to stand on its own.
+    /// </summary>
+    private static string MatchKey(string id, (string Match, string Key)[] rules)
+    {
         if (string.IsNullOrEmpty(id)) return null;
 
         var haystack = Normalize(id);
@@ -294,8 +482,7 @@ internal static class DescriptiveNames
             if (haystack.IndexOf(Normalize(match), StringComparison.Ordinal) < 0) continue;
             // A rule whose key is missing from the lang file shouldn't swallow the object into
             // a spoken key name — treat it as no match and keep looking.
-            var text = Loc.Find(key);
-            if (!string.IsNullOrEmpty(text)) return text;
+            if (!string.IsNullOrEmpty(Loc.Find(key))) return key;
         }
         return null;
     }

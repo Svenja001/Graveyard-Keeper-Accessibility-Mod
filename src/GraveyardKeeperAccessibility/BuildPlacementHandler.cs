@@ -790,12 +790,116 @@ internal static class BuildPlacementHandler
             if (string.IsNullOrEmpty(objId)) return "Object";
             if (objId.EndsWith("_place"))
                 objId = objId.Substring(0, objId.Length - "_place".Length);
+
+            // Name a resource node by its work group, as the rest of the mod does: "big tree" and
+            // "small tree" are one technology apart, so lumping them together as "tree" would hide
+            // that one of the two is the reason the yard cannot be cleared yet. Only where the game
+            // has no name of its own, so a real translation still wins.
+            if (!InteractionDetector.HasTranslation(objId))
+            {
+                var nodeName = DescriptiveNames.ForNode(w);
+                if (!string.IsNullOrEmpty(nodeName)) return nodeName;
+            }
+
             var name = InteractionDetector.LocalizedObjectName(objId);
             return string.IsNullOrWhiteSpace(name) ? "Object" : name;
         }
         catch
         {
             return "Object";
+        }
+    }
+
+    /// <summary>
+    /// A blocker's name with how to get rid of it — "Tree (chop down with the axe)" — or the bare
+    /// name when nothing can be done about it.
+    /// </summary>
+    private static string WithRemovalHint(string name, WorldGameObject w)
+    {
+        var hint = RemovalHint(w);
+        return string.IsNullOrEmpty(hint) ? name : Loc.Fmt("build.blocker.removable", name, hint);
+    }
+
+    /// <summary>
+    /// What to say about a blocker beyond its name: how to clear it, or — when the work is behind a
+    /// technology — which technology. Null when there is nothing useful to add.
+    ///
+    /// The two are kept apart on purpose: only the first is an instruction the player can act on
+    /// now, and only the first may count towards a clearing plan.
+    /// </summary>
+    private static string BlockerNote(WorldGameObject w)
+    {
+        var hint = RemovalHint(w);
+        if (!string.IsNullOrEmpty(hint)) return hint;
+
+        try { return WorkUnlock.LockedNote(w?.obj_def); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// How the player could clear this object out of a build spot, or null when they cannot.
+    ///
+    /// "Blocked by tree" leaves a blind player with no way to know whether that is a dead end or
+    /// thirty seconds of work: a sighted player recognises a fellable tree, a mineable rock and an
+    /// immovable cliff on sight, and a screen reader user has only the name. The answer is in the
+    /// object's own definition, so it needs no table of ids:
+    ///
+    ///   a Remove craft at the build desk                = a built thing, demolish it;
+    ///   a harvest tool_action AND something that drops  = a resource node, work it away;
+    ///   neither                                         = terrain or a building, no.
+    ///
+    /// The demolish test comes first, and the harvest test insists on drop_items, because a
+    /// crafting station carries a tool_action too — that is how you WORK at it (the oven, every
+    /// workbench and every zombie desk answers to the Hand, the sawmill to the Axe). Going by the
+    /// tool alone would tell the player to pick the oven up by hand. A node that yields nothing is
+    /// not a node; 103 stations in the balance data match the tool test and not one of them drops
+    /// anything, so the pair separates them cleanly.
+    ///
+    /// People are left out on purpose — <see cref="AnalyzeBestFit"/> already says they will move on
+    /// their own, which is a different instruction from "clear it away".
+    /// </summary>
+    private static string RemovalHint(WorldGameObject w)
+    {
+        try
+        {
+            var def = w?.obj_def;
+            if (def == null || IsCharacter(w)) return null;
+
+            // Safe from anywhere — it reads the balance data, never the game's poisonable
+            // has_removal_craft property. See HasRemovalCraft.
+            if (HasRemovalCraft(w)) return Loc.Get("build.clear.demolish");
+
+            if (def.drop_items == null || def.drop_items.Count == 0) return null;
+
+            // A node whose work the player has not unlocked is not something they can clear today,
+            // however good an axe they own — the game will refuse the swing. Telling them to fell it
+            // would send them across the yard for a refusal, so it is reported as a blocker with the
+            // technology named (see BlockerNote) and never offered as a plan.
+            if (WorkUnlock.IsLocked(def)) return null;
+
+            var tools = def.tool_actions;
+            if (tools == null || tools.no_actions) return null;
+
+            string how =
+                tools.HasToolK(ItemDefinition.ItemType.Axe) ? Loc.Get("build.clear.chop") :
+                tools.HasToolK(ItemDefinition.ItemType.Pickaxe) ? Loc.Get("build.clear.mine") :
+                tools.HasToolK(ItemDefinition.ItemType.Shovel) ? Loc.Get("build.clear.dig") :
+                tools.HasToolK(ItemDefinition.ItemType.Hand) ? Loc.Get("build.clear.gather") :
+                null;
+            if (how == null) return null;
+
+            // Working a node does not always make the tile free: the game replaces some objects
+            // rather than removing them, and a felled tree leaves a stump that goes on blocking the
+            // build exactly as the tree did. Saying "chop it down" and stopping there sends the
+            // player off to do the work and come back to the same refusal, so name what will still
+            // be standing. Generic — it reads the definition's own replacement id, so it covers
+            // whatever else in the game works that way, not just trees.
+            var leftover = LeftoverName(w, def);
+            return leftover == null ? how : Loc.Fmt("build.clear.leftover", how, leftover);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -1159,6 +1263,13 @@ internal static class BuildPlacementHandler
             Vector2 best = playerPos;
             int bestBlocked = int.MaxValue, bestOutside = 0, bestBusy = 0;
 
+            // Spots whose ONLY problem is that something is standing on them — the candidates for
+            // "clear this and it fits". Collected during the sweep because a second sweep would
+            // double the cost of a pass that already takes most of a second, and kept spread out
+            // (see NoteClearCandidate) so the shortlist offers genuinely different places rather
+            // than twenty samples of the same one.
+            var candidates = new List<(Vector2 Pos, int Busy)>();
+
             // Wall strips are small enough to re-measure at the sweep's own resolution; an open floor
             // zone is not, so there we stay on the coarse cell grid.
             float probe = string.IsNullOrEmpty(subZoneId) ? Step : Mathf.Max(step, 4f);
@@ -1171,7 +1282,9 @@ internal static class BuildPlacementHandler
                     {
                         var cand = new Vector2(x, y);
                         MoveFootprintTo(cand);
-                        CountBlockedCells(cells, zoneId, subZoneId, out int outside, out int busy, null, null);
+                        CountBlockedCells(cells, zoneId, subZoneId, out int outside, out int busy, null);
+
+                        if (outside == 0 && busy > 0) NoteClearCandidate(candidates, cand, busy, playerPos);
 
                         int blocked = outside + busy;
                         if (blocked > bestBlocked) continue;
@@ -1189,14 +1302,16 @@ internal static class BuildPlacementHandler
             if (bestBlocked == int.MaxValue) return null;
 
             // Name what sits on the best spot.
-            var blockers = new HashSet<string>();
-            var characters = new HashSet<string>();
+            var names = new BlockerNames();
             MoveFootprintTo(best);
-            CountBlockedCells(cells, zoneId, subZoneId, out _, out _, blockers, characters);
+            CountBlockedCells(cells, zoneId, subZoneId, out _, out _, names, logDetail: true);
+            var blockers = names.Spoken;
+            var characters = names.Characters;
 
             _log?.LogInfo($"[BUILD] best fit at {best}: {bestBlocked}/{counted} cells blocked " +
                           $"(outside={bestOutside} busy={bestBusy}) blockers=[{string.Join(", ", blockers)}] " +
-                          $"characters=[{string.Join(", ", characters)}]");
+                          $"characters=[{string.Join(", ", characters)}] " +
+                          $"clearable=[{string.Join(", ", names.Clearable)}] immovable={names.ImmovableCount}");
 
             // Tile-by-tile at that spot: which corner of the footprint fails tells us whether the
             // decoration overhangs the mount in one direction (nudgeable) or is boxed in.
@@ -1208,6 +1323,10 @@ internal static class BuildPlacementHandler
                 _log?.LogInfo($"[BUILD]   tile rel=({p.x - best.x:0},{p.y - best.y:0}) " +
                               $"busy={BuildGrid.IsCellBusy(p)} inZone={c.IsInsideWorldZone(zoneId, subZoneId)}");
             }
+
+            // Which shortlisted spots would actually open up if the player cleared what stands on
+            // them, and what each would cost in work.
+            var clearingPlans = FindClearingPlans(candidates, cells, zoneId, subZoneId, playerPos);
 
             bool wall = !string.IsNullOrEmpty(subZoneId);
             var area = Loc.Get(wall ? "build.area.wall_mount" : "build.area.build_area");
@@ -1221,6 +1340,10 @@ internal static class BuildPlacementHandler
             if (bestOutside > 0)
                 parts.Add(Loc.Fmt("build.outside_area", bestOutside, area));
 
+            // Names of clearable objects the sentence has already mentioned, so the zone-wide list
+            // at the end adds only things the player has not just been told about.
+            var spokenClearables = new HashSet<string>(names.Clearable, StringComparer.Ordinal);
+
             var tail = "";
             // A person standing on the spot is the one blocker that clears itself — worth saying,
             // because the same build succeeds a minute later with no other change.
@@ -1230,10 +1353,32 @@ internal static class BuildPlacementHandler
                 tail = wall
                     ? " " + Loc.Get("build.tail.too_wide_mount")
                     : " " + Loc.Get("build.tail.too_wide_area");
-            else if (bestBusy > 0 && bestOutside == 0 && blockers.Count == 1 && blockers.Contains("the building itself"))
+            // Compared against the localized string, not the English one: that is what
+            // CountBlockedCells put in the set, so testing the literal made this branch dead in
+            // every language but English.
+            else if (bestBusy > 0 && bestOutside == 0 && blockers.Count == 1 &&
+                     blockers.Contains(Loc.Get("build.blocker.building_itself")))
                 tail = " " + Loc.Get("build.tail.wall_structure");
+            // Something is in the way, and it is something the player can get rid of. Spell out what
+            // to clear and where the spot then opens up — and offer a second option when a different
+            // set of objects would do it, since "demolish the sawbuck" and "mine two stones" are very
+            // different amounts of work. Said before the "occupied" wording below, which reads like a
+            // dead end.
+            else if (bestBusy > 0 && bestOutside == 0 && clearingPlans.Count > 0)
+                tail = DescribeClearingPlans(clearingPlans, best, names, spokenClearables);
+            else if (bestBusy > 0 && bestOutside == 0 && names.Clearable.Count > 0)
+                tail = " " + Loc.Fmt("build.tail.clear_first", string.Join(", ", names.Clearable.Take(2).ToArray()));
             else if (wall && bestBusy > 0 && bestOutside == 0)
                 tail = " " + Loc.Get("build.tail.mount_occupied");
+
+            // Finally: anything else in the zone that could go. Only when something is actually in
+            // the way — when the object simply does not fit the area, clearing the yard cannot help.
+            if (bestBusy > 0)
+            {
+                var elsewhere = ZoneClearables(playerPos, spokenClearables);
+                if (elsewhere.Count > 0)
+                    tail += " " + Loc.Fmt("build.clear_zone", string.Join(", ", elsewhere.ToArray()));
+            }
 
             return string.Join(", ", parts) + "." + tail;
         }
@@ -1245,12 +1390,323 @@ internal static class BuildPlacementHandler
     }
 
     /// <summary>
+    /// The name of what this object leaves behind when it is worked to nothing (a tree leaves its
+    /// stump), or null when it simply disappears.
+    ///
+    /// <c>after_hp_0</c> is the game's own "replace with this id" field, read through its
+    /// <c>GetValue</c> the way <c>WorldGameObject.DoZeroHPActivity</c> reads it. An id we cannot
+    /// resolve to a definition is treated as nothing left behind: this only ever adds a warning
+    /// clause, so being silent is the safe way to be wrong.
+    /// </summary>
+    private static string LeftoverName(WorldGameObject w, ObjectDefinition def)
+    {
+        try
+        {
+            var id = def.after_hp_0?.GetValue(w, MainGame.me?.player);
+            if (string.IsNullOrEmpty(id)) return null;
+            if (GameBalance.me.GetDataOrNull<ObjectDefinition>(id) == null) return null;
+            return InteractionDetector.LocalizedObjectName(id);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Everything worth knowing about what occupies a candidate spot. One object rather than four
+    /// out-parameters, because the plan search below needs all four and the counting sweep needs
+    /// none of them.
+    /// </summary>
+    private sealed class BlockerNames
+    {
+        /// <summary>Names as spoken, each with how to clear it where that is possible.</summary>
+        internal readonly HashSet<string> Spoken = new HashSet<string>();
+        /// <summary>People standing there — they move on their own, so they are not an obstacle to clear.</summary>
+        internal readonly HashSet<string> Characters = new HashSet<string>();
+        /// <summary>Plain names of what the player could work away.</summary>
+        internal readonly HashSet<string> Clearable = new HashSet<string>();
+        /// <summary>How many blockers there is nothing to be done about (terrain, buildings, people).</summary>
+        internal int ImmovableCount;
+    }
+
+    /// <summary>
+    /// How many spots to keep as candidates for a "clear this and it fits" suggestion.
+    ///
+    /// Generous on purpose. Whether a spot can be cleared is only known once its occupants have been
+    /// named, which is far too expensive to do for every sample, so the shortlist is built on tile
+    /// counts alone — and a spot held by terrain or by the building looks just as promising by that
+    /// measure as one held by two stones. Keeping forty neighbourhoods means the clearable ones
+    /// survive the ranking even when immovable spots score better on tiles. The plan pass that
+    /// follows costs one naming pass each, against a sweep of several thousand samples.
+    /// </summary>
+    private const int MaxClearCandidates = 80;
+
+    /// <summary>
+    /// How far apart shortlisted candidates must be. Positions are sampled every few units, so
+    /// without this the whole shortlist is one spot sampled eighty times over — and the point of the
+    /// shortlist is to find a DIFFERENT place, blocked by different things.
+    ///
+    /// Half a tile, cut down from three. Three tiles sounded safely generous and threw away the one
+    /// case this feature was built for: the spot blocked by bushes sat 64 units — two thirds of a
+    /// tile — from the spot blocked by the sawbuck, so it was folded into it and never reported.
+    /// Spots this close really are different spots when they are held by different things, and
+    /// FindClearingPlans now removes the duplicates that a tight spread lets through by comparing
+    /// what each plan asks the player to clear.
+    /// </summary>
+    private const float ClearCandidateSpread = 0.5f * TileSize;
+
+    /// <summary>
+    /// Offer a spot to the shortlist of "blocked, but only by things standing on it". Keeps the
+    /// least-blocked candidate in each neighbourhood, nearest to the player on a tie, and evicts the
+    /// worst entry once the list is full.
+    /// </summary>
+    private static void NoteClearCandidate(List<(Vector2 Pos, int Busy)> shortlist, Vector2 pos,
+                                           int busy, Vector2 playerPos)
+    {
+        bool Better(int busyA, Vector2 posA, int busyB, Vector2 posB) =>
+            busyA != busyB
+                ? busyA < busyB
+                : (posA - playerPos).sqrMagnitude < (posB - playerPos).sqrMagnitude;
+
+        float spreadSqr = ClearCandidateSpread * ClearCandidateSpread;
+        for (int i = 0; i < shortlist.Count; i++)
+        {
+            if ((shortlist[i].Pos - pos).sqrMagnitude > spreadSqr) continue;
+            // Same neighbourhood: keep only the better of the two.
+            if (Better(busy, pos, shortlist[i].Busy, shortlist[i].Pos)) shortlist[i] = (pos, busy);
+            return;
+        }
+
+        if (shortlist.Count < MaxClearCandidates)
+        {
+            shortlist.Add((pos, busy));
+            return;
+        }
+
+        int worst = 0;
+        for (int i = 1; i < shortlist.Count; i++)
+            if (Better(shortlist[worst].Busy, shortlist[worst].Pos, shortlist[i].Busy, shortlist[i].Pos))
+                worst = i;
+        if (Better(busy, pos, shortlist[worst].Busy, shortlist[worst].Pos)) shortlist[worst] = (pos, busy);
+    }
+
+    /// <summary>
+    /// Of the shortlisted spots, which ones would actually become buildable if the player cleared
+    /// what stands on them — cheapest first, counted in objects to get rid of rather than tiles.
+    ///
+    /// This is the question behind "can I make room here?", and the closest-fit report on its own
+    /// answers a narrower one: it names what sits on the single spot with the fewest blocked tiles,
+    /// which may well be the most expensive thing in the zone to shift. Demolishing the sawbuck
+    /// needs a trip to the build desk and the materials back; two stones five tiles away need a
+    /// pickaxe and give stone. The player can only weigh that up if both are said out loud.
+    ///
+    /// A spot counts only when EVERY blocker on it can go: one immovable collider — the building
+    /// itself, terrain, a person who happens to be standing there — and clearing the rest changes
+    /// nothing, so promising it would send the player off to work for a spot that still will not
+    /// take the build.
+    /// </summary>
+    private static List<(Vector2 Pos, List<string> Objects, List<string> Plain)> FindClearingPlans(
+        List<(Vector2 Pos, int Busy)> shortlist, FlowGridCell[] cells, string zoneId,
+        string subZoneId, Vector2 playerPos)
+    {
+        var plans = new List<(Vector2 Pos, List<string> Objects, List<string> Plain)>();
+        try
+        {
+            foreach (var cand in shortlist.OrderBy(c => c.Busy)
+                                          .ThenBy(c => (c.Pos - playerPos).sqrMagnitude))
+            {
+                MoveFootprintTo(cand.Pos);
+                var names = new BlockerNames();
+                CountBlockedCells(cells, zoneId, subZoneId, out int outside, out _, names);
+
+                if (outside != 0) continue;                  // also hangs off the zone edge
+                if (names.ImmovableCount > 0) continue;      // something here cannot be shifted at all
+                if (names.Clearable.Count == 0) continue;
+
+                plans.Add((cand.Pos, names.Spoken.ToList(), names.Clearable.ToList()));
+            }
+
+            // Fewest things to clear wins; nearer to the player breaks the tie.
+            plans = plans.OrderBy(p => p.Objects.Count)
+                         .ThenBy(p => (p.Pos - playerPos).sqrMagnitude)
+                         .ToList();
+
+            // Two spots blocked by the same things are one option, however far apart they sit.
+            // Position alone cannot dedupe them — the shortlist is spread over the zone precisely
+            // so that different spots survive — so drop repeats by what they ask the player to do.
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            plans = plans.Where(p => seen.Add(string.Join("|", p.Objects.OrderBy(o => o).ToArray())))
+                         .ToList();
+
+            foreach (var p in plans)
+                _log?.LogInfo($"[BUILD] clearing plan at {p.Pos}: {string.Join(" + ", p.Objects.ToArray())}");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] FindClearingPlans failed: {ex.Message}");
+        }
+        return plans;
+    }
+
+    /// <summary>
+    /// Everything standing in the build zone that the player could clear away, grouped by name with
+    /// how many there are: "5 bushes (dig up with the shovel), 2 stones (mine away with the
+    /// pickaxe)".
+    ///
+    /// This exists because naming blockers spot by spot answers a narrower question than the player
+    /// is asking, and a real session showed how narrowly. The oven reported "6 tiles taken by
+    /// sawbuck"; the player cleared a few bushes on their own initiative and the same search then
+    /// reported 2 tiles. The bushes were never at the closest-fit spot — they were two tiles south,
+    /// blocking the better spot the sweep then found — and no per-spot report was ever going to
+    /// mention them. Nor did the clearing-plan pass: candidates are held one per neighbourhood and
+    /// those two spots are 64 units apart, so the bush spot was collapsed into the sawbuck spot and
+    /// vanished from the shortlist.
+    ///
+    /// So say plainly what is IN the zone. It promises nothing about a particular spot — it answers
+    /// "is there anything here I could get rid of", which is what a player standing in their own
+    /// yard with nowhere to build actually wants to know, and the Trees / Bushes / Stones lists in
+    /// the navigator (which now say what each one yields) are how they go and find them.
+    ///
+    /// The zone's own <c>GetZoneWGOs</c> is no use here: it only holds objects whose definition sets
+    /// <c>can_belong_to_zone</c>, and trees, stones, mushrooms and most bushes do not — they do not
+    /// count towards a zone's rating, so the game never files them under the zone. The mod's own
+    /// registry sees every world object, so ask that and test zone membership with the zone's
+    /// colliders, exactly as <c>WorldZone.DoesObjectBelongToZone</c> does.
+    /// </summary>
+    private static List<string> ZoneClearables(Vector2 playerPos, HashSet<string> alreadySaid)
+    {
+        var groups = new List<string>();
+        try
+        {
+            var zone = Logics?.cur_build_zone;
+            if (zone == null) return groups;
+
+            var zoneCols = zone.GetComponentsInChildren<Collider2D>(includeInactive: true);
+            if (zoneCols == null || zoneCols.Length == 0) return groups;
+
+            var bounds = zone.GetBounds();
+            var centre = (Vector2)bounds.center;
+            // Enough to reach the far corner of the zone from its centre.
+            float radius = new Vector2(bounds.size.x, bounds.size.y).magnitude * 0.5f + TileSize;
+
+            var found = new List<WorldGameObject>();
+            WorldObjectRegistry.CollectNear(centre, radius, null, found, requireActive: false);
+
+            // name -> (how many, the spoken name with its note, where the nearest one is)
+            var byName = new Dictionary<string, (int Count, string Text, Vector2 Nearest, float Dist)>(StringComparer.Ordinal);
+            var order = new List<string>();
+
+            foreach (var w in found)
+            {
+                if (w == null || w.is_player) continue;
+
+                // Locked nodes are listed too, with their technology named. "Three big trees you
+                // cannot fell yet" is why the yard cannot be cleared, and a player who is not told
+                // goes and tries anyway.
+                var note = BlockerNote(w);
+                if (string.IsNullOrEmpty(note)) continue;
+
+                Vector2 p;
+                try { p = w.pos; } catch { continue; }
+
+                bool inZone = false;
+                foreach (var col in zoneCols)
+                {
+                    if (col == null) continue;
+                    try { if (col.OverlapPoint(p)) { inZone = true; break; } } catch { }
+                }
+                if (!inZone) continue;
+
+                var name = WgoName(w);
+                if (string.IsNullOrEmpty(name) || alreadySaid.Contains(name)) continue;
+
+                float dist = (p - playerPos).magnitude;
+                if (byName.TryGetValue(name, out var have))
+                {
+                    byName[name] = dist < have.Dist
+                        ? (have.Count + 1, have.Text, p, dist)
+                        : (have.Count + 1, have.Text, have.Nearest, have.Dist);
+                }
+                else
+                {
+                    byName[name] = (1, Loc.Fmt("build.blocker.removable", name, note), p, dist);
+                    order.Add(name);
+                }
+            }
+
+            _log?.LogInfo($"[BUILD] zone '{zone.id}' clearables: {order.Count} kind(s) out of " +
+                          $"{found.Count} object(s) within {radius:0} units of {centre}");
+            foreach (var name in order)
+                _log?.LogInfo($"[BUILD] zone clearable: {byName[name].Count}x {name}");
+
+            // Most numerous first: clearing five bushes frees the most ground, and it is also the
+            // group the player is most likely to have walked past without knowing.
+            foreach (var name in order.OrderByDescending(n => byName[n].Count).Take(3))
+            {
+                var entry = byName[name];
+                var text = entry.Count > 1 ? Loc.Fmt("build.clear_group", entry.Count, entry.Text) : entry.Text;
+                // Where to go. Without it the player is told five bushes exist and has to hunt the
+                // yard for them; with it they can walk straight there (and the Bushes / Trees /
+                // Stones lists in the navigator take them the rest of the way).
+                groups.Add(Loc.Fmt("build.clear_where", text, DirectionFromPlayer(entry.Nearest)));
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[BUILD] ZoneClearables failed: {ex.Message}");
+        }
+        return groups;
+    }
+
+    /// <summary>
+    /// Speak the cheapest clearing plan, plus one genuinely different alternative when there is one.
+    ///
+    /// "Different" means it does not ask for the same objects: two plans that both come down to
+    /// demolishing the same sawbuck are one option said twice, and the whole point of the second
+    /// sentence is to offer a choice of work.
+    ///
+    /// When the cheapest plan is the closest-fit spot itself, its direction and its blockers have
+    /// both just been spoken, so it gets the short wording rather than saying the sawbuck twice in
+    /// one breath.
+    /// </summary>
+    private static string DescribeClearingPlans(List<(Vector2 Pos, List<string> Objects, List<string> Plain)> plans,
+                                                Vector2 bestFit, BlockerNames bestNames,
+                                                HashSet<string> spokenObjects)
+    {
+        if (plans.Count == 0) return "";
+
+        var first = plans[0];
+        bool isBestFit = (first.Pos - bestFit).sqrMagnitude <= TileSize * TileSize;
+
+        var text = isBestFit
+            ? " " + Loc.Fmt("build.tail.clear_first",
+                            string.Join(", ", bestNames.Clearable.Take(2).ToArray()))
+            : " " + Loc.Fmt("build.clear_plan",
+                            string.Join(", ", first.Objects.Take(3).ToArray()),
+                            DirectionFromPlayer(first.Pos));
+        foreach (var plain in first.Plain) spokenObjects.Add(plain);
+
+        foreach (var alt in plans.Skip(1))
+        {
+            if (alt.Objects.Any(o => first.Objects.Contains(o))) continue;
+            text += " " + Loc.Fmt("build.clear_plan_alt",
+                                  string.Join(", ", alt.Objects.Take(3).ToArray()),
+                                  DirectionFromPlayer(alt.Pos));
+            foreach (var plain in alt.Plain) spokenObjects.Add(plain);
+            break;
+        }
+
+        return text;
+    }
+
+    /// <summary>
     /// Split the ghost's failing cells at its current position into "outside the build zone" and
     /// "occupied", mirroring <see cref="FloatingWorldGameObject.RecalculateAvailability"/>. When
-    /// <paramref name="blockers"/> is given, the occupying objects are named into it.
+    /// <paramref name="names"/> is given, the occupying objects are named into it.
     /// </summary>
     private static void CountBlockedCells(FlowGridCell[] cells, string zoneId, string subZoneId,
-        out int outside, out int busy, HashSet<string> blockers, HashSet<string> characters)
+        out int outside, out int busy, BlockerNames names, bool logDetail = false)
     {
         outside = 0;
         busy = 0;
@@ -1265,7 +1721,7 @@ internal static class BuildPlacementHandler
             if (BuildGrid.IsCellBusy(pos))
             {
                 busy++;
-                if (blockers == null) continue;
+                if (names == null) continue;
                 foreach (var hit in Physics2D.OverlapBoxAll(pos, BuildGrid.GRID_CHECK_BOX_SIZE, 0f, mask))
                 {
                     if (hit == null || BuildGrid.SkipCollider(hit)) continue;
@@ -1279,17 +1735,28 @@ internal static class BuildPlacementHandler
                         // counts as occupied while having nothing to name. Log the hierarchy so it
                         // can be identified, and tell the player it's the building — not something
                         // they can move out of the way.
-                        _log?.LogInfo($"[BUILD]   busy cell at {pos} blocked by unowned collider " +
+                        if (logDetail)
+                            _log?.LogInfo($"[BUILD]   busy cell at {pos} blocked by unowned collider " +
                                       $"'{HierarchyPath(hit.transform)}' layer={hit.gameObject.layer} " +
                                       $"kind={hit.GetType().Name} bounds={hit.bounds.center}/{hit.bounds.size}");
-                        blockers.Add(Loc.Get("build.blocker.building_itself"));
+                        names.Spoken.Add(Loc.Get("build.blocker.building_itself"));
+                        names.ImmovableCount++;
                         continue;
                     }
                     var name = WgoName(wgo);
                     if (string.IsNullOrEmpty(name)) continue;
-                    blockers.Add(name);
-                    if (characters != null && IsCharacter(wgo))
-                        characters.Add(wgo.is_player ? "You" : name);
+                    // Name it, and say what can be done about it — a tree in the way is a chore, a
+                    // cliff in the way is a different spot, and a tree whose technology is missing is
+                    // a chore that has to wait.
+                    var hint = RemovalHint(wgo);
+                    var note = BlockerNote(wgo);
+                    names.Spoken.Add(string.IsNullOrEmpty(note)
+                        ? name
+                        : Loc.Fmt("build.blocker.removable", name, note));
+                    if (string.IsNullOrEmpty(hint)) names.ImmovableCount++;
+                    else names.Clearable.Add(name);
+                    if (IsCharacter(wgo))
+                        names.Characters.Add(wgo.is_player ? "You" : name);
                 }
                 continue;
             }
@@ -1299,7 +1766,7 @@ internal static class BuildPlacementHandler
                 outside++;
                 // Naming pass only: record where the offending tiles sit, so a log tells us whether
                 // the object misses the zone on one edge (nudge it) or overhangs everywhere (too big).
-                if (blockers != null) _log?.LogInfo($"[BUILD]   outside-zone cell at {pos}");
+                if (logDetail) _log?.LogInfo($"[BUILD]   outside-zone cell at {pos}");
             }
         }
     }
@@ -1377,7 +1844,7 @@ internal static class BuildPlacementHandler
                     cbb = FloatingWorldGameObject.can_be_built;
                     if (ghostCells != null && ghostCells.Length > 0)
                     {
-                        CountBlockedCells(ghostCells, zoneIdForCount, subZoneId, out int outside, out int busy, null, null);
+                        CountBlockedCells(ghostCells, zoneIdForCount, subZoneId, out int outside, out int busy, null);
                         fit = $" outside={outside} busy={busy}";
                     }
                 }
@@ -1525,7 +1992,9 @@ internal static class BuildPlacementHandler
 
                     var wgo = hit.GetComponentInParent<WorldGameObject>();
                     if (wgo == null) continue;
-                    return WgoName(wgo);
+                    // Say whether it can be cleared, not just what it is: "Blocked by tree" and
+                    // "Blocked by cliff" call for completely different next moves.
+                    return WithRemovalHint(WgoName(wgo), wgo);
                 }
             }
             return null;

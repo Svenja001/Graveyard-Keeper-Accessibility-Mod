@@ -53,8 +53,14 @@ internal static class StockPointFilter
     // 48-49 tiles due south, which is what a player heard as "the crowd is still there" — is spread
     // over about a tile. This only ever writes a log line, so erring wide costs nothing.
     private const int StackThreshold = 3;
-    private const float StackRadius = 1.5f * TileSize;
-    private const float StackRadiusSqr = StackRadius * StackRadius;
+
+    /// <summary>
+    /// How close two characters have to be to count as standing on the SAME point. Eight units — a
+    /// twelfth of a tile. Parking assigns the point's coordinate verbatim, so a parked crowd shares
+    /// one position exactly; anything looser starts catching animals milling around an idle point,
+    /// which is how the first version of this came to hide the refugee camp's chickens.
+    /// </summary>
+    private const float SamePointRadius = 8f;
 
     private static ManualLogSource _log;
 
@@ -66,7 +72,13 @@ internal static class StockPointFilter
     private static readonly List<Vector2> _stackPos = new(32);
     private static readonly List<int> _stackCount = new(32);
     private static readonly List<string> _stackWho = new(32);
+    private static readonly HashSet<string> _stacksSeenOnce = new(StringComparer.Ordinal);
     private static readonly HashSet<string> _stacksReported = new(StringComparer.Ordinal);
+
+    /// Parking spots learned from a pile-up rather than from a tag. Only ever added to: the game
+    /// teleports a parked crowd straight back out rather than letting it disperse, and forgetting
+    /// one would put the whole crowd back into the lists.
+    private static readonly List<Vector2> _learned = new(4);
 
     internal static void Init(ManualLogSource log) => _log = log;
 
@@ -96,6 +108,9 @@ internal static class StockPointFilter
 
         for (int i = 0; i < _points.Count; i++)
             if ((_points[i] - pos).sqrMagnitude <= ParkedRadiusSqr) return true;
+
+        for (int i = 0; i < _learned.Count; i++)
+            if ((_learned[i] - pos).sqrMagnitude <= ParkedRadiusSqr) return true;
 
         return false;
     }
@@ -170,13 +185,27 @@ internal static class StockPointFilter
     }
 
     /// <summary>
-    /// Report — never hide — any spot where characters are standing on top of one another, with who
-    /// they are and what GD point they think they are on. This exists purely so that a "the crowd is
-    /// still there" report can be answered from the log instead of guessed at: if the pile turns out
-    /// to be a parking spot the two tests above do not recognise, the line below says exactly which
-    /// tag to add.
+    /// Spot the parking places the tag rules miss, from the one thing that gives them away: several
+    /// characters occupying the SAME POINT.
     ///
-    /// Each distinct spot is logged once per session.
+    /// The tags cover the row the game ships, but not all of it. A live save turned up
+    /// <c>npc_lilya</c> — the wife, who must not exist until the ending is triggered at the portal —
+    /// stacked with <c>npc_satyr</c> and <c>npc_hunchback</c> on exactly (12960, -6240): the same
+    /// off-map band as <c>gd_stock_bishop</c> and friends at y ≈ -6200, but on a spot carrying no
+    /// recognisable tag and with nothing stamped on the characters either.
+    ///
+    /// WHY "THE SAME POINT" IS SAFE, when the first attempt at this was not. That one hid the
+    /// refugee camp's chickens, and the reason is instructive: it grouped anything within 0.4 tiles,
+    /// and chickens milling around <c>camp_chicken_*</c> idle points are near each other but never
+    /// on the same spot. Parking is not like that — the game assigns the point's position verbatim
+    /// (<c>wgo.transform.position = gdPoint.transform.position</c>), so a parked crowd is at ONE
+    /// coordinate, to the unit. <see cref="SamePointRadius"/> is eight units, a twelfth of a tile:
+    /// close enough to be the same assignment, far too close to be two characters standing near one
+    /// another. The game's own idle points are locked one-per-character, so a legitimate crowd
+    /// cannot pile up like this either.
+    ///
+    /// And it still has to hold STILL: a spot is only learned once it has been seen stacked on two
+    /// separate rebuilds, so a momentary overlap during a spawn cannot latch.
     /// </summary>
     internal static void NoteCharacters(List<(WorldGameObject Obj, Vector2 Pos)> characters)
     {
@@ -184,31 +213,7 @@ internal static class StockPointFilter
 
         try
         {
-            _stackPos.Clear();
-            _stackCount.Clear();
-            _stackWho.Clear();
-
-            foreach (var c in characters)
-            {
-                int found = -1;
-                for (int i = 0; i < _stackPos.Count; i++)
-                {
-                    if ((_stackPos[i] - c.Pos).sqrMagnitude > StackRadiusSqr) continue;
-                    found = i;
-                    break;
-                }
-
-                string who = Describe(c.Obj);
-                if (found >= 0)
-                {
-                    _stackCount[found]++;
-                    if (_stackWho[found].Length < 200) _stackWho[found] += ", " + who;
-                    continue;
-                }
-                _stackPos.Add(c.Pos);
-                _stackCount.Add(1);
-                _stackWho.Add(who);
-            }
+            Cluster(characters, SamePointRadius * SamePointRadius);
 
             for (int i = 0; i < _stackPos.Count; i++)
             {
@@ -216,16 +221,56 @@ internal static class StockPointFilter
                 if (IsParked(_stackPos[i])) continue;      // already a known parking point
 
                 string key = $"{Mathf.RoundToInt(_stackPos[i].x)},{Mathf.RoundToInt(_stackPos[i].y)}";
+
+                // Seen once: remember it and wait. Seen twice: it is a parking spot.
+                if (_stacksSeenOnce.Add(key))
+                {
+                    _log?.LogInfo(
+                        $"[STOCK] {_stackCount[i]} characters on the exact same point {_stackPos[i]} " +
+                        $"— {_stackWho[i]}; watching to confirm it is a parking spot");
+                    continue;
+                }
                 if (!_stacksReported.Add(key)) continue;
 
+                _learned.Add(_stackPos[i]);
                 _log?.LogWarning(
-                    $"[STOCK] {_stackCount[i]} characters standing on the same spot {_stackPos[i]} " +
-                    $"and NOT recognised as a parking point — {_stackWho[i]}");
+                    $"[STOCK] Learned an untagged parking spot at {_stackPos[i]}: {_stackCount[i]} " +
+                    $"characters on the exact same point — {_stackWho[i]}. Hiding it.");
             }
         }
         catch (Exception ex)
         {
             _log?.LogWarning($"[STOCK] Pile-up check failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Group the characters into clusters, filling the scratch lists.</summary>
+    private static void Cluster(List<(WorldGameObject Obj, Vector2 Pos)> characters, float radiusSq)
+    {
+        _stackPos.Clear();
+        _stackCount.Clear();
+        _stackWho.Clear();
+
+        foreach (var c in characters)
+        {
+            int found = -1;
+            for (int i = 0; i < _stackPos.Count; i++)
+            {
+                if ((_stackPos[i] - c.Pos).sqrMagnitude > radiusSq) continue;
+                found = i;
+                break;
+            }
+
+            string who = Describe(c.Obj);
+            if (found >= 0)
+            {
+                _stackCount[found]++;
+                if (_stackWho[found].Length < 200) _stackWho[found] += ", " + who;
+                continue;
+            }
+            _stackPos.Add(c.Pos);
+            _stackCount.Add(1);
+            _stackWho.Add(who);
         }
     }
 
