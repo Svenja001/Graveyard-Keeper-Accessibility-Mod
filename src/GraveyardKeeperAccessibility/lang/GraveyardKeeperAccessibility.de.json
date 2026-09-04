@@ -242,7 +242,6 @@
   "fishing.tier.has_fish": "{0}, hier gibt es Fische",
   "fishing.tier.empty": "{0}, leer",
 
-  "interaction.intro_blocked": "{0}. Während des Intros nicht verfügbar.",
   "interaction.press_e_pickup": "{0}, E drücken zum Aufheben",
   "interaction.press_f": "F drücken zum {0}",
 

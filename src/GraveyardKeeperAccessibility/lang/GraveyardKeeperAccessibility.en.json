@@ -242,7 +242,6 @@
   "fishing.tier.has_fish": "{0}, fish here",
   "fishing.tier.empty": "{0}, empty",
 
-  "interaction.intro_blocked": "{0}. Not available during the intro.",
   "interaction.press_e_pickup": "{0}, press E to pick up",
   "interaction.press_f": "Press F to {0}",
 

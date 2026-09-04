@@ -1,3 +1,9 @@
+## 0.2.4 | 4 September 2026
+
+- **Removed a stale message that kept firing during the tutorial.** Pressing E on an object could
+  answer "Not available during the intro" even though the object could be used perfectly well. The
+  check no longer matched what the game actually blocks, so it is gone.
+
 ## 0.2.3 | 3 September 2026
 
 **Trees, flowers, mushrooms and ore now say which kind they are and whether you are allowed to work

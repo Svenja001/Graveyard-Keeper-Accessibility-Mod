@@ -58,25 +58,11 @@ internal static class InteractionDetector
             // Detect when player presses E
             if (Input.GetKeyDown(KeyCode.E))
             {
-                // The game blocks interaction with most objects during the tutorial/intro
-                // (WorldGameObject.CheckIfDisabledInTutorial). To a blind player that just
-                // feels like "nothing happens", so when the object the game would interact
-                // with is tutorial-locked, say why.
-                var gameNearest = GetGameInteractionNearest();
-                if (gameNearest != null && IsTutorialDisabled(gameNearest))
+                var target = FindClosestInteractable(forceFresh: true);
+                if (target != null)
                 {
-                    var label = GetObjectLabel(gameNearest);
-                    ScreenReader.Say(Loc.Fmt("interaction.intro_blocked", label), interrupt: true);
-                    _lastAnnouncedObject = AnnounceKey(gameNearest);
-                }
-                else
-                {
-                    var target = FindClosestInteractable(forceFresh: true);
-                    if (target != null)
-                    {
-                        ScreenReader.Say(DescribeObject(target), interrupt: true);
-                        _lastAnnouncedObject = AnnounceKey(target);
-                    }
+                    ScreenReader.Say(DescribeObject(target), interrupt: true);
+                    _lastAnnouncedObject = AnnounceKey(target);
                 }
             }
 
@@ -1166,33 +1152,6 @@ internal static class InteractionDetector
             return "tasks: " + string.Join(", ", npc.tasks.Select(t => $"{t.id}={t.state}").ToArray());
         }
         catch (Exception ex) { return $"tasks unavailable ({ex.Message})"; }
-    }
-
-    // The object the game considers "in reach" for an E press (its highlighted interaction
-    // target), or null. This is what the game would actually act on, so it's the right thing
-    // to test for the tutorial lock rather than our looser nearest-by-distance scan.
-    private static WorldGameObject GetGameInteractionNearest()
-    {
-        try { return MainGame.me?.player?.components?.interaction?.nearest; }
-        catch { return null; }
-    }
-
-    // True when the game would refuse to interact with this object because the player is still
-    // in the tutorial and the object isn't flagged interactive_in_tutorial
-    // (see WorldGameObject.CheckIfDisabledInTutorial / GameSave.IsInTutorial).
-    private static bool IsTutorialDisabled(WorldGameObject wgo)
-    {
-        try
-        {
-            return wgo?.obj_def != null
-                && !wgo.obj_def.interactive_in_tutorial
-                && MainGame.me?.save != null
-                && MainGame.me.save.IsInTutorial();
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     // Cached result of the proximity scan, plus the frame it was taken on. The scan used to run
