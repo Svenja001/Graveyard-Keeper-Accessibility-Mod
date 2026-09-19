@@ -6385,6 +6385,32 @@ internal static class GUIAccessibility
         }
     }
 
+    /// <summary>
+    /// A window that is on screen but is not a menu the player is standing in: the storybook
+    /// illustration/subtitle card a cutscene puts up.
+    ///
+    /// Treating the illustration card as the active window did real damage beyond the pointless
+    /// "Illustrations" announcement: it has no rows at all, so the whole menu layer went live and
+    /// empty, and everything gated on "no window is open" — the cutscene announcer's
+    /// still-running reminders, interaction and combat updates, world navigation keys — went quiet
+    /// for as long as the scene lasted. Its narration is spoken from
+    /// <see cref="Patches.IllustrationsGUI_SetText_Postfix"/> instead, which is where the text
+    /// actually arrives.
+    ///
+    /// (The HUD used to be excluded here too, but it is a plain MonoBehaviour, not a BaseGUI, so
+    /// it never turned up in the scan in the first place — the compiler said as much.)
+    ///
+    /// The perspective crawl in front of the first time-machine memory is a BaseGUI for exactly
+    /// the same reasons and would cause exactly the same damage, for the half-minute it slides
+    /// past. It is internal to Assembly-CSharp and cannot be named in an `is` test, so the type is
+    /// resolved once by name and cached; if it cannot be found the check simply never matches.
+    /// </summary>
+    private static readonly Type PerspectiveTextGuiType = AccessTools.TypeByName("PerspectiveTextGUI");
+
+    private static bool IsPassiveWindow(BaseGUI gui) =>
+        gui is IllustrationsGUI
+        || (PerspectiveTextGuiType != null && PerspectiveTextGuiType.IsInstanceOfType(gui));
+
     internal static void CheckForNewGUI()
     {
         if (!GUIElements.me) return;
@@ -6393,7 +6419,7 @@ internal static class GUIAccessibility
         foreach (var gui in GUIElements.me.GetComponentsInChildren<BaseGUI>(true))
         {
             if (!gui.is_shown) continue;
-            if (gui is HUD) continue;
+            if (IsPassiveWindow(gui)) continue;
             topGUI = gui;
         }
 
@@ -6404,7 +6430,7 @@ internal static class GUIAccessibility
         // is the game's authoritative top-of-stack window, so prefer it when it's a real,
         // shown, non-HUD window.
         var activeGui = BaseGUI.active_gui;
-        if (activeGui != null && activeGui.is_shown)
+        if (activeGui != null && activeGui.is_shown && !IsPassiveWindow(activeGui))
             topGUI = activeGui;
 
         if (topGUI == _currentGUI) return;

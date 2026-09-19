@@ -11,7 +11,7 @@ namespace GraveyardKeeperAccessibility;
 /// fish bites (FishingGUI.GetRandomFish) — so we keep those as real choices and just make them
 /// audible.
 ///
-/// This module (patches live in this class, dispatched from Plugin.RegisterPatches) does three
+/// This module (patches live in this class, dispatched from Plugin.RegisterPatches) does four
 /// things, mirroring the CombatAssist approach (narrate + assist the twitch parts, keep the
 /// decisions with the player):
 ///   1. NARRATION — every state change is spoken through the single ChangeState funnel; the
@@ -22,8 +22,13 @@ namespace GraveyardKeeperAccessibility;
 ///      tracking. This is the same idea stardew-access uses for Stardew fishing. If the standalone
 ///      NoTimeForFishing mod is also installed we defer the catch to IT (it patches the same flow)
 ///      and only narrate — see DeferToNoTimeForFishing — so the two never fight the state machine.
-///   3. TOGGLE — Ctrl+F flips auto-catch off, leaving the vanilla mini-game for a sighted-assisted
-///      or practising player. Off by default would make fishing unplayable blind, so it defaults ON.
+///   3. SONAR — with auto-catch off, the bite and the reel game are played BY EAR instead: a ding
+///      the instant the fish bites, then a tone that tracks the fish against your bar (see
+///      FishingSonar and FishingGUI_UpdatePulling_Postfix). This is the part stardew-access solves the same way for
+///      Stardew's bobber bar, and it is what makes catching a fish by hand possible without sight.
+///   4. TOGGLE — Ctrl+F flips auto-catch off, handing the player the real mini-game with the sonar
+///      on. Auto-catch stays the default: it is the one mode that cannot be lost, and the manual
+///      game is a choice, not a requirement.
 ///
 /// All private FishingGUI state is reached with Harmony's Traverse; everything is wrapped in
 /// try/catch so a reflection miss can never wedge the fishing UI.
@@ -32,6 +37,17 @@ internal static class FishingAssist
 {
     private static ManualLogSource _log;
     private static bool _enabled = true;   // auto-catch on by default (see class summary)
+
+    // Manual play has two difficulties, and Ctrl+F cycles auto → assisted → full speed → auto.
+    //
+    // Assisted is not a concession, it is the point: the mini-game was built to be tracked with the
+    // eyes, and the fastest fish in the game move their marker across a third of the column in well
+    // under a second. Hearing where the fish is does not make that reachable — the first player to
+    // try it got the cues, understood them, and still could not land the bar in time. Halving the
+    // fish's speed leaves the shape of the task, the controls and the catch requirement exactly as
+    // they are and gives the ears the time the eyes did not need. Full speed stays one keypress away
+    // for anyone who wants the unmodified fight.
+    private static bool _assisted = true;
 
     // NoTimeForFishing (p1xel8ted.gyk.notimeforfishing) is a separate mod that also auto-completes
     // fishing — it patches the same FishingGUI flow methods. If it's installed we let IT drive the
@@ -63,9 +79,15 @@ internal static class FishingAssist
     // only speak when it actually changes rather than every frame. Reset to -1 on entering the bar.
     private static int _lastAnnouncedTier = -1;
 
+    // The full "here is what the sounds mean" briefing is spoken the first time a player enters
+    // manual mode in a session (and again whenever they switch back to it with Ctrl+F), then a one
+    // line reminder on every later cast — it would otherwise be read out before every single throw.
+    private static bool _manualIntroSpoken;
+
     internal static void Init(ManualLogSource log)
     {
         _log = log;
+        FishingSonar.Init(log);
         _log?.LogInfo("[FISHING] FishingAssist initialized (auto-catch on, Ctrl+F toggles)");
     }
 
@@ -75,6 +97,11 @@ internal static class FishingAssist
     {
         try
         {
+            // Drives the sonar's fades and its delayed second blip. Runs in every fishing state, not
+            // just the reel game: the frames AFTER the pull are exactly the ones that let the tone
+            // fade out instead of being cut off mid-cycle with a click.
+            FishingSonar.Tick();
+
             bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             if (ctrl && Input.GetKeyDown(KeyCode.F))
             {
@@ -84,8 +111,24 @@ internal static class FishingAssist
                     ScreenReader.Say(Loc.Get("fishing.deferred"));
                     return;
                 }
-                _enabled = !_enabled;
-                ScreenReader.Say(Loc.Get(_enabled ? "fishing.autocatch.on" : "fishing.autocatch.off"));
+                // Not in the middle of a pull: switching to auto there would silence the sonar
+                // mid-reel and hand the player a mini-game they can no longer hear, and switching to
+                // manual would drop them into one already half over. The pull lasts a few seconds —
+                // the toggle can wait for the next cast.
+                if (__instance != null && __instance.state == FishingGUI.FishingState.Pulling) return;
+                // auto → manual assisted → manual full speed → auto.
+                if (_enabled) { _enabled = false; _assisted = true; }
+                else if (_assisted) { _assisted = false; }
+                else { _enabled = true; _assisted = true; }
+
+                // Arriving in manual earns the full briefing again on the next cast — that is the
+                // moment the player has asked to be told how the sounds work. Changing difficulty
+                // within manual does not; they have just heard it.
+                if (!_enabled && _assisted) _manualIntroSpoken = false;
+
+                ScreenReader.Say(Loc.Get(_enabled ? "fishing.mode.auto"
+                    : _assisted ? "fishing.mode.assisted"
+                    : "fishing.mode.full"));
                 return;
             }
 
@@ -131,10 +174,17 @@ internal static class FishingAssist
                         ScreenReader.Say(Loc.Get("fishing.no_fish_there"));
                     else if (DeferToNoTimeForFishing)
                         ScreenReader.Say(Loc.Get("fishing.intro.deferred"));
+                    else if (_enabled)
+                        ScreenReader.Say(Loc.Get("fishing.intro.auto"));
                     else
-                        ScreenReader.Say(Loc.Get(_enabled
-                            ? "fishing.intro.auto"
-                            : "fishing.intro.manual"));
+                    {
+                        // Manual mode: the long version once, then a reminder that also names the
+                        // difficulty, since that is the one thing about it that can change.
+                        ScreenReader.Say(Loc.Get(!_manualIntroSpoken ? "fishing.intro.manual.first"
+                            : _assisted ? "fishing.intro.manual.assisted"
+                            : "fishing.intro.manual.full"));
+                        _manualIntroSpoken = true;
+                    }
                     break;
 
                 case FishingGUI.FishingState.DistanceChoosing:
@@ -147,21 +197,33 @@ internal static class FishingAssist
                     break;
 
                 case FishingGUI.FishingState.WaitingForPulling:
-                    // The fish is on the line. In auto-catch mode the prefix below turns this into a
-                    // catch a frame later; in manual mode the player now has the vanilla window.
+                    // The fish is on the line. In auto-catch mode the postfix below turns this into a
+                    // catch a frame later; in manual mode the player now has the vanilla window to
+                    // hook it — and that window is SHORT (the fish presets set it to 0.8-1.0 s). Far
+                    // too short to wait for a screen reader to start talking, so the cue is a sound:
+                    // a rising two-note ding fires on this very frame, and the spoken "Bite!" follows
+                    // whenever the speech queue gets to it.
+                    if (ManualPlay)
+                    {
+                        FishingSonar.Blip(1000f);
+                        FishingSonar.BlipAfter(0.12f, 1320f);
+                    }
                     ScreenReader.Say(Loc.Get("fishing.bite"));
                     break;
 
                 case FishingGUI.FishingState.Pulling:
-                    // Pulling is passed through automatically (by us or by NoTimeForFishing) unless
-                    // the player is truly working the reel by hand — auto-catch off AND NTFF absent.
-                    // Only then do we spell out the controls; otherwise stay quiet so the flow reads
-                    // cleanly as "Bite!" then "Caught X" without a misleading instruction in between.
-                    if (!DeferToNoTimeForFishing && !_enabled)
-                        ScreenReader.Say(Loc.Get("fishing.reeling"));
+                    // Nothing is spoken here on purpose. Pulling is passed through automatically (by
+                    // us or by NoTimeForFishing) unless the player is working the reel by hand, and
+                    // in that case the sonar starts on this same frame — a sentence of instructions
+                    // would mask the one sound the player needs for the next few seconds. What the
+                    // tones mean was explained back at bait choosing, where there was time for it.
+                    ResetReel();
                     break;
 
                 case FishingGUI.FishingState.TakingOut:
+                    // Drop the tone (and any warning blip still queued) the moment the pull is over,
+                    // so the result is announced into silence.
+                    FishingSonar.Release();
                     AnnounceTakeOut(__instance, prev);
                     break;
             }
@@ -296,6 +358,190 @@ internal static class FishingAssist
         catch (Exception ex)
         {
             _log?.LogError($"[FISHING] auto-catch error: {ex.Message}");
+        }
+    }
+
+    // ── Manual play: the reel game by ear ───────────────────────────────────────────────────────
+
+    // True when the player is actually meant to play the mini-game themselves: auto-catch off and no
+    // NoTimeForFishing doing it for them. Everything in this section is gated on it.
+    private static bool ManualPlay => !_enabled && !DeferToNoTimeForFishing;
+
+    // How far (in bar units, the game's 0-100 scale) the fish has to be outside the bar before the
+    // tone reaches its full octave of detune. The fish rarely strays further than this, so the pitch
+    // range gets used across the whole realistic span instead of saturating immediately.
+    private const float FullDetuneDistance = 45f;
+
+    // The pitch offset at the bar's own edge — the seam where the inside and outside halves of the
+    // mapping meet. Small enough that the bar still reads as "the middle", big enough to hear a fish
+    // sliding towards the edge in time to do something about it.
+    private const float EdgeSemitones = 2f;
+
+    // How much the assisted difficulty slows the fish down. It scales the time step fed to the
+    // fish's curve, so the fish swims exactly the same path, just at half pace — nothing about the
+    // catch is changed, only how fast you have to be. See FishPreset_CalculateFishPos_Prefix.
+    private const float AssistedFishSpeed = 0.5f;
+
+    // Milestone blips as the catch progress bar fills and empties. Rising triad up, duller tones
+    // down, so gaining and losing ground never sound alike.
+    private static readonly float[] ProgressUpHz = { 700f, 900f, 1150f };
+    private static readonly float[] ProgressDownHz = { 600f, 500f, 420f };
+
+    private static int _progressLevel;       // 0-3: which quarter of the bar we last reported
+    private static float _zeroProgressTime;  // how long the bar has been empty (the fail clock)
+    private static float _lastWarningAt;
+    private static bool _rodAtBottom;
+    private static bool _rodAtTop;
+
+    // Called when the reel game starts. _rodAtBottom starts TRUE because the rod genuinely does
+    // start resting at the bottom — without this the first frame would report a bump that never
+    // happened, on top of the bite ding.
+    private static void ResetReel()
+    {
+        _progressLevel = 0;
+        _zeroProgressTime = 0f;
+        _lastWarningAt = 0f;
+        _rodAtBottom = true;
+        _rodAtTop = false;
+    }
+
+    /// <summary>
+    /// The reel game, once per frame: read where the fish and the bar are and turn that into sound.
+    ///
+    /// The mini-game is a tracking task. A bar of 30-38 units (by rod level) sits somewhere on a
+    /// 0-100 column and is flown like a flappy-bird: holding the interaction key thrusts it up,
+    /// releasing lets gravity pull it down. A fish wanders the same column on a sum of sines. While
+    /// the fish is inside the bar the catch progress fills (about 0.45/s); while it is outside the
+    /// progress drains (about 0.5/s), and if it sits empty for the fish's fail time (2-3 s) the fish
+    /// escapes. So the player needs two things continuously: which way to move, and whether they are
+    /// scoring right now. Pitch answers the first, the steady-versus-pulsing tone answers the second.
+    ///
+    /// Everything read here is public on FishingGUI: the widget positions are the same numbers
+    /// UpdatePulling just wrote, divided back out by the pixels-per-unit factor the game derived from
+    /// the progress backdrop's height. No reflection, so nothing to go stale.
+    /// </summary>
+    internal static void FishingGUI_UpdatePulling_Postfix(FishingGUI __instance)
+    {
+        try
+        {
+            if (!ManualPlay || __instance == null) return;
+            // UpdatePulling also runs on the frame the fish is landed or lost (it changes state
+            // itself); on that frame we simply stop asking for a tone and it fades.
+            if (__instance.state != FishingGUI.FishingState.Pulling) return;
+            if (__instance.fishing_rod == null || __instance.fish_tf == null || __instance.process_back == null) return;
+
+            float screenK = __instance.process_back.height / 100f;
+            if (screenK <= 0.001f) return;   // layout not sized yet — silence beats a screech
+
+            float rodBottom = __instance.fishing_rod.transform.localPosition.y / screenK;
+            float rodHeight = __instance.fishing_rod.height / screenK;
+            float rodTop = rodBottom + rodHeight;
+            float fishPos = __instance.fish_tf.localPosition.y / screenK;
+            float progress = (__instance.progress_bar != null) ? __instance.progress_bar.value : 0f;
+
+            // ── The carrier: where is the fish, relative to the bar? ──
+            //
+            // Pitch is a continuous, monotonic function of the fish's position across the whole
+            // column, in two joined halves:
+            //   inside the bar  — the base pitch at dead centre, sliding to ±2 semitones at the
+            //                     edges. This is what tells you the fish is DRIFTING before it
+            //                     leaves: a flat tone across a bar a third of the column wide gives
+            //                     no warning at all, so the first news of trouble is the tone
+            //                     breaking into a pulse, by which time you are already chasing.
+            //   outside the bar — starts at exactly those ±2 semitones, where the inside half left
+            //                     off, and widens to ±12 with distance.
+            // The two meet at the edge, so nothing jumps; inside versus outside is carried by the
+            // tone being steady versus pulsing, not by the pitch.
+            bool inZone = fishPos >= rodBottom && fishPos <= rodTop;
+            float semitones;
+            if (inZone)
+            {
+                float half = Mathf.Max(rodHeight * 0.5f, 0.001f);
+                semitones = ((fishPos - (rodBottom + half)) / half) * EdgeSemitones;
+            }
+            else
+            {
+                float offset = (fishPos > rodTop) ? fishPos - rodTop : fishPos - rodBottom;
+                semitones = Mathf.Sign(offset) * (EdgeSemitones + 10f * Mathf.Clamp01(Mathf.Abs(offset) / FullDetuneDistance));
+            }
+            FishingSonar.SetTone(semitones, inZone);
+
+            // ── Milestones: the catch bar crossing a quarter, in either direction ──
+            int level = Mathf.Clamp(Mathf.FloorToInt(progress / 0.25f), 0, 3);
+            if (level > _progressLevel) FishingSonar.Blip(ProgressUpHz[Mathf.Min(level, 3) - 1], 0.8f);
+            else if (level < _progressLevel) FishingSonar.Blip(ProgressDownHz[level], 0.6f);
+            _progressLevel = level;
+
+            // ── The fail clock ──
+            // An empty bar is not itself an emergency: it is where every pull starts. It becomes one
+            // once it stays empty, so the warning waits a second before it begins, and then repeats
+            // as a low double tick — nothing else in the mini-game is both that low and repeating.
+            if (progress <= 0.0005f)
+            {
+                _zeroProgressTime += Time.deltaTime;
+                if (_zeroProgressTime > 1f && Time.unscaledTime - _lastWarningAt > 0.5f)
+                {
+                    _lastWarningAt = Time.unscaledTime;
+                    FishingSonar.Blip(196f, 0.9f);
+                    FishingSonar.BlipAfter(0.11f, 196f, 0.9f);
+                }
+            }
+            else _zeroProgressTime = 0f;
+
+            // ── Bar hitting its limits ──
+            // Worth its own cue: pinned at the bottom, "go lower" is advice the player cannot take,
+            // and the pitch alone would never say so.
+            float rodMax = 100f - rodHeight;
+            bool atBottom = rodBottom <= 0.35f;
+            bool atTop = rodBottom >= rodMax - 0.35f;
+            // 130 Hz, not the 165 the carrier itself reaches when the fish is far below the bar:
+            // those two fire together constantly, and at the same pitch they would blur into one.
+            if (atBottom && !_rodAtBottom) FishingSonar.Blip(130f, 0.5f);
+            if (atTop && !_rodAtTop) FishingSonar.Blip(1320f, 0.35f);
+            _rodAtBottom = atBottom;
+            _rodAtTop = atTop;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[FISHING] reel sonar error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The assisted difficulty, in one line: feed the fish's curve a smaller time step.
+    ///
+    /// FishPreset.CalculateFishPos advances three phases by delta_time and adds up the sines; every
+    /// one of them scales with that step, so halving it halves the fish's speed while leaving its
+    /// path, its range and the shape of its wandering untouched. Nothing else in the mini-game reads
+    /// this method — FishLogic is its only caller — so the progress rates, the fail clock, the bar,
+    /// the rod physics and the fish that bit are all exactly as the game shipped them.
+    ///
+    /// Done here rather than by editing the preset: FishPreset is a ScriptableObject that Resources
+    /// caches for the rest of the session, so a mod that writes to its fields has to remember to put
+    /// every one of them back — and if it ever fails to, the player's game stays modified until they
+    /// restart it. A scaled argument cannot leak.
+    /// </summary>
+    internal static void FishPreset_CalculateFishPos_Prefix(ref float delta_time)
+    {
+        try
+        {
+            if (ManualPlay && _assisted) delta_time *= AssistedFishSpeed;
+        }
+        catch { }
+    }
+
+    // Closing the fishing UI (caught, lost, or escaped out of) ends the Update calls that drive the
+    // sonar's fade, so this is the one place that has to cut it off outright.
+    internal static void FishingGUI_Hide_Postfix()
+    {
+        try
+        {
+            FishingSonar.StopNow();
+            ResetReel();
+        }
+        catch (Exception ex)
+        {
+            _log?.LogError($"[FISHING] Hide postfix error: {ex.Message}");
         }
     }
 }

@@ -25,6 +25,7 @@ public class Plugin : BaseUnityPlugin
         DayTimeAnnouncer.Init(Log);
         QuestAnnouncer.Init(Log);
         ZoneScoreAnnouncer.Init(Log);
+        LogNoise.Init(Log);
         CutsceneAnnouncer.Init(Log);
         BuildZoneAudit.Init(Log);
         ZoneAnnouncer.Init(Log);
@@ -84,6 +85,52 @@ public class Plugin : BaseUnityPlugin
 
         // Patch WorldGameObject.Say method for dialogue capture
         TryPatchWorldGameObjectSay(harmony);
+
+        // The storybook screen: a painted illustration with a line of narration under it (the
+        // witch's tale of the previous keeper, the time machine's memory replays, plain
+        // subtitles). Its text arrives through SetText after the window is already open, so that
+        // is the only place it can be caught. See Patches.IllustrationsGUI_SetText_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.IllustrationsGUI_SetText_Postfix),
+            typeof(IllustrationsGUI), "SetText",
+            new[] { typeof(string), typeof(float).MakeByRefType() });
+        // …and describe the drawing itself, which the game never puts into words. The six sin
+        // windows in the church show a picture and nothing else, so this is all there is to hear.
+        // See Patches.IllustrationsGUI_ShowIllustration_Postfix.
+        TryPatch(harmony, typeof(Patches), nameof(Patches.IllustrationsGUI_ShowIllustration_Postfix),
+            typeof(IllustrationsGUI), "ShowIllustration", new[] { typeof(string) });
+
+        // Drop the game's two highest-volume empty debug messages before they are written. They
+        // are 80% of a session's log on their own, which is what made keeping logs across runs
+        // impractical. See LogNoise for the measurements and for what must NOT be filtered.
+        TryPatchPrefix(harmony, typeof(LogNoise), nameof(LogNoise.Debug_Log_Prefix),
+            typeof(Debug), "Log", new[] { typeof(object) });
+
+        // The Star Wars style crawl that opens the first time-machine memory. Its text is a plain
+        // UILabel on a prefab and the GUI itself only babbles Gerry's voice over it, so without
+        // this the whole prologue is lost. PerspectiveTextGUI is internal to Assembly-CSharp, so
+        // it has to be found by name; null parameters means match on the name alone (there is one
+        // OpenSlidingText and its argument type is internal too). See CutsceneAnnouncer.
+        TryPatchByName(harmony, typeof(CutsceneAnnouncer),
+            nameof(CutsceneAnnouncer.PerspectiveTextGUI_OpenSlidingText_Postfix),
+            "PerspectiveTextGUI", "OpenSlidingText", null);
+
+        // Describe the silent half of a cutscene — the corpses lifting off the ground, the drawn
+        // swords, the collapsing villa. Every one of those beats is a Trigger Animation node, so
+        // this single hook covers them all. See CutsceneActionDescriber for why sound is left
+        // alone, and note the patch is on the one-arg overload that the two-arg one delegates to.
+        TryPatch(harmony, typeof(CutsceneActionDescriber),
+            nameof(CutsceneActionDescriber.WorldGameObject_TriggerSmartAnimation_Postfix),
+            typeof(WorldGameObject), "TriggerSmartAnimation", new[] { typeof(string) });
+
+        // The opening intro: an Animator in the title scene whose three narrated lines arrive as
+        // animation events. It is not bracketed by GS.SetPlayerEnable and is not a speech bubble,
+        // so nothing else in the mod sees it. See CutsceneAnnouncer's intro section.
+        TryPatchPrefix(harmony, typeof(CutsceneAnnouncer), nameof(CutsceneAnnouncer.Intro_ShowIntro_Prefix),
+            typeof(Intro), "ShowIntro", new[] { typeof(Action), typeof(bool), typeof(bool) });
+        TryPatch(harmony, typeof(CutsceneAnnouncer), nameof(CutsceneAnnouncer.Intro_ShowSubtitleText_Postfix),
+            typeof(Intro), "ShowSubtitleText", new[] { typeof(string) });
+        TryPatch(harmony, typeof(CutsceneAnnouncer), nameof(CutsceneAnnouncer.Intro_OnIntroAnimationFinished_Postfix),
+            typeof(Intro), "OnIntroAnimationFinished", Type.EmptyTypes);
 
         // Make dialogue answer choices (MultiAnswerGUI) keyboard-accessible: announce options
         // when shown and clear our state once one is committed. See DialogueChoiceHandler.
@@ -190,6 +237,18 @@ public class Plugin : BaseUnityPlugin
         // when we drive the state machine programmatically — that was the hang).
         TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_UpdateWaitingForPulling_Postfix),
             typeof(FishingGUI), "UpdateWaitingForPulling", Type.EmptyTypes);
+        // Manual play: with auto-catch off, sonify the reel game frame by frame (fish position as
+        // pitch, in/out of the bar as steady/pulsing, progress and limits as blips) so it can be
+        // played by ear. Hide is where the tone has to be cut — once the UI closes, Update stops
+        // running and nothing else would silence it.
+        TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_UpdatePulling_Postfix),
+            typeof(FishingGUI), "UpdatePulling", Type.EmptyTypes);
+        TryPatch(harmony, typeof(FishingAssist), nameof(FishingAssist.FishingGUI_Hide_Postfix),
+            typeof(FishingGUI), "Hide", new[] { typeof(bool) });
+        // The assisted manual difficulty: halve the time step the fish's curve is advanced by, which
+        // halves its speed and changes nothing else. FishLogic is this method's only caller.
+        TryPatchPrefix(harmony, typeof(FishingAssist), nameof(FishingAssist.FishPreset_CalculateFishPos_Prefix),
+            typeof(Fishing.FishPreset), "CalculateFishPos", new[] { typeof(float), typeof(bool) });
 
         // Accessible quick-use hotbar (number keys 1-4): announce the result whenever the player
         // triggers a slot in the world ("Used bread, 2 left" / "Slot 2 empty"). The prefix snapshots
@@ -272,6 +331,11 @@ public class Plugin : BaseUnityPlugin
                 // than waiting for the periodic sweep.
                 WorldObjectRegistry.RequestResync("scene change");
             }
+
+            // Describe the opening intro's painted scenes as the animator swaps them in. Runs
+            // unconditionally (and returns instantly unless an intro is playing) because the intro
+            // is on the title screen, where the GUI/menu gates further down would skip it.
+            CutsceneAnnouncer.IntroTick();
 
             // Speak any items the player just received ("Got 4 wood"). Runs regardless of GUI
             // state so a craft finished with the station window open still announces its output.

@@ -1,3 +1,74 @@
+## 0.3.0 | 20 September 2026
+
+**The fishing mini-game can be played by ear, the opening cutscene and the storybook scenes are read
+out, the fourteen painted pictures in the game are described for the first time, and auto-walk no
+longer leaves you stranded at the bed.**
+
+- **You can now catch a fish by hand.** Turning auto-catch off (Ctrl+F) used to leave you with the
+  mini-game as the game shipped it: a fish drifting up and down a bar you cannot see. It is now played by ear. The bite is a double
+  ding, with "Bite!" spoken right behind it: the window to hook the fish is under a second, so the
+  ding is the cue you react to and the word only confirms it. Then a tone follows the fish while you fly the bar:
+  it sounds high while the fish is above you, low while it is below, and it stops pulsing and holds
+  steady the moment you have it — that steady tone is you winning. While the fish is inside the bar
+  the pitch still drifts as it wanders towards an edge, so you can catch it slipping before it slips.
+  Blips mark each quarter of the catch bar as it fills or drains, a low double tick warns that you
+  are about to lose the fish, and a thud tells you the bar has hit the bottom. The cues follow your
+  master volume.
+
+- **And the fish will wait for you.** Ctrl+F now cycles three ways of fishing rather than two: catch
+  it automatically, catch it yourself with the fish swimming at half speed, or catch it yourself at
+  the game's own pace. The middle one is the one to start with. The fastest fish in the game cross a
+  third of the bar in well under a second, which is a speed built for watching rather than listening
+  — at half pace the same fish swims the same path and needs the same time in the bar to land, it
+  just stops being a reflex test. Nothing else about the catch changes, and full speed is one
+  keypress away.
+
+- **The opening cutscene is narrated.** Starting a new game played a full minute of animation with
+  story text painted onto it, and none of it was spoken — you heard "Loading", then nothing at all,
+  and then you were standing in the graveyard. It is not a cutscene as the game counts them and not
+  dialogue either, which is why it slipped past everything. You now hear that the opening scene is
+  playing, each of its lines as it appears, and that it is over.
+
+- **The pictures themselves are now described.** Fourteen painted scenes in the game are shown and
+  never explained in words — the sinners' windows in the church, the villagers' tales, the scenes of
+  the opening. Six of them are a picture and five seconds of silence and nothing else, so there was
+  no way to know what you had just unlocked. Each now gets a written description read out as it
+  appears: what is in the picture, who is in it and what they are doing. The descriptions were
+  written for this mod — the game has no text for them — and are translated into German alongside
+  everything else. They can run on a little past the picture they belong to; that is the intended
+  trade for saying enough.
+
+- **The storybook scenes are read out.** At a few points the game stops and shows a painted picture
+  with a line of narration under it instead of a speech bubble. None of that is dialogue as far as
+  the game is concerned, so none of it was ever spoken — the window announced itself as
+  "Illustrations" and then went quiet until the scene ended. Every line is now read as it appears,
+  and the scene no longer counts as an open menu, so the reminders and the world keys keep working
+  through it.
+
+- **The text crawl before the first time machine memory is read out.** That memory does not begin
+  with the scene — it begins with a wall of text sliding away into the distance, Star Wars style. It
+  is not a speech bubble, not a subtitle and not one of the painted cards, so nothing in the mod had
+  ever seen it. It is now read as the crawl starts, and no longer counts as an open menu while it
+  slides.
+
+- **Cutscenes now say what they are doing, not just what is said.** A lot of these scenes tell their
+  story in mime, and the silent gaps are long enough that the only thing you heard was the reminder
+  that a scene was still running. Those beats are now described as they happen. Sounds you can
+  already hear — doors, cheering crowds, a body hitting the ground — are deliberately left alone.
+
+- **Auto-walk no longer strands you at the bed.** Some spots indoors are places the game's own
+  pathfinding has no idea about — the bed in your house is one, a chest tucked into a corner of the
+  graveyard another. The mod could walk you there by sliding you the last stretch in a straight
+  line, but once you stood on such a spot it could not walk you anywhere else, in a room you had
+  just been walked across. It now remembers the spot it set off from and quietly walks you back to
+  it before carrying on.
+
+- **The log file is a fifth of the size.** `BepInEx\LogOutput.log` is what you attach to a bug
+  report, and it had been growing to forty megabytes in a single session. Eighty percent of that was
+  two messages the game prints to itself over and over, neither of which ever said anything. They
+  are now dropped before they are written; everything that helps diagnose a problem is still in
+  there.
+
 ## 0.2.4 | 4 September 2026
 
 - **Removed a stale message that kept firing during the tutorial.** Pressing E on an object could
@@ -630,8 +701,6 @@ already run other Graveyard Keeper mods, and goes into the existing `BepInEx` fo
   arrows and Escape stop responding and speech stops — because BepInEx's Configuration Manager
   and the game's UI both poll the keyboard at the same time. The feature is disabled rather
   than left half-working; everything else is reachable without it.
-- **The game's opening intro and other visuals are not narrated.** Its subtitles are drawn by a separate system
-  that is not hooked yet.
 - **Linux and macOS are untested.** The Prism speech libraries for both are bundled, but
   nobody has confirmed yet if it correctly loads on the game's native Mac and Linux builds. Windows
   is verified. Linux players using Proton run the Windows build, which works, but Prism cannot

@@ -131,8 +131,25 @@ you have moved to Yes or No.
 
 ## Fishing
 
-- **Ctrl+F** — turn auto-catch on or off
+- **Ctrl+F** — change how the fish is caught. It cycles: auto-catch → catch it yourself with the
+  fish at half speed → catch it yourself at the game's own speed → back to auto-catch.
 - **Tab** — change bait, while the game is asking you to choose one
+
+### Catching a fish yourself
+
+A double ding means the fish has bitten — press **E** at once to hook it, then let go. From there a
+tone follows the fish while you fly your bar with **E**:
+
+- **Steady tone** — the fish is inside your bar and you are winning it. The pitch still drifts up or
+  down as the fish moves towards an edge, so you can correct before you lose it.
+- **Pulsing tone** — the fish is outside: high above you, low below you.
+- **Hold E** to raise the bar, **release** to let it sink, **tap** for a small hop.
+- If the bar is resting at the bottom, **let go of E and press again** — holding a key you were
+  already holding will not lift it. A thud tells you the bar has reached the bottom.
+- Blips mark each quarter of the catch bar as it fills or drains; a low double tick means the bar is
+  empty and the fish is about to get away.
+
+The cues follow your master volume.
 
 ## Controls page (pause menu → Controls)
 

@@ -118,6 +118,105 @@ internal static class Patches
         }
     }
 
+    /// <summary>
+    /// Speak the caption of a full-screen illustration or subtitle card.
+    ///
+    /// <c>IllustrationsGUI</c> is the game's storybook screen: a painted picture with one line of
+    /// narration under it, driven by the <c>Show Illustration</c> and <c>Show Subtitle</c> flow
+    /// nodes. It carries the witch's story about the previous graveyard keeper, the time machine's
+    /// memory replays and every other narrated flashback. None of it is a speech bubble, so the
+    /// dialogue hook never saw it and a blind player got the window name "Illustrations" and then
+    /// silence for the whole scene.
+    ///
+    /// Hooked on SetText rather than on the window opening, because the window opens EMPTY —
+    /// <c>Open()</c> blanks both the picture and the text and the flow node fills it a moment
+    /// later. The empty calls that <c>Open()</c> and <c>Hide()</c> make are skipped here.
+    ///
+    /// <c>__0</c> is the raw lng id: SetText localizes it into a local variable, so we resolve it
+    /// ourselves the same way it does rather than reading the label back (which the fade-out
+    /// tween would not have written yet anyway).
+    /// </summary>
+    public static void IllustrationsGUI_SetText_Postfix(string __0)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(__0)) return;   // Open()/Hide() clearing the card
+
+            var text = ScreenReader.StripNguiCodes(GJL.L(__0) ?? "").Trim();
+            // A missing translation comes back as the key itself or as "!key!" — a marker, not
+            // narration. Only the bracketed form is tested for '!', because a real caption may
+            // very well end in one.
+            if (string.IsNullOrEmpty(text) || text.Length <= 2
+                || text.Equals(__0, StringComparison.OrdinalIgnoreCase)
+                || (text.StartsWith("!") && text.EndsWith("!")))
+                return;
+
+            // The scene is talking — don't let the silent-NPC watchdog report the NPC who
+            // started it as having nothing to say.
+            InteractionDetector.NoteDialogueActivity();
+
+            var spoken = EnrichDayNumbers(text);
+            Plugin.Log.LogInfo($"[ILLUSTRATION] {spoken}");
+            // Non-interrupting, like a speech bubble: the previous line belongs to the same scene
+            // and the card is held on screen for a time computed from its own length.
+            ScreenReader.Say(spoken, interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[ILLUSTRATION] Error: {ex.Message}");
+        }
+    }
+
+    // The picture currently on the storybook card, so a redraw with the same name stays quiet.
+    // The four keeper stories call ShowIllustration once per narrated line from inside a loop
+    // (the picture never changes), which would otherwise describe the same drawing four times.
+    private static string _currentIllustration;
+
+    /// <summary>
+    /// Describe the drawing on the storybook card.
+    ///
+    /// These are full-screen painted scenes and the game says nothing about them. Four of them
+    /// (illustration_1..4) sit behind an NPC's tale of a previous graveyard keeper, where at least
+    /// the narration is spoken; the six sin windows in the church (illustration_sin_*) are shown
+    /// for five seconds with no text at all, so without this a blind player gets total silence
+    /// where a sighted one gets the whole point of the scene.
+    ///
+    /// The descriptions are ours, not the game's — written from the sprites themselves and kept in
+    /// the lang file under <c>illustration.desc.&lt;object name&gt;</c>, which is the name the
+    /// flowscript passes in. A picture we have no description for says nothing rather than
+    /// reading out an internal id.
+    /// </summary>
+    public static void IllustrationsGUI_ShowIllustration_Postfix(string __0)
+    {
+        try
+        {
+            // Open() and Hide() pass an empty name to clear the card — that ends the picture.
+            if (string.IsNullOrEmpty(__0)) { _currentIllustration = null; return; }
+            if (__0 == _currentIllustration) return;
+            _currentIllustration = __0;
+
+            var desc = Loc.Find("illustration.desc." + __0);
+            if (string.IsNullOrEmpty(desc))
+            {
+                Plugin.Log.LogInfo($"[ILLUSTRATION] picture '{__0}' has no description");
+                return;
+            }
+
+            Plugin.Log.LogInfo($"[ILLUSTRATION] picture {__0}");
+            // Non-interrupting, and deliberately before the caption: ShowIllustration runs just
+            // ahead of SetText in the same flow node, so the player hears what is on screen and
+            // then what is said about it. Spoken bare: a "Picture:" lead-in in front of every one
+            // of these was only overhead. The descriptions themselves are deliberately full —
+            // the card waits on screen, so there is room for the detail. (The intro's scenes are
+            // the exception and are kept terse; see CutsceneAnnouncer.IntroTick.)
+            ScreenReader.Say(desc, interrupt: false);
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.LogError($"[ILLUSTRATION] Error: {ex.Message}");
+        }
+    }
+
     public static void UIButtonColor_OnHover_Postfix(UIButtonColor __instance, bool isOver)
     {
         GUIAccessibility.OnHover(__instance, isOver);

@@ -25,7 +25,7 @@ both poll the keyboard at once. If you already have it, simply never press F1.
 ## Install
 
 There is no installer, and the mod does not look for your game folder — you extract one ZIP into
-it yourself. That is the whole install.
+it yourself.
 
 ### Which download to take
 
@@ -79,8 +79,6 @@ Four documents land next to `Graveyard Keeper.exe` as well —
 `Accessibility-Mod-CHANGELOG.md` and `Accessibility-Mod-LICENSE.txt`. They are there so the keys
 and the instructions are in the folder you are already standing in, not buried inside the mod.
 
-That is everything. Nothing needs to be run first, and no folders need creating by hand.
-
 ### Installing (the mod-only ZIP)
 
 If you already have BepInEx, extract `..._ModOnly.zip` into the **`BepInEx` folder inside** your
@@ -107,9 +105,9 @@ instead, which is bundled with it and needs nothing installed. NVDA, JAWS and Zo
 are driven directly, and braille works on the readers that support it. If no screen reader is
 running, speech falls back to the Windows SAPI voice exactly as it does on Steam.
 
-**It is tested and working, but less thoroughly than on Steam.** The mod is built against the Steam
-version of the game, and GOG's is older and differs in places. If something behaves oddly only on
-GOG, a report is very welcome.
+**It works.** GOG players have confirmed the mod running on their installs. It is built against
+the Steam version of the game and GOG's is older, so if something ever behaves oddly only on
+GOG, a report is still very welcome.
 
 ### Start the game
 
@@ -138,21 +136,26 @@ add or remove at any point in a playthrough.
 
 ## Known limitations
 
-- The game's opening intro is not narrated — its subtitles are drawn by a separate system that is
-  not hooked yet.
 - Linux and macOS are untested. Windows is verified. Playing through Proton works, but Prism
   cannot reach a Linux screen reader such as Orca from inside Proton; those DLLs have to be
   installed by hand, as a mod cannot do it in that case.
 - BepInEx Configuration Manager is not accessible (see above).
-- manual fishing is not accessible yet, but its possible to automatically fish.
-
-`Accessibility-Mod-CHANGELOG.md`, in the same folder, has the full list.
+- Manual fishing is now mostly accessible. The only thing not yet confirmed is if every fish can be caught as they have different requirements.
+- Auto-walk is still a bit buggy, it can still slip through where it should not. Sometimes it also claims to not find a way further, but you can walk around the obstacle manually and then auto-walk the rest.
+- The turn-by-turn guidance for manual walking is in, but can still behave oddly at times.
 
 ## Something went wrong?
 
 `BepInEx\LogOutput.log` inside the game folder records what the mod did. It is a plain text file,
 and the lines beginning with `Graveyard Keeper Accessibility` are this mod's. That log is the
 first thing worth looking at, and the most useful thing to attach to a bug report.
+
+Bug reports, questions and suggestions are welcome through any of these:
+
+- **GitHub** — [open an issue](https://github.com/Svenja001/Graveyard-Keeper-Accessibility-Mod/issues)
+- **Mastodon** — [@svenja@mstdn.games](https://mstdn.games/@svenja)
+- **Discord** — `@svenjadev`
+- **E-mail** — [stream@svenja-blog.de](mailto:stream@svenja-blog.de)
 
 ## Licence & credits
 

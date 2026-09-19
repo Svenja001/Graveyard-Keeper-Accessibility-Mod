@@ -247,6 +247,10 @@ internal static class ObjectNavigator
     // errors. We then pull the destination toward the player and retry until it lands on reachable
     // navmesh (the island's edge nearest the target), walk there, and report the remaining gap.
     private static int _pullbackTries = 0;
+    // Where this journey (or its latest re-plan) set off from, and how many times the pulled-back
+    // landing has been re-planned. See TryReplanFromPullbackLanding.
+    private static Vector2 _longWalkStartPos;
+    private static int _journeyReplans;
     // One fine-player-graph route attempt per long walk, after graph 0 has given up. See HandleNoRoute.
     private static bool _fineRouteTried;
     // The PLAYER, not the target, is the end with no node on the NPC navmesh — set by
@@ -265,6 +269,15 @@ internal static class ObjectNavigator
     private static NavigationTarget _escapeLegTarget;
     private static Vector2 _escapeLegRealDest;   // _longWalkDest parked while the hop borrows it
     private static int _escapeLegsUsed;
+
+    // Breadcrumb for the return glide. A Direct glide is the only way into a spot no graph can
+    // route to (the bed inside the house, the graveyard chest); the price is that once standing
+    // there, nothing routes back OUT either. So remember where the glide launched from, and whether
+    // graph 0 could route from that spot — see TryReturnGlideToOrigin.
+    private static Vector2 _glideOrigin;
+    private static bool _glideOriginValid;
+    private static int _returnGlidesUsed;
+
     private static Vector2 _longWalkDest;            // route end (approach point near the target)
     // Partial-route chaining: when the target is unreachable on the navmesh (e.g. an NPC inside
     // a building), graph 0 returns a path to the closest reachable node — the entrance/outside.
@@ -348,6 +361,26 @@ internal static class ObjectNavigator
     private static bool _rescanRetryPending = false;
     private static int _rescanRetryFramesLeft = 0;
     private static NavigationTarget _rescanRetryTarget;
+
+    // A body-sized ground drop is a DropResGameObject with a DYNAMIC Rigidbody2D and a kick
+    // component (ChangeKickableState(now_kickable: true)) while it lies there, so it is physically
+    // shovable. InteractionDest deliberately walks the player ONTO a drop's exact tile, and the
+    // moment the walk ends we hand control back and the body turns Dynamic again — the physics
+    // solver then separates the two overlapping colliders by ejecting the DROP, half a tile to a
+    // tile clear of the player. The arrival check has already passed by then (it measures at the
+    // arrival frame, while the drop is still underfoot), so the mod says "arrived" and plain E
+    // finds nothing to pick up. Measured twice in one session at the morgue: the same delivered
+    // corpse shoved 65u south-west on one delivery and 49u north-west on the next, with the player
+    // standing at the identical spot both times.
+    //
+    // So after arriving at a drop, watch it for a moment and ask the GAME whether it is pickable —
+    // DropResGameObject.currently_higlighted_obj, set from InteractionComponent.FindNearestDrop.
+    // That is exact and needs no distance guess: the pickup zone is the interaction box rotated to
+    // the player's facing, not a radius. If the drop never lights up, chase it once.
+    private static bool _dropSettlePending = false;
+    private static int _dropSettleFramesLeft = 0;
+    private static NavigationTarget _dropSettleTarget;
+    private static int _dropChases = 0;
 
     // World coordinates use 96 units per tile. Only surface points of interest
     // within a generous radius so the per-category lists stay manageable.
@@ -442,6 +475,14 @@ internal static class ObjectNavigator
     // A failed near-walk defers its one-shot rescan retry this many frames so the queued A* graph
     // update has processed before we re-issue the walk (same reason as the _escalatePending defer).
     private const int RescanRetryDelayFrames = 6;
+    // How long after arriving at a ground drop we keep asking whether the game highlights it, before
+    // concluding it was kicked clear and chasing it. Long enough for the solver to push it out and
+    // for it to slide to a stop (it carries the shove for a few fixed steps), short enough that the
+    // re-approach still feels like part of the same walk.
+    private const int DropSettleWindowFrames = 24;
+    // One chase is the fix for a kicked drop; a second covers the rare case where the chase kicks it
+    // again. Past that, stop walking the player around and let them nudge with WASD.
+    private const int MaxDropChases = 2;
     // TickLongWalk runs every frame, so this is in frames: how long the player may make less
     // than ProgressDistance of headway before we treat the native follow as stuck. Generous so
     // brief pauses at waypoints / slow stretches don't trip it.
@@ -458,6 +499,11 @@ internal static class ObjectNavigator
     private const float PullbackStep = 6f * TileSize;
     private const int MaxPullbackTries = 12;
     private const float PullbackMinToPlayer = 12f * TileSize;
+    // How many times a pulled-back landing may re-plan the journey from where it stopped. Two is
+    // enough for the case this exists for (a walk that starts boxed in and only needs to get out
+    // into open country before the road network can answer) and short enough that a genuinely
+    // unreachable target still reaches the beacon quickly. See TryReplanFromPullbackLanding.
+    private const int MaxJourneyReplans = 2;
 
     // Un-wedge search (see TryFreeWedgedPlayer): how far around the player we look for a walkable
     // graph-0 node that is actually connected to where they want to go, and how finely we sample.
@@ -604,6 +650,11 @@ internal static class ObjectNavigator
                     }
                 }
             }
+
+            // Just arrived at a ground drop: watch whether the arrival kicked it out of reach.
+            // Independent of the walk-retry chain below — it only ever runs when no walk is in
+            // progress, and it starts one of its own at most twice.
+            if (_dropSettlePending) TickDropSettle();
 
             // A near-walk failed and we forced a navmesh rescan around the target — re-issue the
             // walk once the queued graph update has processed (a few frames later). If it fails again
@@ -1149,6 +1200,14 @@ internal static class ObjectNavigator
         _currentRoute = null;
         _routeIsWorldMesh = false;
         _rescanRetryPending = false;
+        // A walk the player asked for replaces any drop chase still watching the last arrival, and
+        // gives the new arrival a fresh chase budget.
+        _dropSettlePending = false;
+        _dropChases = 0;
+        _routeRejectedForSolid = null;
+        // A clear spot remembered during an EARLIER walk is not somewhere to be teleported back to
+        // during this one; the wall guard records a fresh one on the first clear frame.
+        _hasLastClearPos = false;
         ClearArrivedTarget();
         // Asking to be walked there replaces any turn-by-turn guidance in progress.
         GuidedWalk.Stop(announce: false);
@@ -1251,6 +1310,14 @@ internal static class ObjectNavigator
         _currentRoute = null;
         _routeIsWorldMesh = false;
         _rescanRetryPending = false;
+        // A walk the player asked for replaces any drop chase still watching the last arrival, and
+        // gives the new arrival a fresh chase budget.
+        _dropSettlePending = false;
+        _dropChases = 0;
+        _routeRejectedForSolid = null;
+        // A clear spot remembered during an EARLIER walk is not somewhere to be teleported back to
+        // during this one; the wall guard records a fresh one on the first clear frame.
+        _hasLastClearPos = false;
         ClearArrivedTarget();
         GuidedWalk.Stop(announce: false);
         _escapeExitObject = best;
@@ -1298,7 +1365,12 @@ internal static class ObjectNavigator
     /// by Ctrl+Home on a near target and as the final approach when a compass beacon brings
     /// the player into range.
     /// </summary>
-    private static void WalkToTarget(NavigationTarget target)
+    /// <param name="silent">
+    /// Skip the "walking to X" announcement. Used by the drop settle chase, which is the tail of a
+    /// walk the player already heard announced a second ago — saying it again would just be the
+    /// same sentence twice for what is, to them, one continuous approach.
+    /// </param>
+    private static void WalkToTarget(NavigationTarget target, bool silent = false)
     {
         // Prefer the game's own interaction tile (nearest dock point) so we land exactly
         // where vanilla E/F works. Falls back to a point ~1 tile short of the object, along
@@ -1326,7 +1398,8 @@ internal static class ObjectNavigator
             _escalatePending = false;
             _shortWalkTarget = target;        // kept so an A* failure can escalate to fence-aware routing
             _walkFacePos = facePos;           // face it on arrival so plain E interacts/picks up
-            ScreenReader.Say(Loc.Fmt("nav.walking_to", target.Label, DistanceText(target.Distance)), interrupt: true);
+            if (!silent)
+                ScreenReader.Say(Loc.Fmt("nav.walking_to", target.Label, DistanceText(target.Distance)), interrupt: true);
             StartWalk(dest, target.Label, MovementComponent.GoToMethod.AStar);
         }
         finally
@@ -1352,9 +1425,11 @@ internal static class ObjectNavigator
         _routeNeedsRecompute = false;
         _exitAssisting = false;
         _escapeLegActive = false;
-        if (!afterEscapeLeg) _escapeLegsUsed = 0;
+        if (!afterEscapeLeg) { _escapeLegsUsed = 0; _returnGlidesUsed = 0; }
         _pullbackTries = 0;
+        if (!afterEscapeLeg) _journeyReplans = 0;
         _fineRouteTried = false;
+        _routeRejectedForSolid = null;
         _startOffWorldMesh = false;
         _routeReachesTarget = true;
         _finalPartial = false;
@@ -1363,6 +1438,7 @@ internal static class ObjectNavigator
         var pp = MainGame.me?.player?.pos ?? Vector2.zero;
         _longWalkProgressPos = pp;
         _longWalkAnnouncePos = pp;
+        _longWalkStartPos = pp;
         if (!afterEscapeLeg)
             ScreenReader.Say(Loc.Fmt("nav.walking_to_dir", target.Label, DirectionTo(target), DistanceText(Vector2.Distance(pp, target.Position))), interrupt: true);
         _log?.LogInfo($"[NAVIGATOR] Long walk started to {target.Label}" +
@@ -1496,7 +1572,14 @@ internal static class ObjectNavigator
     /// legitimately threading gaps graph 0 calls solid — that is the entire reason it was asked —
     /// so checking it against graph 0 would reject every route it ever produces.
     /// </param>
-    private static void StartNativePathWalk(List<Vector3> waypoints, bool checkAgainstWorldMesh = true)
+    /// <param name="fromWorldMesh">
+    /// Whether this route came from the road network, which is what a wall recovery must not
+    /// discard. Normally the same thing as <paramref name="checkAgainstWorldMesh"/>; passed
+    /// separately only by <see cref="WalkRejectedRouteAnyway"/>, which re-issues a road route with
+    /// the checks off and must not have it demoted to a fine-graph route in the process.
+    /// </param>
+    private static void StartNativePathWalk(List<Vector3> waypoints, bool checkAgainstWorldMesh = true,
+                                            bool? fromWorldMesh = null)
     {
         try
         {
@@ -1518,6 +1601,35 @@ internal static class ObjectNavigator
                 _log?.LogWarning($"[NAVIGATOR] Graph-0 route cuts through solid ground near {corner.Value}; guiding instead");
                 BeaconBail("route would pass through geometry");
                 return;
+            }
+
+            // Second, finer pass. The check above can only see obstacles graph 0 itself calls
+            // solid, which is why fences, tree trunks and cliff lips sailed through it. Ask physics
+            // what the body would really have hit, and route AROUND it on the fine player graph —
+            // which is built from these same colliders — rather than gliding through it.
+            //
+            // Only graph-0 routes get here. A fine-graph route is not re-checked, which is both
+            // correct (it already respects these colliders) and what stops this looping.
+            if (checkAgainstWorldMesh)
+            {
+                var hit = FirstRouteLegThroughSolid(path, out var what);
+                if (hit.HasValue)
+                {
+                    _log?.LogWarning($"[NAVIGATOR] Road route passes through '{what}' at {hit.Value}; routing around it");
+                    _routeRejectedForSolid = path;
+                    // Shares the one fine-graph attempt per walk with the wall recovery, on
+                    // purpose. If this attempt succeeds we are already ON the fine graph, so
+                    // recovery 2's "switch to the fine graph" has nothing left to do; if it fails,
+                    // it failed seconds ago and would fail again. Either way the budget is spent
+                    // on the same question.
+                    if (!_fineRouteTried && TryFineGraphRoute("road route passes through solid ground",
+                                                             WalkRejectedRouteAnyway))
+                        return;
+                    // The fine graph was already spent on this walk, or could not be started at
+                    // all. Walk the original rather than lose the journey.
+                    WalkRejectedRouteAnyway();
+                    return;
+                }
             }
 
             var finalDest = (Vector2)path[path.Count - 1];
@@ -1547,7 +1659,7 @@ internal static class ObjectNavigator
             _currentRoute = path;
             // checkAgainstWorldMesh is only ever true for a graph-0 route, so it doubles as "this
             // route came from the road network" — the thing a wall recovery must not discard.
-            _routeIsWorldMesh = checkAgainstWorldMesh;
+            _routeIsWorldMesh = fromWorldMesh ?? checkAgainstWorldMesh;
 
             _isWalking = true;
             _walkWatchdog = 0;
@@ -1609,6 +1721,95 @@ internal static class ObjectNavigator
     /// Slightly under one graph-0 node (76 units), so no node on a leg can be stepped over.
     private const float RouteProbeStep = 64f;
 
+    /// <summary>
+    /// Walk the route the follower is about to be given and return the first point where a real
+    /// COLLIDER sits on it, naming what it was, or null if the route is clean.
+    ///
+    /// This is the companion to <see cref="FirstRouteLegThroughGeometry"/>, and the reason clipping
+    /// survived that one: it asks graph 0 — the same 76-unit grid the route was computed on — so
+    /// anything thinner than a node is invisible to it, and where graph 0 has no data at all the
+    /// answer is "clear". Measured over one play session: it rejected NOTHING while the player
+    /// passed through 87 solid things, 78 of them on this very code path.
+    ///
+    /// Asks physics instead — what the player's body would have hit had it not been Kinematic.
+    ///
+    /// Walls AND props count here, unlike the per-frame wall guard, which lets props through
+    /// because refusing to walk past a chair would take the indoor walks away. That argument does
+    /// not apply at route level: a route rejected here is re-routed AROUND the obstacle, not
+    /// stopped in front of it, so a fence can be out of bounds without a chair blocking anything.
+    /// </summary>
+    private static Vector2? FirstRouteLegThroughSolid(List<Vector3> path, out string what)
+    {
+        what = null;
+        try
+        {
+            if (path == null || path.Count < 2) return null;
+
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                Vector2 a = path[i], b = path[i + 1];
+                var delta = b - a;
+                float length = delta.magnitude;
+                if (length <= SolidProbeStep) continue;
+                var dir = delta / length;
+
+                // Skirt the two ends of the whole route, the same concession
+                // StraightLineIsWalkable makes and for the same reason: the player very often
+                // starts pressed against the station they were just using, and the last waypoint is
+                // by definition right up against the thing being walked to. Without this a route
+                // would be rejected before it began roughly whenever the player stood anywhere
+                // interesting. Only the FIRST and LAST legs are skirted — a mid-route waypoint has
+                // no such excuse.
+                float from = (i == 0) ? SolidEndSkirt : SolidProbeStep;
+                float to = (i == path.Count - 2) ? length - SolidEndSkirt : length - SolidProbeStep * 0.5f;
+
+                for (float t = from; t < to; t += SolidProbeStep)
+                {
+                    var solid = SolidAt(a + dir * t, out _);
+                    if (solid != null) { what = solid; return a + dir * t; }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // A probe that cannot run must never be the reason auto-walk stops working.
+            _log?.LogWarning($"[NAVIGATOR] Route solidity probe failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// Unity layer 9, the game's "Characters" layer. ComponentsManager.CheckCharacterStuff puts
+    /// every character on it and drags every non-character off it, so it is a reliable "this thing
+    /// walks around under its own power" test — see <see cref="SolidAt(Vector2, out bool)"/>.
+    private const int CharactersLayer = 9;
+
+    /// A sixth of a tile. Finer than <see cref="RouteProbeStep"/> because this is looking for real
+    /// colliders rather than grid flags: the measured crossings start at 0.17 tiles, so a
+    /// quarter-tile stride could straddle the thin ones entirely and see nothing.
+    private const float SolidProbeStep = 16f;
+
+    /// Half a tile of grace at each end of a route — see FirstRouteLegThroughSolid.
+    private const float SolidEndSkirt = 0.5f * TileSize;
+
+    /// The road route a solidity check rejected, kept so that if nothing can route around the
+    /// obstacle we can still walk it rather than abandoning the journey over a bush.
+    private static List<Vector3> _routeRejectedForSolid;
+
+    /// <summary>
+    /// Nothing could route around the obstacle on the road route. Walking through it is still a far
+    /// better outcome for the player than losing the journey, so re-issue the original route — with
+    /// the check off, which is also what stops this from looping — but keep it marked as a road
+    /// route so a later wall recovery still treats it as one.
+    /// </summary>
+    private static void WalkRejectedRouteAnyway()
+    {
+        var path = _routeRejectedForSolid;
+        _routeRejectedForSolid = null;
+        if (path == null || !_longWalkActive) { FallBackToEscapeOrBeacon(); return; }
+        _log?.LogInfo("[NAVIGATOR] Nothing routes around it; walking the road route as it is");
+        StartNativePathWalk(path, checkAgainstWorldMesh: false, fromWorldMesh: true);
+    }
+
     private static void OnNativeWalkComplete()
     {
         _isWalking = false;
@@ -1665,10 +1866,16 @@ internal static class ObjectNavigator
             // so it fails and falsely says "Could not reach" even though we arrived. Just face the
             // target so vanilla E interacts. If we only got to a pulled-back island edge, the
             // player is still some way off — report the remaining gap instead of "Arrived".
-            _longWalkActive = false;
             var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
             var remaining = Vector2.Distance(playerPos, target.Position);
             _log?.LogInfo($"[NAVIGATOR] Native walk ended {remaining:F0}u from {target.Label}");
+
+            // We may not actually be anywhere near the target: see TryReplanFromPullbackLanding.
+            if (remaining > FinalApproachReach &&
+                TryReplanFromPullbackLanding(target, playerPos, remaining))
+                return;
+
+            _longWalkActive = false;
 
             // Stations/build desks need the player within ~1 tile to interact; doors/teleports can
             // be triggered from the lenient AtTargetDistance. Pick the right "arrived" radius so a
@@ -1686,6 +1893,9 @@ internal static class ObjectNavigator
                 FacePlayerAtTarget();
                 SetArrivedTarget(target.Object);
                 ScreenReader.Say(Loc.Fmt("nav.arrived_at", target.Label, DistanceText(remaining)), interrupt: true);
+                // A drop we just walked onto gets shoved clear the moment the body turns Dynamic
+                // again; watch it and chase it if E would no longer reach it.
+                ArmDropSettleCheck(target);
             }
             else if (remaining <= FinalApproachReach)
             {
@@ -1718,6 +1928,69 @@ internal static class ObjectNavigator
             // Partial route still closing in: re-route from here to continue into the next region.
             _routeNeedsRecompute = true;
         }
+    }
+
+    /// <summary>
+    /// A journey that "arrived" a long way from where the player asked to go, because the thing it
+    /// actually walked to was not the target at all.
+    ///
+    /// When graph 0 cannot route to the destination, <see cref="HandleNoRoute"/> drags
+    /// <see cref="_longWalkDest"/> toward the player a step at a time until something answers. That
+    /// is a good idea — it gets a player off an island and moving. What it is NOT is a shorter
+    /// version of the same journey: after twelve pulls the destination can be a point next to where
+    /// the player is standing, and whichever graph finally routes to it sets _routeReachesTarget,
+    /// because as far as it knows it did reach the destination it was given. The walk then ends,
+    /// and the player is told "as close as possible" about somewhere they never set off toward.
+    ///
+    /// Log, 2026-09-19: asked for the fishing spot from the vineyard, twelve pulls, a 199-point
+    /// fine-graph route to a spot ~13 tiles away, and "Native walk ended 6952u from Angelplatz am
+    /// Fluss" — ninety-one tiles short, announced as the best that could be done. The player asked
+    /// again from exactly where it had left them and graph 0 returned an 85-waypoint route that
+    /// reached the spot within 29 units. Nothing was in the way; the journey simply stopped
+    /// believing in itself one leg early, and the player had to know to ask a second time.
+    ///
+    /// So: when a pulled-back leg lands us well short, and the leg actually MOVED us, re-plan the
+    /// whole journey from here instead of announcing a result. The position is new, so graph 0 is
+    /// being asked a genuinely different question — which is exactly what the player did by hand.
+    /// Bounded by <see cref="MaxJourneyReplans"/>, and only where the leg made progress, so a walk
+    /// that truly cannot get closer still reaches "as close as possible" or the beacon.
+    /// </summary>
+    private static bool TryReplanFromPullbackLanding(NavigationTarget target, Vector2 playerPos, float remaining)
+    {
+        // Only the pulled-back case. A route that was aimed at the real destination all along and
+        // ended short has genuinely got as close as it can, and that is what we should say.
+        if (_pullbackTries <= 0) return false;
+        if (_journeyReplans >= MaxJourneyReplans) return false;
+
+        // The leg has to have carried us somewhere. Re-planning from the spot we just failed at
+        // asks the same graph the same question and is how this would loop.
+        if (Vector2.Distance(playerPos, _longWalkStartPos) < TileSize)
+        {
+            _log?.LogInfo($"[NAVIGATOR] Pulled-back leg landed {remaining:F0}u short of {target.Label} " +
+                          "without moving us; not re-planning");
+            return false;
+        }
+
+        _journeyReplans++;
+        _pullbackTries = 0;
+        _fineRouteTried = false;
+        _routeRejectedForSolid = null;
+        _startOffWorldMesh = false;
+        _routeReachesTarget = true;
+        _finalPartial = false;
+        _bestEndGap = float.MaxValue;
+        _stalledRecomputes = 0;
+        _longWalkStuckTicks = 0;
+        _longWalkStartPos = playerPos;
+        _longWalkProgressPos = playerPos;
+        _longWalkAnnouncePos = playerPos;
+
+        // Back to the REAL interaction tile — _longWalkDest is still the pulled-back point.
+        _longWalkDest = InteractionDest(target, out _);
+        _log?.LogInfo($"[NAVIGATOR] Pulled-back leg landed {remaining:F0}u short of {target.Label}; " +
+                      $"re-planning from {playerPos} (replan {_journeyReplans}/{MaxJourneyReplans})");
+        RequestGraph0Route(playerPos, _longWalkDest);
+        return true;
     }
 
     private static void OnNativeWalkFailed()
@@ -2210,9 +2483,18 @@ internal static class ObjectNavigator
         if (pl != null && Vector2.Distance(pl.pos, _longWalkTarget.Position) <= LongWalkStartDistance)
         {
             var target = _longWalkTarget;
-            _longWalkActive = false;
             _log?.LogInfo($"[NAVIGATOR] Graph-0 unreachable but {target.Label} is near; direct glide fallback");
-            DirectGlideTo(target);
+            if (DirectGlideTo(target)) return;
+
+            // A wall is on the line. Before handing a blind player the compass: if we are standing
+            // where an earlier glide dropped us, go back to where it launched from — that spot is
+            // on the navmesh by construction, and the wall we cannot cross here is one the route
+            // from there goes around. Keeps _longWalkActive, so the resumed walk continues silently.
+            if (_returnGlidesUsed < MaxReturnGlides && TryReturnGlideToOrigin()) return;
+
+            _longWalkActive = false;
+            ScreenReader.Say(Loc.Fmt("nav.manual_guidance", target.Label), interrupt: true);
+            GuidedWalk.StartTo(target, announceStart: false, allowBeaconFallback: true);
             return;
         }
 
@@ -2226,7 +2508,11 @@ internal static class ObjectNavigator
     /// gets driven to the bed/chest inside the house. StartWalk disables control (Kinematic body), so
     /// the straight line slides along without colliding; on Direct failure it releases and reports.
     /// </summary>
-    private static void DirectGlideTo(NavigationTarget target)
+    /// <returns>
+    /// True if the glide was started (the caller must not do anything else). False if a wall sits on
+    /// the line, in which case the walk is untouched and still active for the caller to fall back.
+    /// </returns>
+    private static bool DirectGlideTo(NavigationTarget target)
     {
         var dest = InteractionDest(target, out var facePos);
 
@@ -2260,17 +2546,106 @@ internal static class ObjectNavigator
         // after SnapToWalkable, because that call is what refreshes the player graph over the whole
         // player->target span, so the navmesh half of the test has data to answer with.
         // _shortWalkTarget is assigned first so the probe knows not to count the target itself.
-        var here = PlayerBodyPos(MainGame.me?.player);
+        var player = MainGame.me?.player;
+        var here = PlayerBodyPos(player);
         if (!StraightLineIsWalkable(here, dest))
         {
-            _log?.LogWarning($"[NAVIGATOR] Direct glide to {target.Label} would pass through geometry; guiding instead");
-            ScreenReader.Say(Loc.Fmt("nav.manual_guidance", target.Label), interrupt: true);
-            GuidedWalk.StartTo(target, announceStart: false, allowBeaconFallback: true);
-            return;
+            _log?.LogWarning($"[NAVIGATOR] Direct glide to {target.Label} would pass through geometry");
+            return false;
         }
 
+        // Drop the breadcrumb. This glide may be about to land the player somewhere no graph has a
+        // node — that is precisely when it is used — and the spot we are leaving is the one known to
+        // route, so it is the only way back out. Recorded even when graph 0 cannot snap here: the
+        // flag says how much to trust it, TryReturnGlideToOrigin decides.
+        if (player != null)
+        {
+            _glideOrigin = player.pos;
+            _glideOriginValid = TrySnapGraph0(player.pos, out _, out _);
+        }
+
+        _longWalkActive = false;
         // No fresh "Walking to…" — StartLongWalk already announced this walk; a second would double up.
         StartWalk(dest, target.Label, MovementComponent.GoToMethod.Direct);
+        return true;
+    }
+
+    /// One per walk. If going back to where we came from does not produce a route, a second trip
+    /// would only walk the same line again; guided walk takes over instead.
+    private const int MaxReturnGlides = 1;
+
+    /// The breadcrumb is only meaningful while the player is still standing roughly where the glide
+    /// put them. Beyond this they have walked off by hand and the spot says nothing about them.
+    private const float ReturnGlideMaxTiles = 8f;
+
+    /// Only "are we still standing on the breadcrumb". This is NOT the escape leg's 1.5-tile
+    /// minimum and must not be tied to it: that one stops a pointless nudge from burning the one
+    /// exploration a walk gets, and it measures progress TOWARD the goal. Here the whole point is a
+    /// short hop backwards, and the value of it has nothing to do with its length — half a tile is
+    /// enough to land on a graph-0 node (they are 76 units) and that is all that is being bought.
+    /// Gating this on the escape minimum is what made the first build a no-op: the bed→door
+    /// breadcrumb is 1.4 tiles, so every single return glide was declined (2026-09-05 log).
+    private const float ReturnGlideMinTiles = 0.5f;
+
+    /// <summary>
+    /// Go back to where the last Direct glide launched from, then resume the walk from there.
+    ///
+    /// THE SITUATION, from the 2026-09-05 log. Inside the house the mod glides the player to the
+    /// bed at (2452.9,-6247.6) — a spot with no walkable node on graph 0 AND none on the player
+    /// graph (both were logged at the time: "Route dest … has no walkable graph-0 node", "No
+    /// walkable player-graph node near target"). Every walk asked for from there is then dead on
+    /// arrival: graph-0 routing has no start node, the exploration flood reaches NOWHERE (zero
+    /// nodes, not a small pocket — <see cref="TrySqueezeOutOfPocket"/> cannot help, it needs a
+    /// pocket to compare graph areas against), and the one remaining tool, a straight glide, is
+    /// correctly refused by the wall between the bedroom and the kitchen. The same walk to the same
+    /// oven succeeded earlier in that log purely because the player happened to be standing at the
+    /// chest instead, which does have graph nodes.
+    ///
+    /// Vetoing the glide IN is not the fix — it is the only way the mod reaches the bed or the
+    /// graveyard chest at all, and refusing it strands a blind player at the door. The way out is
+    /// the way in, backwards: the launch spot routed a moment ago, and the line back to it is one
+    /// we have already glided along, so <see cref="StraightLineIsWalkable"/> passes it.
+    ///
+    /// Driven as an escape leg, so the arrival handler in OnNativeWalkComplete resumes the real walk
+    /// silently — to the player this is one walk that took a moment to get going.
+    /// </summary>
+    /// <returns>True if the return glide was started (the caller must not do anything else).</returns>
+    private static bool TryReturnGlideToOrigin()
+    {
+        // Logged on every decline, deliberately. The first build of this declined silently and the
+        // log showed only the glide veto it was supposed to rescue — which reads exactly like the
+        // code not running at all, and cost a whole test round to tell apart.
+        if (!_glideOriginValid) { _log?.LogInfo("[NAVIGATOR] No return glide: no breadcrumb from a glide that routed"); return false; }
+        if (!_longWalkActive) return false;
+        var pl = MainGame.me?.player;
+        if (pl == null) return false;
+
+        var from = pl.pos;
+        float d = Vector2.Distance(from, _glideOrigin);
+        if (d < ReturnGlideMinTiles * TileSize || d > ReturnGlideMaxTiles * TileSize)
+        {
+            _log?.LogInfo($"[NAVIGATOR] No return glide: breadcrumb {_glideOrigin} is {d / TileSize:F1} tiles away");
+            return false;
+        }
+        if (!StraightLineIsWalkable(PlayerBodyPos(pl), _glideOrigin)) return false;
+
+        _returnGlidesUsed++;
+        _glideOriginValid = false;   // consumed: we are leaving that spot behind either way
+        _escapeLegTarget = _longWalkTarget;
+        _escapeLegRealDest = _longWalkDest;
+        _escapeLegActive = true;
+        _longWalkDest = _glideOrigin;
+        _routeReachesTarget = true;
+        _finalPartial = false;
+        _log?.LogInfo($"[NAVIGATOR] Stranded where a glide dropped us; gliding back to {_glideOrigin} " +
+                      $"({d / TileSize:F1} tiles) before {_escapeLegTarget.Label}");
+
+        // Two points, walked Kinematic by the native follower — the same vehicle the squeeze uses,
+        // and the same line we came in on.
+        StartNativePathWalk(
+            new List<Vector3> { new Vector3(from.x, from.y, 0f), new Vector3(_glideOrigin.x, _glideOrigin.y, 0f) },
+            checkAgainstWorldMesh: false);
+        return true;
     }
 
     private static NavigationTarget? NearestDoor()
@@ -2497,8 +2872,20 @@ internal static class ObjectNavigator
             run += WallProbeStep;
             if (run <= passableThickness) continue;
 
+            // Over the limit, so the answer is already no. Keep probing anyway, purely to report
+            // how thick the thing actually is: bailing here made the message always say exactly one
+            // step (0.25 tiles) whether it had hit a sliver or a cliff face, which is useless for
+            // deciding what a sane passableThickness would be — and it did mislead a reading of the
+            // log once (2026-09-05). The decision above is unchanged; only the number is now true.
+            float measured = run;
+            for (float u = t + WallProbeStep; u < length - WallProbeStep; u += WallProbeStep)
+            {
+                if (SolidAt(from + dir * u, out _) == null) break;
+                measured += WallProbeStep;
+            }
+
             _log?.LogInfo($"[NAVIGATOR] Straight line rejected: wall '{runName}' fills " +
-                          $"{run / TileSize:F2} tiles from {runAt}");
+                          $"{measured / TileSize:F2} tiles from {runAt}");
             return false;
         }
 
@@ -2557,6 +2944,21 @@ internal static class ObjectNavigator
                 if (col == null || col.isTrigger) continue;
                 if (playerLayer >= 0 &&
                     Physics2D.GetIgnoreLayerCollision(playerLayer, col.gameObject.layer)) continue;
+
+                // Creatures are not obstacles. A villager, a zombie worker or a mob standing on
+                // the route is a SNAPSHOT of where somebody happened to be at planning time; a
+                // second later they have walked on, and during a scripted walk our own body is
+                // Kinematic and slides past them regardless. Counting them cost a whole journey
+                // on 2026-09-19: an 85-waypoint road route that reached the fishing spot within
+                // 29 units was thrown away because 'worker_zombie_1(Clone)' was standing on it,
+                // and the 628-point fine-graph detour that replaced it drove into the cliff at
+                // 'steep_2 (15)' three times and lost the walk.
+                //
+                // Layer 9 is the game's own answer to "is this a creature": ComponentsManager
+                // .CheckCharacterStuff forces every ObjectDefinition.IsCharacter() object onto it
+                // and forces everything else off it, logging a warning if it finds a stray. So the
+                // layer is authoritative here in a way an obj_id or a component lookup is not.
+                if (col.gameObject.layer == CharactersLayer) continue;
 
                 var wgo = col.GetComponentInParent<WorldGameObject>();
                 if (wgo != null)
@@ -2717,10 +3119,9 @@ internal static class ObjectNavigator
                 if (Time.unscaledTime - _lastWallReportAt > 5f)
                 {
                     _lastWallReportAt = Time.unscaledTime;
-                    NearRouteBeingFollowed(pos, out float grazeOffRoute);
                     _log?.LogInfo(
                         $"[NAVIGATOR] Brushing the edge of '{inside}' at {pos} during {WalkDescription()} " +
-                        $"({grazeOffRoute / TileSize:F1} tiles off route) — carrying on");
+                        $"({OffRouteText(pos)}) — carrying on");
                 }
                 _insideWallTicks = 0;
                 return;
@@ -2757,10 +3158,9 @@ internal static class ObjectNavigator
                 return;
             }
 
-            NearRouteBeingFollowed(pos, out float offRoute);
             _log?.LogWarning(
                 $"[NAVIGATOR] Inside wall '{inside}' at {pos} for {_insideWallTicks} frames during " +
-                $"{WalkDescription()} ({offRoute / TileSize:F1} tiles off route), " +
+                $"{WalkDescription()} ({OffRouteText(pos)}), " +
                 $"{_crossingDistance / TileSize:F2} tiles inside it and not near its edge; " +
                 "stopping and stepping back out");
             StopInsideWall();
@@ -2892,6 +3292,20 @@ internal static class ObjectNavigator
     /// nearest waypoint — waypoints on a long road route are most of a tile apart, so measuring to
     /// the points alone reports a player walking perfectly down the middle of a leg as being off it.
     /// </summary>
+    /// <summary>
+    /// How far off the followed route this point is, for a log line. A SHORT walk has no injected
+    /// route to be off, so <see cref="NearRouteBeingFollowed"/> leaves the distance at
+    /// float.MaxValue — which printed as "3544608000000000000000000000000000000.0 tiles off route".
+    /// Both wall-guard messages go through here so the two cannot drift apart again.
+    /// </summary>
+    private static string OffRouteText(Vector2 pos)
+    {
+        NearRouteBeingFollowed(pos, out float offRoute);
+        return (offRoute < float.MaxValue)
+            ? $"{offRoute / TileSize:F1} tiles off route"
+            : "no route to be off";
+    }
+
     private static bool NearRouteBeingFollowed(Vector2 pos, out float distance)
     {
         distance = float.MaxValue;
@@ -2965,7 +3379,20 @@ internal static class ObjectNavigator
                 _log?.LogWarning($"[NAVIGATOR] Could not step back out of the wall: {ex.Message}");
             }
         }
-        _hasLastClearPos = false;
+        // NOT cleared. It used to be, and that is how a journey ended with the player left standing
+        // INSIDE the geometry: the resumed route drove straight back into the same collider without
+        // ever passing over clear ground, so no new clear position was ever recorded, and the final
+        // give-up had nowhere to put them back to. The beacon then handed guidance to a player boxed
+        // in on all four sides, which is the worst place this code can leave anybody. Stepping back
+        // to the same spot twice costs nothing; being stranded inside a wall costs the journey.
+
+        // The pullback is a teleport, so the crossing measurement has to start again — otherwise the
+        // jump backwards is added to "how far we have been carried through this thing" and the next
+        // stop fires at the 12-frame minimum with a distance it never walked (2.03 tiles, then 4.61,
+        // then 5.33, in one journey to the witch on 2026-09-05).
+        _crossingName = null;
+        _crossingDistance = 0f;
+        _crossingFrames = 0;
 
         // Try to carry on from where they now stand, rather than giving the problem back.
         //
@@ -2986,12 +3413,55 @@ internal static class ObjectNavigator
         {
             var pos = MainGame.me?.player?.pos ?? _lastClearPlayerPos;
 
-            if (TryResumeRouteAfterWall(pos)) return;
-
-            if (_routeIsWorldMesh)
+            // FIRST hit: assume the road is right. One clipped cliff corner is not a reason to throw
+            // away a 152-waypoint road route — that mistake is what the comment above is about.
+            if (_wallRecoveries == 1)
             {
-                _log?.LogInfo($"[NAVIGATOR] Walked into a wall (recovery {_wallRecoveries}); " +
-                              "re-asking the road network rather than dropping to the fine graph");
+                if (TryResumeRouteAfterWall(pos)) return;
+
+                if (_routeIsWorldMesh)
+                {
+                    _log?.LogInfo($"[NAVIGATOR] Walked into a wall (recovery {_wallRecoveries}); " +
+                                  "re-asking the road network rather than dropping to the fine graph");
+                    RequestGraph0Route(pos, _longWalkDest);
+                    return;
+                }
+            }
+
+            // SECOND hit on the same journey: stop believing the route. It has now driven the player
+            // into geometry twice, and resuming it a second time cannot help — the tail is re-injected
+            // as the new route, so the nearest waypoint to the pulled-back position is index 0 again
+            // and the resume restarts two waypoints along, walking the identical failing stretch.
+            // (Log, 2026-09-05: "resuming the same road route from waypoint 34/92", then "from
+            // waypoint 2/58", then the beacon — a route heading west into the river at the swamp
+            // crossing, three attempts at the same water's edge.)
+            //
+            // Ask the FINE graph instead, which is exactly what the player then did by hand: they
+            // stepped one tile back east, asked again, and it returned a 712-waypoint route SOUTH
+            // over the stone bridge — the real way to the witch, which the road network never
+            // offered. Deliberately not the first move: the fine graph is scanned as a thin strip
+            // between player and destination, so preferring it on hit one is what once replaced a
+            // road with a straight corridor across the cliffs. Second chances go to the other graph.
+            //
+            // "The OTHER graph" has to mean the other one BOTH WAYS, and for a long time it did
+            // not. Everything above is written for a route that came from the road, and the only
+            // rung that changes graph is guarded by _routeIsWorldMesh — so when the route was
+            // already a fine-graph one (the road was rejected at planning time, or graph 0 gave
+            // up), recovery 1 and recovery 2 were the SAME call: TryFineGraphRoute, same graph,
+            // from the same pulled-back position, because the step-back always returns the player
+            // to the same clear spot. It answered with the identical route both times and the
+            // player drove into the identical wall both times.
+            //
+            // Log, 2026-09-19, walking to the fishing spot: a 628-point fine-graph route hit
+            // 'steep_2 (15)', stepped back to (3047.6, 1911.5), re-asked the fine graph -> 455
+            // waypoints, hit the same cliff, stepped back to (3047.6, 1911.5) again, re-asked the
+            // fine graph -> 455 waypoints again, hit it a third time, beacon. The beacon then
+            // asked GRAPH 0 from that very position and got a 50-waypoint route around the slope
+            // in one go. The way round was there the whole time, on the graph nothing asked.
+            if (_wallRecoveries >= 2 && !_routeIsWorldMesh)
+            {
+                _log?.LogInfo($"[NAVIGATOR] Walked into a wall (recovery {_wallRecoveries}); the fine " +
+                              "graph has now failed twice from the same spot — asking the road network");
                 RequestGraph0Route(pos, _longWalkDest);
                 return;
             }
@@ -2999,6 +3469,14 @@ internal static class ObjectNavigator
             if (TryFineGraphRoute($"walked into a wall (recovery {_wallRecoveries})",
                                   () => BeaconBail("no way round the wall")))
                 return;
+
+            if (_routeIsWorldMesh)
+            {
+                _log?.LogInfo($"[NAVIGATOR] Walked into a wall (recovery {_wallRecoveries}); " +
+                              "the fine graph had nothing either — re-asking the road network");
+                RequestGraph0Route(pos, _longWalkDest);
+                return;
+            }
         }
 
         if (_longWalkActive)
@@ -3622,6 +4100,99 @@ internal static class ObjectNavigator
     /// closer/more aligned. Ground drops (<paramref name="obj"/> == null) are excluded: they're
     /// picked up via the game's own highlighted-drop path, not the interaction component.
     /// </summary>
+    /// <summary>
+    /// Arm the post-arrival settle watch for a ground drop — see <see cref="_dropSettlePending"/>
+    /// for why a drop is not where we left it a moment later.
+    ///
+    /// Only drops the game can highlight are worth watching. Small items and tech points are never
+    /// highlighted (InteractionComponent.FindNearestDrop skips both) because walking near them
+    /// collects them outright, which the walk has just done — watching those would chase a drop that
+    /// is already in the inventory, or one that can never light up.
+    /// </summary>
+    private static void ArmDropSettleCheck(NavigationTarget target)
+    {
+        _dropSettlePending = false;
+        if (!target.IsDrop || ReferenceEquals(target.DropGo, null) || target.DropGo == null) return;
+        try
+        {
+            var drop = target.DropGo.GetComponent<DropResGameObject>();
+            if (drop == null || drop.is_collected) return;
+            var res = drop.res;
+            if (res == null || res.is_tech_point || res.definition == null || res.definition.is_small) return;
+
+            _dropSettleTarget = target;
+            _dropSettleFramesLeft = DropSettleWindowFrames;
+            _dropSettlePending = true;
+        }
+        catch { /* the settle watch must never be the thing that breaks an arrival */ }
+    }
+
+    /// <summary>
+    /// One frame of the drop settle watch. Ends the moment the game highlights the drop (it is
+    /// pickable, nothing to do and nothing to say), and otherwise re-approaches once the window
+    /// runs out. Silent throughout: to the player this is the tail of the walk they already asked
+    /// for, not a new one.
+    /// </summary>
+    private static void TickDropSettle()
+    {
+        try
+        {
+            // Anything that moves the player on purpose owns them now — a new walk, the beacon,
+            // guidance, a cutscene. Drop the watch rather than fight it for control.
+            if (_isWalking || _longWalkActive || _beaconActive || _gameOwnsPlayer)
+            {
+                _dropSettlePending = false;
+                return;
+            }
+
+            var go = _dropSettleTarget.DropGo;
+            var drop = (go == null) ? null : go.GetComponent<DropResGameObject>();
+            if (drop == null || drop.is_collected)
+            {
+                _dropSettlePending = false;   // picked up or despawned — the walk did its job
+                return;
+            }
+
+            // The game's own answer to "would E pick this up": set by FindNearestDrop from the
+            // interaction box, so it already accounts for the player's facing.
+            if (ReferenceEquals(DropResGameObject.currently_higlighted_obj, drop))
+            {
+                _dropSettlePending = false;
+                _dropChases = 0;
+                return;
+            }
+
+            if (--_dropSettleFramesLeft > 0) return;
+            _dropSettlePending = false;
+
+            if (_dropChases >= MaxDropChases)
+            {
+                _log?.LogInfo($"[NAVIGATOR] {_dropSettleTarget.Label} still not in reach after " +
+                              $"{_dropChases} chase(s); leaving it to the player");
+                return;
+            }
+
+            // Re-read where the drop actually ended up — target.Position is where it was when the
+            // list was last built, which is the spot we just walked to and it has left.
+            var target = _dropSettleTarget;
+            var pos = (Vector2)go.transform.position;
+            var playerPos = MainGame.me?.player?.pos ?? Vector2.zero;
+            target.Position = pos;
+            target.Distance = Vector2.Distance(pos, playerPos);
+            _dropSettleTarget = target;
+            _dropChases++;
+
+            _log?.LogInfo($"[NAVIGATOR] {target.Label} was kicked clear on arrival " +
+                          $"(now {target.Distance:F0}u at {pos}); re-approaching (chase {_dropChases})");
+            WalkToTarget(target, silent: true);
+        }
+        catch (Exception ex)
+        {
+            _dropSettlePending = false;
+            _log?.LogWarning($"[NAVIGATOR] Drop settle check failed: {ex.Message}");
+        }
+    }
+
     private static void SetArrivedTarget(WorldGameObject obj)
     {
         _arrivedTarget = obj;
@@ -4221,6 +4792,9 @@ internal static class ObjectNavigator
                     SetArrivedTarget(_shortWalkTarget.Object);
                     ScreenReader.Say(Loc.Fmt("nav.arrived_at_simple", label), interrupt: true);
                     _log?.LogInfo($"[NAVIGATOR] Arrived at {label} ({method})");
+                    // A drop we just walked onto gets shoved clear the moment the body turns
+                    // Dynamic again; watch it and chase it if E would no longer reach it.
+                    ArmDropSettleCheck(_shortWalkTarget);
                 },
                 on_failed: () =>
                 {
@@ -4329,6 +4903,12 @@ internal static class ObjectNavigator
         _currentRoute = null;
         _routeIsWorldMesh = false;
         _rescanRetryPending = false;
+        _dropSettlePending = false;
+        _dropChases = 0;
+        _routeRejectedForSolid = null;
+        // A clear spot remembered during an EARLIER walk is not somewhere to be teleported back to
+        // during this one; the wall guard records a fresh one on the first clear frame.
+        _hasLastClearPos = false;
         _teleportRescanFramesLeft = 0;
         _hasLastPlayerPos = false;
         // Drop every transition baseline so the new session establishes its own instead of comparing
@@ -4396,13 +4976,19 @@ internal static class ObjectNavigator
             _walkWatchdog = 0;
             _longWalkStuckTicks = 0;
             _pullbackTries = 0;
+            _journeyReplans = 0;
             _fineRouteTried = false;
             _startOffWorldMesh = false;
             _escapeLegsUsed = 0;
+            _returnGlidesUsed = 0;
+            _glideOriginValid = false;   // wherever we glided from, it is not near us any more
             _stalledRecomputes = 0;
             _astarFailedForWalk = false;
             _rescanRetried = false;
             _rescanRetryPending = false;
+            _dropSettlePending = false;
+            _dropChases = 0;
+            _routeRejectedForSolid = null;
             _exitAssisting = false;
             _hasBusyPos = false;
             ClearArrivedTarget();
