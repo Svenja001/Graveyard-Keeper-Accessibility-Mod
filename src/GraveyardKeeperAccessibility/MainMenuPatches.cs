@@ -201,6 +201,17 @@ internal static class GUIAccessibility
         if (!string.IsNullOrEmpty(textContent))
             Plugin.Log.LogInfo($"[GUI TEXT] {textContent}");
 
+        // Fishing is narrated entirely by FishingAssist, off the FishingGUI state machine, and this
+        // generic path must not speak over it. It ran one frame LATER than the state change, so the
+        // "Fishing. Tab changes bait. Hold E to cast: …" intro was cut off after a few words by this
+        // method saying the window's name — which is the word the intro had just started with, so it
+        // sounded like the instructions interrupting themselves. There is nothing here worth the
+        // collision either: the window exposes no navigable elements (the log line reads
+        // "Fishing, 0 elements"), so all the generic branch below could contribute is that one word.
+        // We still fall through the bookkeeping above and leave _currentGUI set, so input gating and
+        // the close path behave exactly as before — we just stay quiet.
+        if (gui is FishingGUI) return;
+
         // New-technology popup: read the full unlock text, then land on the first button (OK /
         // unlock) so Enter confirms. Must run before the generic "Dialog" branch below, which
         // would otherwise read only the tech name and return.

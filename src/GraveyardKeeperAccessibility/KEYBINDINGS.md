@@ -133,6 +133,8 @@ you have moved to Yes or No.
 
 - **Ctrl+F** — change how the fish is caught. It cycles: auto-catch → catch it yourself with the
   fish at half speed → catch it yourself at the game's own speed → back to auto-catch.
+- **Ctrl+H** — read the full instructions for the mode you are in. The window explains itself the
+  first time and gives a one-line reminder after that, so this is how you get the long version back.
 - **Tab** — change bait, while the game is asking you to choose one
 
 ### Catching a fish yourself

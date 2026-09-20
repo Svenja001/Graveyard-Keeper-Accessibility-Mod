@@ -121,14 +121,47 @@ internal static class FishingAssist
                 else if (_assisted) { _assisted = false; }
                 else { _enabled = true; _assisted = true; }
 
-                // Arriving in manual earns the full briefing again on the next cast — that is the
-                // moment the player has asked to be told how the sounds work. Changing difficulty
-                // within manual does not; they have just heard it.
-                if (!_enabled && _assisted) _manualIntroSpoken = false;
+                // NOTE: entering manual does NOT re-arm the briefing. It used to, on the theory
+                // that asking for manual is asking to be told how it works — but the cycle passes
+                // through manual-assisted every third press, so cycling to hear the modes replayed
+                // the whole minute every time round, which is what the player actually experienced.
+                // Once per session is enough; Ctrl+H below is there for anyone who wants it again.
 
                 ScreenReader.Say(Loc.Get(_enabled ? "fishing.mode.auto"
                     : _assisted ? "fishing.mode.assisted"
                     : "fishing.mode.full"));
+
+                // …and the briefing lands HERE, queued behind that mode line, rather than waiting
+                // for the next ChangeState(BaitChoosing). That transition does not come round again
+                // until the window is reopened: pressing Ctrl+F means you are ALREADY in bait
+                // choosing, so a player who switches to manual and casts straight away — which is
+                // exactly what happens — got the bite ding with no idea what it meant. The
+                // 2026-09-20 log shows the whole sequence: mode switched, sonar initialised, hook
+                // window missed, briefing never spoken. Bait choosing is also the one state with no
+                // clock running, so it is the only place a minute of speech is safe; switch mode
+                // anywhere else and we still defer to the next arrival here.
+                if (ManualPlay && !_manualIntroSpoken
+                    && __instance != null && __instance.state == FishingGUI.FishingState.BaitChoosing)
+                {
+                    ScreenReader.Say(Loc.Get("fishing.intro.manual.briefing"), interrupt: false);
+                    _manualIntroSpoken = true;
+                }
+                return;
+            }
+
+            // Ctrl+H — say the instructions for the mode you are in, in full. The window's own
+            // intro shrinks to a one-line reminder after the first time (a minute of speech before
+            // every cast is unusable), so there has to be a way back to the long version, and a
+            // player who has just lost three fish in a row is exactly who needs it. Blocked during
+            // the pull for the same reason as the toggle: it would talk over the sonar, which is
+            // the only thing telling them where the fish is.
+            if (ctrl && Input.GetKeyDown(KeyCode.H))
+            {
+                if (__instance != null && __instance.state == FishingGUI.FishingState.Pulling) return;
+                ScreenReader.Say(IntroFor(DeferToNoTimeForFishing ? "fishing.intro.deferred"
+                    : _enabled ? "fishing.intro.auto"
+                    : "fishing.intro.manual.briefing"));
+                _manualIntroSpoken = true;
                 return;
             }
 
@@ -173,23 +206,35 @@ internal static class FishingAssist
                     if (prev == FishingGUI.FishingState.DistanceChoosing)
                         ScreenReader.Say(Loc.Get("fishing.no_fish_there"));
                     else if (DeferToNoTimeForFishing)
-                        ScreenReader.Say(Loc.Get("fishing.intro.deferred"));
+                        ScreenReader.Say(IntroFor("fishing.intro.deferred"));
                     else if (_enabled)
-                        ScreenReader.Say(Loc.Get("fishing.intro.auto"));
+                        ScreenReader.Say(IntroFor("fishing.intro.auto"));
                     else
                     {
                         // Manual mode: the long version once, then a reminder that also names the
                         // difficulty, since that is the one thing about it that can change.
-                        ScreenReader.Say(Loc.Get(!_manualIntroSpoken ? "fishing.intro.manual.first"
+                        ScreenReader.Say(IntroFor(!_manualIntroSpoken ? "fishing.intro.manual.briefing"
                             : _assisted ? "fishing.intro.manual.assisted"
                             : "fishing.intro.manual.full"));
                         _manualIntroSpoken = true;
                     }
+                    // …and the bait QUEUED behind it, never interrupting it. Show() sets the bait
+                    // label and only then changes state, so the bait was already spoken a moment
+                    // ago and the line above would cut it off mid-word; RedrawSelectedBait's own
+                    // postfix therefore stays quiet outside BaitChoosing and we say it here, in the
+                    // order the player needs it: what to do first, then what is on the hook.
+                    SayCurrentBait(__instance, interrupt: false);
                     break;
 
                 case FishingGUI.FishingState.DistanceChoosing:
+                    // Nothing is spoken here, and that is the fix for a bug that made the cast
+                    // unplayable: this used to say "Casting, release E to set distance", and the
+                    // very next frame the live tier narration below cut it off after one word. The
+                    // bar sweeps its whole range in two seconds, so there is no room for a sentence
+                    // here — the instruction belongs in the bait-choosing intro, where the player
+                    // has all the time in the world, and it now lives there. The first tier call
+                    // ("Near…") is itself the confirmation that the throw has started.
                     _lastAnnouncedTier = -1;   // start a fresh sweep; live narration takes over
-                    ScreenReader.Say(Loc.Get("fishing.casting"));
                     break;
 
                 case FishingGUI.FishingState.WaitingForBite:
@@ -234,6 +279,13 @@ internal static class FishingAssist
         }
     }
 
+    // Every arrival at bait choosing needs the same controls explained and only the tail differs by
+    // who is doing the catching, so the two are separate strings: the controls are written once
+    // instead of five times, and the manual briefing can be spoken ALONE from the Ctrl+F handler,
+    // where the player has just been told the mode and wants only the part about the sounds.
+    private static string IntroFor(string tailKey) =>
+        Loc.Get("fishing.intro.prefix") + " " + Loc.Get(tailKey);
+
     // Spoken when the line comes out: the caught fish on success, or why it came up empty.
     private static void AnnounceTakeOut(FishingGUI gui, FishingGUI.FishingState prev)
     {
@@ -267,21 +319,34 @@ internal static class FishingAssist
     // ── Bait narration ──────────────────────────────────────────────────────────────────────────
 
     // RedrawSelectedBait already sets the localized bait_name label (or "no bait"); we just voice it
-    // whenever it changes — on open and on each Tab through the available baits.
+    // whenever the PLAYER changes it — each Tab through the available baits.
+    //
+    // Show() also calls it, one line before ChangeState(BaitChoosing), and speaking there is worse
+    // than useless: the intro that follows immediately interrupts it, so the player hears half a
+    // bait name and then the instructions. The state is still None during that call (Hide resets
+    // it), which is exactly the signal to stay quiet and let the BaitChoosing case above queue the
+    // bait after the intro instead.
     internal static void FishingGUI_RedrawSelectedBait_Postfix(FishingGUI __instance)
     {
         try
         {
-            var label = __instance?.bait_name?.text;
-            if (string.IsNullOrEmpty(label)) return;
-            var clean = ScreenReader.StripNguiCodes(label).Trim();
-            if (!string.IsNullOrEmpty(clean))
-                ScreenReader.Say(Loc.Fmt("fishing.bait", clean));
+            if (__instance == null || __instance.state != FishingGUI.FishingState.BaitChoosing) return;
+            SayCurrentBait(__instance, interrupt: true);
         }
         catch (Exception ex)
         {
             _log?.LogError($"[FISHING] RedrawSelectedBait postfix error: {ex.Message}");
         }
+    }
+
+    // Speaks the bait label the game has already localized into bait_name ("no bait" included).
+    private static void SayCurrentBait(FishingGUI gui, bool interrupt)
+    {
+        var label = gui?.bait_name?.text;
+        if (string.IsNullOrEmpty(label)) return;
+        var clean = ScreenReader.StripNguiCodes(label).Trim();
+        if (!string.IsNullOrEmpty(clean))
+            ScreenReader.Say(Loc.Fmt("fishing.bait", clean), interrupt);
     }
 
     // ── Live cast-distance narration ────────────────────────────────────────────────────────────

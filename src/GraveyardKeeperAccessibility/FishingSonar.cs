@@ -194,6 +194,15 @@ internal static class FishingSonar
 
             _blip = _host.AddComponent<AudioSource>();
             Configure(_blip);
+            // Configure leaves volume at 0 so the LOOPING tone cannot blast at full level on its
+            // first Play, in the frame before Tick assigns it one. The blip source must not keep
+            // that, and this line is the whole reason the cues were inaudible: PlayOneShot's
+            // volumeScale is MULTIPLIED by AudioSource.volume, so a source sitting at 0 plays every
+            // one-shot at absolute silence. The tone was fine because Tick writes its volume each
+            // frame; the bite ding, the progress blips, the bottom thud and the danger tick were
+            // all being synthesised, pitched and played into nothing. Blip() passes the real level
+            // as the volumeScale, so this stays at unity gain.
+            _blip.volume = 1f;
             // 440 Hz reference: Blip() pitches this clip to whatever it needs, so its length scales
             // with it too (a 1320 Hz tick lasts 40 ms, a 130 Hz thud 400 ms).
             _blip.clip = MakeSine("gk_a11y_blip", 440f, 0.12f, envelope: true);

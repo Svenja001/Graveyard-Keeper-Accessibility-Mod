@@ -1,3 +1,36 @@
+## 0.3.1 | 20 September 2026
+
+**Every sound cue in the fishing mini-game was silent, the instructions cut themselves off
+mid-sentence, and the explanation of manual fishing was never read at the moment you asked for it.**
+
+- **The fishing sound cues can actually be heard now.** The double ding that tells you a fish has
+  bitten, the blips marking each quarter of the catch bar, the thud when your bar hits the bottom
+  and the low double tick warning that the fish is about to get away — none of them ever made a
+  sound. They were being generated correctly and played at a volume of zero, so the mini-game shipped
+  with only its continuous tone audible. That tone is enough to land a fish, which is how this got
+  past testing, but it left you reacting to a bite you were never told about. All four cues work.
+
+- **Fishing no longer talks over its own instructions.** Walking up to a fishing spot read out what
+  to do and then chopped the sentence off after a few words. Three things were speaking at once: the
+  window announced its own name a frame after the instructions had started — and that name is the
+  very word the instructions open with, so it sounded like the sentence restarting over itself — the
+  selected bait was cut in half by the instructions that followed it, and "release E to set the
+  distance" was buried under the distance readout a frame later. The cast bar sweeps its whole range
+  in two seconds, so that sentence never had room there; it is now part of the instructions you hear
+  while choosing bait, where there is all the time in the world, and the window no longer announces
+  itself on top of them.
+
+- **Switching to manual fishing now explains manual fishing.** Pressing Ctrl+F told you the mode had
+  changed and nothing more. The explanation of what the sounds mean was only ever read when the
+  fishing window opened — and pressing Ctrl+F means it already had. So anyone who switched to manual
+  and cast straight away got the bite cue with no idea what it meant, and only heard the explanation
+  the next time they walked up to a fishing spot. It now follows the mode change immediately.
+
+- **…and it stops repeating itself.** That explanation is about a minute long, and it was read again
+  every time the Ctrl+F cycle came back round to manual, so anyone stepping through the modes heard
+  it over and over. It is now read once, with a one-line reminder after that — and **Ctrl+H** reads
+  the full instructions for whichever mode you are in, whenever you want them back.
+
 ## 0.3.0 | 20 September 2026
 
 **The fishing mini-game can be played by ear, the opening cutscene and the storybook scenes are read
