@@ -1,5 +1,5 @@
 {
-  "CarrotMessage": "Caramba! Estou sem cenouras para o burro!!",
+  "CarrotMessage": "Caramba! Não há cenouras suficientes na caixa para o burro!",
   "DebugWarning": "Observe que o modo de depuração está ativado. Não é recomendado deixá-lo ativado a menos que você tenha um propósito para isso.",
   "cfg.section.advanced": "Avançado",
   "cfg.section.delivery_times": "Horários de entrega",

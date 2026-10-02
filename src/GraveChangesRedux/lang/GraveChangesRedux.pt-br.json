@@ -11,5 +11,6 @@
   "cfg.ignore_skull_limit.name": "Ignorar limite de caveiras do corpo",
   "cfg.ignore_skull_limit.desc": "Faz um túmulo contar toda a qualidade das decorações mesmo quando o corpo tem poucas caveiras brancas. O jogo base limita o placar do túmulo ao número de caveiras brancas do cadáver; isto remove esse limite. Desative para o comportamento original.",
   "cfg.check_for_updates.name": "Verificar atualizações",
-  "cfg.check_for_updates.desc": "Mostra um aviso no menu principal quando há uma nova versão deste mod no NexusMods. Clique no aviso para abrir a página do mod."
+  "cfg.check_for_updates.desc": "Mostra um aviso no menu principal quando há uma nova versão deste mod no NexusMods. Clique no aviso para abrir a página do mod.",
+  "FirstTalkNotice": "As alterações nos túmulos só passam a valer depois que você tiver sua primeira conversa com o bispo e pegar suas ferramentas."
 }

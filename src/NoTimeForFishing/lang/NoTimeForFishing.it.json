@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "Generale",
   "cfg.section.catch_rates": "Probabilità di cattura",
   "cfg.section.updates": "Aggiornamenti",
+  "cfg.mode.name": "Modalità",
+  "cfg.mode.desc": "Quanta parte della pesca la mod fa al posto tuo.\n\n• Skip Everything - il pesce abbocca subito e viene catturato senza il minigioco.\n• Auto Hook Only - l'abboccata viene agganciata per te. Devi comunque aspettare l'abboccata e giocare il minigioco del recupero.",
   "cfg.rare_fish_catch_rate.name": "Probabilità di pesci rari",
   "cfg.rare_fish_catch_rate.desc": "Quanto spesso peschi pesci rari - il pesce d''oro, il salmone d''oro, lo storione d''oro e il carassio d''oro. Le percentuali presumono la canna migliore, esca a gemma, distanza 3 e pesca diurna; altre canne o punti danno sensazioni simili.\\n\\n• Vanilla - circa 1 raro ogni 20 lanci (intorno al 5%, il valore originale).\\n• Leggermente aumentato - circa 1 ogni 9 lanci (intorno all''11%).\\n• Aumentato - circa 1 ogni 5 lanci (intorno al 20%).\\n• Molto aumentato - circa 1 ogni 3 lanci (intorno al 33%).\\n• Molto comune - circa uno sì e uno no (intorno al 50%).",
   "cfg.check_for_updates.name": "Controlla aggiornamenti",

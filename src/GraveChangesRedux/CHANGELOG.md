@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 | 2 October 2026
+
+- Grave changes now wait until you've had your first talk with the bishop and collected your tools, so this mod doesn't make his first task available early. A notice tells you while they're waiting
+- On saves where the bishop's first task was handed in early and skipped his tools quest, that quest now starts on load, so collecting your tools can clear his repeated fetch-your-tools line
+
 ## 0.1.11 | 7 June 2026
 
 - Fixed grave decorations still being capped by the body's white-skull count

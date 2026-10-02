@@ -1,5 +1,11 @@
 namespace ThoughtfulReminders;
 
+public enum HarvestReminderTiming
+{
+    WhenReady,
+    NextMorning
+}
+
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 public class Plugin : BaseUnityPlugin
 {
@@ -13,6 +19,9 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> EnableEventMessages { get; private set; }
     internal static ConfigEntry<bool> DaysOnlyConfig { get; private set; }
     internal static ConfigEntry<bool> SpeechBubblesConfig { get; private set; }
+    internal static ConfigEntry<bool> ConfessionReminders { get; private set; }
+    internal static ConfigEntry<bool> HarvestReminders { get; private set; }
+    internal static ConfigEntry<HarvestReminderTiming> HarvestTiming { get; private set; }
     internal static ConfigEntry<float> WakeUpDelay { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
@@ -39,6 +48,9 @@ public class Plugin : BaseUnityPlugin
         EnableEventMessages = LocalizedConfig.Bind(Config, RemindersSection, "Event Messages", true, "event_messages", order: 100);
         DaysOnlyConfig = LocalizedConfig.Bind(Config, RemindersSection, "Days Only", false, "days_only", order: 99);
         SpeechBubblesConfig = LocalizedConfig.Bind(Config, RemindersSection, "Speech Bubbles", true, "speech_bubbles", order: 90);
+        ConfessionReminders = LocalizedConfig.Bind(Config, RemindersSection, "Confession Reminders", true, "confession_reminders", order: 88);
+        HarvestReminders = LocalizedConfig.Bind(Config, RemindersSection, "Harvest Reminders", true, "harvest_reminders", order: 86);
+        HarvestTiming = LocalizedConfig.Bind(Config, RemindersSection, "Harvest Reminder Timing", HarvestReminderTiming.WhenReady, "harvest_timing", order: 84);
         WakeUpDelay = LocalizedConfig.Bind(Config, RemindersSection, "Wake-Up Delay", 2f, "wake_up_delay", new AcceptableValueRange<float>(0f, 10f), order: 80);
 
         CheckForUpdates = LocalizedConfig.Bind(Config, UpdatesSection, "Check for Updates", true, "check_for_updates", order: 100);

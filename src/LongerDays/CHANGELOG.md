@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.2 | 2 October 2026
+
+- Fixed the swamp slimes and bats leaving early on longer days
+
+## 1.7.1 | 13 September 2026
+
+- Fixed timed buffs and debuffs still lasting longer than they should at longer day settings
+- The log now warns if part of the mod can't apply to your version of the game
+
 ## 1.7.0 | 18 July 2026
 
 - Added an optional Debug Logging setting to help diagnose corpse-delivery reports

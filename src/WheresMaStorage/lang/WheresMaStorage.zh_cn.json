@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "容器额外格数",
   "cfg.additional_container_inventory_space.desc": "为可共享的箱子、架子、橱柜等存储增加的格数。需要开启 Modify Inventory Size。",
   "cfg.show_only_personal_inventory.name": "仅显示个人物品栏",
-  "cfg.show_only_personal_inventory.desc": "开启或关闭此选项。",
+  "cfg.show_only_personal_inventory.desc": "与商人交易时只显示你随身携带的物品。关闭后也可以出售仓库中的物品(需要开启共享物品栏)。",
   "cfg.dont_show_empty_rows_in_inventory.name": "隐藏物品栏空行",
   "cfg.dont_show_empty_rows_in_inventory.desc": "是否在物品栏中显示空行。",
   "cfg.show_used_space_in_titles.name": "在标题显示已用空间",

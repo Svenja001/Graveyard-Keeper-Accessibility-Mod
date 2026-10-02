@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "Espace inventaire conteneur supplémentaire",
   "cfg.additional_container_inventory_space.desc": "Nombre d'emplacements supplémentaires pour coffres, étagères, armoires et autres stockages partagés. Nécessite Modify Inventory Size activé.",
   "cfg.show_only_personal_inventory.name": "Afficher uniquement l'inventaire personnel",
-  "cfg.show_only_personal_inventory.desc": "Active ou désactive cette option.",
+  "cfg.show_only_personal_inventory.desc": "Chez les marchands, n'affiche que les objets que vous portez. Désactivez pour vendre aussi les objets de vos stockages (nécessite Inventaire partagé activé).",
   "cfg.dont_show_empty_rows_in_inventory.name": "Masquer les rangées vides de l'inventaire",
   "cfg.dont_show_empty_rows_in_inventory.desc": "Afficher ou masquer les rangées vides dans l'inventaire.",
   "cfg.show_used_space_in_titles.name": "Afficher l'espace utilisé dans les titres",

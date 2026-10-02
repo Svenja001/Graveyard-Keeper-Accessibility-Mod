@@ -1,5 +1,5 @@
 {
-  "CarrotMessage": "Accidenti! Ho finito le carote per l'asino!!",
+  "CarrotMessage": "Accidenti! Non ci sono abbastanza carote nella cassa per l'asino!",
   "DebugWarning": "Nota: la modalità debug è attivata. Non è consigliato lasciarla attiva a meno che tu non abbia un motivo specifico.",
   "cfg.section.advanced": "Avanzate",
   "cfg.section.delivery_times": "Orari di consegna",

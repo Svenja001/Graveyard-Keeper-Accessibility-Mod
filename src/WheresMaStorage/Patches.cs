@@ -761,7 +761,21 @@ public static class Patches
             .Contains(Fields.Vendor))
             return;
 
-        if (!Plugin.HideInvalidSelections.Value) return;
+        if (!Plugin.HideInvalidSelections.Value)
+        {
+            // Setting turned off with a window still open: bring back any row hidden earlier.
+            if (Fields.FilterHiddenWidgets.Remove(__instance))
+            {
+                __instance.gameObject.SetActive(true);
+            }
+
+            return;
+        }
+
+        // Leave the equipped-tools row as the game draws it: tools the bench can't use stay
+        // visible but greyed, so the row doesn't look like it's missing.
+        var toolbelt = MainGame.me?.player?.data?.secondary_inventory;
+        if (toolbelt != null && __instance.inventory_data?.inventory == toolbelt) return;
 
         if (Fields.UsingBag) return;
 
@@ -788,9 +802,23 @@ public static class Patches
 
         var activeCount = __instance.items.Count(x => !x.is_inactive_state);
 
-        if (activeCount <= 0)
+        if (__instance.custom_size)
         {
-            __instance.Hide();
+            if (activeCount <= 0)
+            {
+                __instance.Hide();
+            }
+        }
+        else if (activeCount <= 0)
+        {
+            // Only switch the row off. Hide() destroys its cells, so it could never come back
+            // when items return to it (e.g. taken back out of a trade offer).
+            __instance.gameObject.SetActive(false);
+            Fields.FilterHiddenWidgets.Add(__instance);
+        }
+        else if (Fields.FilterHiddenWidgets.Remove(__instance))
+        {
+            __instance.gameObject.SetActive(true);
         }
 
         __instance.RecalculateWidgetSize();

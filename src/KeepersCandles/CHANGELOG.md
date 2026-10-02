@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 | 13 September 2026
+
+- The extinguish key now only targets candle holders and incense burners that are actually lit
+- Fixed removing incense permanently raising church rating. Existing extra rating is cleared from empty burners on load, and from lit burners when extinguished
+- Added separate settings to let candles and incense burn down normally instead of staying lit forever
+- Fixed the directional arrow pointing off the map when using an extinguish key away from the church
+- Extinguishing a candle holder now gives the candles back. Nothing is given back while the matching burn-down setting is on
+
 ## 0.2.0 | 20 June 2026
 
 - Fixed candelabras that couldn't be extinguished after saving and reloading

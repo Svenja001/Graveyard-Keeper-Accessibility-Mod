@@ -75,6 +75,9 @@ public static class Fields
     // can recover each item's owning WGO position without a back-reference.
     internal static readonly Dictionary<Item, Vector3> InventoryPositions = new();
 
+    // Rows the Hide Invalid Selections filter switched off, so only those get switched back on.
+    internal static readonly HashSet<InventoryWidget> FilterHiddenWidgets = [];
+
     private static bool _inventoriesLoaded;
 
     internal static bool InventoriesLoaded

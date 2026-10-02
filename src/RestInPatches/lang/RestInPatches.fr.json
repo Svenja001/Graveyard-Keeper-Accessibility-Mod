@@ -15,6 +15,8 @@
   "cfg.smooth_player_movement.desc": "Lisse le mouvement du joueur par interpolation physique afin qu'il ne soit plus lié à la grille de pixels. Désactive pour rétablir le mouvement d'origine du jeu, par exemple si ton personnage a du mal à s'aligner sur les points d'interaction.",
   "cfg.max_footprints.name": "Empreintes max",
   "cfg.max_footprints.desc": "Nombre maximum d'empreintes avant retrait des plus anciennes. 0 désactive la limite.",
+  "cfg.footprint_fade_seconds.name": "Durée de disparition des empreintes",
+  "cfg.footprint_fade_seconds.desc": "Temps en secondes pour que les empreintes visibles disparaissent lorsque la limite d'empreintes maximales les supprime. Réglez sur 0 pour les supprimer instantanément. Ne modifie pas la durée de vie normale des empreintes. Les changements s'appliquent aux empreintes supprimées ensuite.",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",
   "cfg.check_for_updates.desc": "Affiche un avis dans le menu principal lorsqu'une nouvelle version de ce mod est disponible sur NexusMods. Clique sur l'avis pour ouvrir la page du mod."
 }

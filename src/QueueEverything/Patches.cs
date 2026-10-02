@@ -85,23 +85,10 @@ public static class Patches
     [HarmonyPostfix, HarmonyPatch(typeof(MainMenuGUI), nameof(MainMenuGUI.Open))]
     public static void MainMenuGUI_Open()
     {
-        Plugin.FasterCraftEnabled = false;
-        Plugin.FasterCraftReloaded = false;
-        Plugin.ExhaustlessEnabled = false;
-
-        Plugin.FasterCraftReloaded = Harmony.HasAnyPatches("p1xel8ted.gyk.fastercraftreloaded");
-        Plugin.ExhaustlessEnabled = Harmony.HasAnyPatches("p1xel8ted.gyk.exhaust-less");
-
-        if (Plugin.FasterCraftReloaded)
+        if (Plugin.DebugEnabled)
         {
-            Plugin.TimeAdjustment = Plugin.FcTimeAdjustment.Value;
-            Plugin.FasterCraftEnabled = true;
-            if (Plugin.DebugEnabled) Plugin.WriteLog($"FasterCraft Reloaded! detected, using its config.");
-        }
-
-        if (Plugin.ExhaustlessEnabled)
-        {
-            if (Plugin.DebugEnabled) Plugin.WriteLog($"Exhaust-less! detected, using its config.");
+            Plugin.WriteLog($"FasterCraft Reloaded! present: {ModCompat.IsPresent(ModCompat.FasterCraftGuid)}");
+            Plugin.WriteLog($"Exhaust-less! present: {ModCompat.IsPresent(ModCompat.ExhaustlessGuid)}");
         }
 
         // Clear per-save state so loading a different save doesn't see the previous save's WGOs.
@@ -124,12 +111,13 @@ public static class Patches
             return;
         }
 
+        // Single-craft-only recipes still get their ingredient tier picked below,
+        // they just never get an amount above 1.
         var canCraftMultiple = __instance.craft_definition.CanCraftMultiple();
         if (!canCraftMultiple)
         {
-            if (Plugin.DebugEnabled) Plugin.WriteLog($"[Redraw] {__instance.craft_definition.id}: skip (CanCraftMultiple=false) → _amount=1");
+            if (Plugin.DebugEnabled) Plugin.WriteLog($"[Redraw] {__instance.craft_definition.id}: CanCraftMultiple=false → _amount=1");
             __instance._amount = 1;
-            return;
         }
 
         if (Plugin.AlreadyRun)
@@ -150,6 +138,8 @@ public static class Patches
             : GUIElements.me.craft.multi_inventory;
 
         var craftInfo = CraftMaxCalculator.Calculate(__instance, multiInventory, Plugin.AutoSelectHighestQualRecipe.Value);
+
+        if (!canCraftMultiple) return;
 
         if (Plugin.AutoMaxMultiQualCrafts.Value && craftInfo.IsMultiQualCraft)
         {
@@ -549,6 +539,15 @@ public static class CraftDefinitionPatches
             return;
         }
 
+        // The organ workbench stays on the unsafe list for everything else it hosts, but its own
+        // skull upgrades are fine to run as one multi-level craft.
+        if (Plugin.ForceMultiCraft.Value && OrganEnhancer.IsOrganCraft(__instance))
+        {
+            if (Plugin.DebugEnabled) Plugin.WriteLog($"[CanCraftMultiple] {__instance.id}: organ upgrade → true");
+            __result = true;
+            return;
+        }
+
         if (!Plugin.ForceMultiCraft.Value || Plugin.IsUnsafeDefinition(__instance))
         {
             if (Plugin.DebugEnabled) Plugin.WriteLog($"[CanCraftMultiple] {__instance.id}: unsafe/force-off → {__result} (timeZero={__instance.craft_time_is_zero})");
@@ -563,6 +562,14 @@ public static class CraftDefinitionPatches
     public static void CraftDefinition_GetSpendTxt(CraftDefinition __instance, WorldGameObject wgo, ref string __result,
         int multiplier = 1)
     {
+        // An organ run's energy already covers every level it was built for, so read the run's
+        // figure and drop the amount multiplier that would otherwise count them all again.
+        if (OrganEnhancer.TryGetPreview(__instance, out var organRun))
+        {
+            __instance = organRun;
+            multiplier = 1;
+        }
+
         var text = "";
         int num;
         if (GlobalCraftControlGUI.is_global_control_active)
@@ -595,15 +602,15 @@ public static class CraftDefinitionPatches
 
             if (GlobalCraftControlGUI.is_global_control_active)
             {
-                var cost = Plugin.ExhaustlessEnabled ? Mathf.CeilToInt(num * multiplier / 2f) : num * multiplier;
-                var hasEnough = MainGame.me.player.gratitude_points >= (__instance.gratitude_points_craft_cost?.EvaluateFloat(MainGame.me.player) ?? 0f);
+                var cost = Mathf.CeilToInt(num * multiplier * ModCompat.GratitudeFactor());
+                var hasEnough = MainGame.me.player.gratitude_points >= cost;
                 text += hasEnough
                     ? $"[c](gratitude_points)[/c]{cost}"
                     : $"(gratitude_points)[c][ff1111]{cost}[/c]";
             }
             else
             {
-                var cost = Plugin.ExhaustlessEnabled ? Mathf.CeilToInt(num / 2f) * multiplier : Mathf.CeilToInt(num * multiplier);
+                var cost = Mathf.CeilToInt(num * ModCompat.EnergyFactor()) * multiplier;
                 text += $"[c](en)[/c]{cost}";
             }
         }
@@ -615,8 +622,7 @@ public static class CraftDefinitionPatches
 
             if (craftTime != 0)
             {
-                if (Plugin.FasterCraftEnabled)
-                    craftTime = Plugin.TimeAdjustment < 0 ? craftTime * Plugin.TimeAdjustment : craftTime / Plugin.TimeAdjustment;
+                craftTime /= ModCompat.CraftSpeedMultiplier();
 
                 craftTime = Mathf.CeilToInt(craftTime);
                 if (craftTime > 0) craftTime *= multiplier;
@@ -679,6 +685,17 @@ public static class CraftGUIPatches
 
         craftBtn.gameObject.SetActive(true);
         __instance.gamepad_controller.SetFocusedItem(navItem);
+    }
+
+    // Every other way of opening the craft window says whether it wants the amount arrows, but
+    // the organ one never does, so it inherits whatever the last window left behind. Ask for
+    // them, or the arrows show up only when the player happened to visit a workbench first.
+    [HarmonyPrefix, HarmonyPatch(nameof(CraftGUI.OpenAsOrganEnhancer))]
+    public static void OpenAsOrganEnhancer_Prefix(CraftGUI __instance)
+    {
+        if (!Plugin.ForceMultiCraft.Value) return;
+
+        __instance.has_amount_buttons = true;
     }
 
     [HarmonyPostfix, HarmonyPatch(nameof(CraftGUI.Open))]
@@ -764,11 +781,145 @@ public static class CraftItemGUIPatches
 
     private static void ApplyFasterCraft(ref float time)
     {
-        if (!Plugin.FasterCraftEnabled) return;
+        time /= ModCompat.CraftSpeedMultiplier();
+    }
 
-        if (Plugin.TimeAdjustment < 0)
-            time /= Plugin.TimeAdjustment;
-        else
-            time *= Plugin.TimeAdjustment;
+    // Works out the organ run before the row draws, so the shard and energy figures cover every
+    // level the player asked for. Runs last so it reads the amount auto-max just settled on.
+    [HarmonyPrefix, HarmonyPriority(Priority.Last)]
+    [HarmonyPatch(nameof(CraftItemGUI.Redraw))]
+    public static void Redraw_Prefix(CraftItemGUI __instance, out OrganPreview __state)
+    {
+        __state = OrganEnhancer.SwapPreview(BuildOrganPreview(__instance));
+    }
+
+    [HarmonyFinalizer, HarmonyPatch(nameof(CraftItemGUI.Redraw))]
+    public static void Redraw_Finalizer(OrganPreview __state)
+    {
+        OrganEnhancer.SwapPreview(__state);
+    }
+
+    private static OrganPreview BuildOrganPreview(CraftItemGUI craftItemGui)
+    {
+        var craft = craftItemGui.current_craft;
+        if (!Plugin.ForceMultiCraft.Value || !OrganEnhancer.IsOrganCraft(craft)) return default;
+
+        var bench = OrganBench();
+        if (bench == null) return default;
+
+        ClampAutoMax(craftItemGui, craft, bench);
+        if (craftItemGui._amount <= 1) return default;
+
+        // No inventory passed: the cost shown is what the chosen amount would cost, even when
+        // the player can't afford it. The greyed-out ingredients say the rest.
+        var run = OrganEnhancer.BuildRun(craft, bench, craftItemGui._amount, null);
+        return run == null ? default : new OrganPreview(craft, run.Definition);
+    }
+
+    // Auto-max sizes the amount by dividing what you have by the first level's cost, but each
+    // organ level costs more than the last and there are only so many to add. Bring the opening
+    // amount back to what the run really reaches. Only on open, so a number picked by hand is
+    // left where the player put it.
+    private static void ClampAutoMax(CraftItemGUI craftItemGui, CraftDefinition craft, WorldGameObject bench)
+    {
+        if (Plugin.AlreadyRun || craftItemGui._amount <= 1) return;
+        if (!Plugin.AutoMaxNormalCrafts.Value && !Plugin.AutoMaxMultiQualCrafts.Value) return;
+
+        var run = OrganEnhancer.BuildRun(craft, bench, craftItemGui._amount, GUIElements.me.organ_enhancer_gui?._multi_inventory);
+        var reachable = run?.Steps ?? 1;
+        if (reachable >= craftItemGui._amount) return;
+
+        if (Plugin.DebugEnabled) Plugin.WriteLog($"[OrganEnhancer] auto-max asked for {craftItemGui._amount}, run reaches {reachable}");
+        craftItemGui._amount = reachable;
+    }
+
+    // Stop the plus arrow once the run can't reach another level. Asking for one more than the
+    // current amount keeps this bounded without putting a ceiling on the run itself.
+    [HarmonyPrefix, HarmonyPatch(nameof(CraftItemGUI.OnAmountPlus))]
+    public static bool OnAmountPlus_Prefix(CraftItemGUI __instance)
+    {
+        var craft = __instance.current_craft;
+        if (!Plugin.ForceMultiCraft.Value || !OrganEnhancer.IsOrganCraft(craft)) return true;
+
+        var bench = OrganBench();
+        if (bench == null) return true;
+
+        var wanted = __instance._amount + 1;
+        var run = OrganEnhancer.BuildRun(craft, bench, wanted, GUIElements.me.organ_enhancer_gui?._multi_inventory);
+        return run != null && run.Steps >= wanted;
+    }
+
+    private static WorldGameObject OrganBench() => GUIElements.me.organ_enhancer_gui?._craftery_wgo;
+}
+
+
+[HarmonyPatch(typeof(BaseItemCellGUI))]
+public static class BaseItemCellGUIPatches
+{
+    // The organ run's shard list already adds up every level, so draw it as it is.
+    [HarmonyPrefix, HarmonyPatch(nameof(BaseItemCellGUI.DrawIngredients))]
+    public static void DrawIngredients_Prefix(ref List<Item> items, ref int amount)
+    {
+        if (!OrganEnhancer.TryGetPreviewNeeds(items, out var aggregate)) return;
+
+        items = aggregate;
+        amount = 1;
+    }
+}
+
+
+[HarmonyPatch(typeof(OrganEnhancerGUI))]
+public static class OrganEnhancerGUIPatches
+{
+    [HarmonyPrefix, HarmonyPatch(nameof(OrganEnhancerGUI.CanCraft))]
+    public static bool CanCraft_Prefix(OrganEnhancerGUI __instance, CraftDefinition craft, int amount, ref bool __result)
+    {
+        if (!Plugin.ForceMultiCraft.Value || amount <= 1 || !OrganEnhancer.IsOrganCraft(craft)) return true;
+
+        var run = OrganEnhancer.BuildRun(craft, __instance._craftery_wgo, amount, null);
+        __result = run != null && run.Steps == amount && __instance._multi_inventory.IsEnoughItems(run.Needs);
+        return false;
+    }
+
+    [HarmonyPrefix, HarmonyPatch(nameof(OrganEnhancerGUI.OnCraft))]
+    public static bool OnCraft_Prefix(OrganEnhancerGUI __instance, CraftDefinition craft, int amount, ref bool __result)
+    {
+        if (!Plugin.ForceMultiCraft.Value || amount <= 1 || !OrganEnhancer.IsOrganCraft(craft)) return true;
+
+        var bench = __instance._craftery_wgo;
+        if (bench == null) return true;
+
+        var run = OrganEnhancer.BuildRun(craft, bench, amount, null);
+        if (run == null || run.Steps < amount || !__instance._multi_inventory.IsEnoughItems(run.Needs))
+        {
+            // Craft nothing rather than part of it. The organ stays in the slot and the window
+            // stays open so the amount can be lowered.
+            if (Plugin.DebugEnabled) Plugin.WriteLog($"[OrganEnhancer] {craft.id}: asked for {amount}, reachable {run?.Steps ?? 0} → nothing crafted");
+            __result = false;
+            return false;
+        }
+
+        var crafted = bench.components.craft.Craft(run.Definition, override_needs: run.Needs, ignore_crafts_list: true);
+        if (Plugin.DebugEnabled)
+        {
+            Plugin.WriteLog($"[OrganEnhancer] {craft.id}: {amount} levels → {run.Definition.output[0].id}, needs {string.Join(", ", run.Needs.Select(n => $"{n.id}x{n.value}"))}, crafted={crafted}");
+        }
+
+        if (!crafted)
+        {
+            __result = false;
+            return false;
+        }
+
+        __instance._current_item_gui = null;
+        GUIElements.me.craft.Hide(false);
+        if (GlobalCraftControlGUI.is_global_control_active)
+        {
+            GUIElements.me.global_craft_control_gui.Open();
+        }
+
+        __instance.Hide(true, false);
+        __result = true;
+        return false;
     }
 }

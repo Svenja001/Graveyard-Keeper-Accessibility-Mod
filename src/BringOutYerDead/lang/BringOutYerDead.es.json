@@ -1,5 +1,5 @@
 {
-  "CarrotMessage": "¡Se me acabaron las zanahorias por el burro!",
+  "CarrotMessage": "¡Vaya! ¡No hay suficientes zanahorias en la caja para el burro!",
   "DebugWarning": "Ten en cuenta que el modo de depuración está activado. No se recomienda dejarlo activado a menos que tengas un propósito para ello.",
   "cfg.section.advanced": "Avanzado",
   "cfg.section.delivery_times": "Horarios de entrega",

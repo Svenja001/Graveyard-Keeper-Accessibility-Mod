@@ -53,10 +53,84 @@ public class Plugin : BaseUnityPlugin
         Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), MyPluginInfo.PLUGIN_GUID);
     }
 
+    // The bishop gives this quest at the end of your first talk with him. It completes when you
+    // collect your tools.
+    private const string FirstTalkQuest = "take_tools_from_grave_chest";
+
+    // With a high rating the bishop's first task can be handed in during that first talk, which
+    // cuts the talk short. So nothing here applies until the save shows that talk is over and
+    // the tools have been collected.
+    private static bool _firstTalkDone;
+    private static bool _noticePending;
+
+    private static bool FirstTalkDone()
+    {
+        var quests = MainGame.me?.save?.quests;
+        if (quests == null) return false;
+        if (quests.IsQuestSucced(FirstTalkQuest)) return true;
+
+        // First task already handed in: there is nothing left to hold back for, and a save that
+        // handed it in during the first talk would otherwise never get the changes.
+        return MainGame.me.player?.GetParam("cup_20_reached") >= 1f;
+    }
+
+    // Older versions let the bishop's first task be handed in during the first talk. That skipped
+    // the step that gives this quest, and without it he only ever tells you to fetch your tools.
+    // Give the quest now; the game clears his line once the tools are collected.
+    private static void RepairCutShortFirstTalk()
+    {
+        var player = MainGame.me?.player;
+        var quests = MainGame.me?.save?.quests;
+        if (player == null || quests == null) return;
+        if (player.GetParam("cup_20_reached") < 1f || player.GetParam(FirstTalkQuest) < 1f) return;
+        if (quests.CheckIfQuestWasExecuted(FirstTalkQuest) || quests.IsQuestCurrent(FirstTalkQuest)) return;
+
+        var quest = GameBalance.me.GetDataOrNull<QuestDefinition>(FirstTalkQuest);
+        if (quest == null) return;
+
+        quests.StartQuest(quest);
+        quests.CheckQuestsState();
+        Log.LogInfo("This save had the bishop's first talk cut short. Started his tools quest so his dialogue can move on.");
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(MainGame), nameof(MainGame.OnGameStartedPlaying))]
+    public static void MainGame_OnGameStartedPlaying()
+    {
+        RepairCutShortFirstTalk();
+        GameBalanceLoad();
+        _noticePending = !_firstTalkDone && (ModifyGraves.Value || ModifyObjects.Value || IgnoreSkullLimit.Value);
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(QuestSystem), nameof(QuestSystem.OnQuestSucceed))]
+    public static void QuestSystem_OnQuestSucceed(QuestState q_to_end)
+    {
+        if (_firstTalkDone || q_to_end?.definition?.id != FirstTalkQuest) return;
+        _noticePending = false;
+        GameBalanceLoad();
+    }
+
+    // Tell the player why nothing has changed yet. Waits until they have control and no window
+    // is open.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(MainGame), nameof(MainGame.Update))]
+    public static void MainGame_Update()
+    {
+        if (!_noticePending) return;
+        if (!MainGame.game_started || MainGame.paused || !BaseGUI.all_guis_closed) return;
+        if (MainGame.me?.player?.components?.character?.control_enabled != true) return;
+
+        _noticePending = false;
+        GUIElements.me.dialog.OpenOK(MyPluginInfo.PLUGIN_NAME, null, Lang.Get("FirstTalkNotice"), true, string.Empty);
+    }
+
     [HarmonyPostfix]
     [HarmonyPatch(typeof(GameBalance), nameof(GameBalance.LoadGameBalance))]
     public static void GameBalanceLoad()
     {
+        _firstTalkDone = FirstTalkDone();
+
         foreach (var itemDef in GameBalance.me.items_data.Where(itemDef => itemDef.id.StartsWith("grave", StringComparison.OrdinalIgnoreCase) && itemDef.quality_type is not ItemDefinition.QualityType.Stars))
         {
             if (SkipThese.Any(a => itemDef.id.Contains(a)))
@@ -70,7 +144,7 @@ public class Plugin : BaseUnityPlugin
 
             TryAdd(ItemDefBackups, itemDef.id, itemDef.quality);
 
-            if (ModifyGraves.Value)
+            if (ModifyGraves.Value && _firstTalkDone)
             {
                 itemDef.quality = MaxQualityValue;
                 if (DebugEnabled)
@@ -97,7 +171,7 @@ public class Plugin : BaseUnityPlugin
 
             TryAdd(ObjDefBackups, objDef.id, objDef.quality);
 
-            if (ModifyObjects.Value)
+            if (ModifyObjects.Value && _firstTalkDone)
             {
                 objDef.quality = MaxQualityExpression;
                 if (DebugEnabled)
@@ -136,7 +210,7 @@ public class Plugin : BaseUnityPlugin
     // decoration quality in full instead of clamping it to the white skulls.
     public static float GraveQualityCap(float computed, float skullCap)
     {
-        return IgnoreSkullLimitEnabled ? computed : Mathf.Min(computed, skullCap);
+        return IgnoreSkullLimitEnabled && _firstTalkDone ? computed : Mathf.Min(computed, skullCap);
     }
 
     private static bool TryAdd<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key, TValue value)

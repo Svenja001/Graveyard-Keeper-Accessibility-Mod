@@ -1,5 +1,5 @@
 {
-  "CarrotMessage": "Blimey ! Je n'ai plus de carottes pour l'âne ! !",
+  "CarrotMessage": "Mince ! Il n'y a pas assez de carottes dans la caisse pour l'âne !",
   "DebugWarning": "Veuillez noter que le mode débogage est activé. Il n'est pas recommandé de le laisser activé sauf si vous en avez besoin.",
   "cfg.section.advanced": "Avancé",
   "cfg.section.delivery_times": "Horaires de livraison",

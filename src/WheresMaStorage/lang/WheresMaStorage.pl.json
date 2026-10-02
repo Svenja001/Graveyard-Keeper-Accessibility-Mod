@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "Dodatkowe miejsce w kontenerach",
   "cfg.additional_container_inventory_space.desc": "Liczba dodatkowych miejsc dla skrzyń, regałów, szafek i innych dzielonych schowków. Wymaga Modify Inventory Size.",
   "cfg.show_only_personal_inventory.name": "Pokazuj tylko osobisty ekwipunek",
-  "cfg.show_only_personal_inventory.desc": "Włącz lub wyłącz tę opcję.",
+  "cfg.show_only_personal_inventory.desc": "U handlarzy pokazuje tylko przedmioty, które masz przy sobie. Wyłącz, aby sprzedawać także przedmioty z magazynów (wymaga włączonej opcji Współdzielony ekwipunek).",
   "cfg.dont_show_empty_rows_in_inventory.name": "Ukryj puste rzędy w ekwipunku",
   "cfg.dont_show_empty_rows_in_inventory.desc": "Pokaż lub ukryj puste rzędy w ekwipunku.",
   "cfg.show_used_space_in_titles.name": "Pokaż zajęte miejsce w tytułach",

@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "常规",
   "cfg.section.catch_rates": "上钩概率",
   "cfg.section.updates": "更新",
+  "cfg.mode.name": "模式",
+  "cfg.mode.desc": "模组替你完成多少钓鱼步骤。\n\n• Skip Everything - 鱼立刻咬钩，无需小游戏直接钓上来。\n• Auto Hook Only - 咬钩时自动提竿。你仍需等待咬钩并完成收线小游戏。",
   "cfg.rare_fish_catch_rate.name": "稀有鱼上钩概率",
   "cfg.rare_fish_catch_rate.desc": "钓到稀有鱼的频率 - 金鱼、金鲑、金鲟、金鲫。百分比基于最好的鱼竿、宝石钓饵、距离 3、白天钓鱼；其他鱼竿或地点感觉相近。\\n\\n• Vanilla - 大约每 20 竿 1 条（约 5%，游戏默认值）。\\n• 略微提升 - 大约每 9 竿 1 条（约 11%）。\\n• 提升 - 大约每 5 竿 1 条（约 20%）。\\n• 大幅提升 - 大约每 3 竿 1 条（约 33%）。\\n• 非常常见 - 大约每两竿 1 条（约 50%）。",
   "cfg.check_for_updates.name": "检查更新",

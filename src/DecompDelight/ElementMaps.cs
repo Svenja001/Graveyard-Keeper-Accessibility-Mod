@@ -8,9 +8,9 @@ internal static class ElementMaps
     {
         {"brown", Element.Slowing},
         {"d_blue", Element.Acceleration},
-        {"gold", Element.Acceleration},
+        {"gold", Element.Gold},
         {"silver", Element.Silver},
-        {"graphite", Element.Acceleration},
+        {"graphite", Element.Graphite},
         {"d_green", Element.Health},
         {"d_violet", Element.Death},
         {"green", Element.Order},
@@ -25,6 +25,8 @@ internal static class ElementMaps
         {"alcohol", Element.Alcohol},
         {"blood", Element.Blood},
         {"salt", Element.Salt},
+        // Salt's output id is "taste_booster:salt", so the part after the last underscore is this.
+        {"booster:salt", Element.Salt},
         {"ash", Element.Ash},
     };
     
@@ -47,6 +49,8 @@ internal static class ElementMaps
         Blood,
         Salt,
         Ash,
-        Alcohol
+        Alcohol,
+        Gold,
+        Graphite
     }
 }

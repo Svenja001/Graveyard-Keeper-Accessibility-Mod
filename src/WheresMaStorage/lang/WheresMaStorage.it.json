@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "Spazi extra inventario contenitori",
   "cfg.additional_container_inventory_space.desc": "Numero di spazi extra per bauli, scaffali, armadi e altri stoccaggi condivisibili. Richiede Modify Inventory Size attivo.",
   "cfg.show_only_personal_inventory.name": "Mostra solo inventario personale",
-  "cfg.show_only_personal_inventory.desc": "Attiva o disattiva questa opzione.",
+  "cfg.show_only_personal_inventory.desc": "Dai mercanti mostra solo gli oggetti che hai con te. Disattiva per vendere anche gli oggetti dei tuoi depositi (richiede Inventario condiviso attivo).",
   "cfg.dont_show_empty_rows_in_inventory.name": "Nascondi righe vuote dell'inventario",
   "cfg.dont_show_empty_rows_in_inventory.desc": "Mostra o nasconde le righe vuote nell'inventario.",
   "cfg.show_used_space_in_titles.name": "Mostra spazio usato nei titoli",

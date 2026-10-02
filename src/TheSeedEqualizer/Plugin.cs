@@ -66,7 +66,7 @@ public class Plugin : BaseUnityPlugin
         DebugEnabled = Debug.Value;
         Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;
 
-        ModifyPlayerGardens = LocalizedConfig.Bind(Config, PlayerGardensSection, "Modify Player Gardens", false, "modify_player_gardens", order: 100);
+        ModifyPlayerGardens = LocalizedConfig.Bind(Config, PlayerGardensSection, "Modify Player Gardens", true, "modify_player_gardens", order: 100);
         BreakEvenPlayerGardens = LocalizedConfig.Bind(Config, PlayerGardensSection, "Player Gardens Break Even", false, "break_even_player_gardens", order: 99);
 
         ModifyZombieGardens = LocalizedConfig.Bind(Config, ZombieGardensSection, "Modify Zombie Gardens", true, "modify_zombie_gardens", order: 100);

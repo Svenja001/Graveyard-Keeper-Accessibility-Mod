@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "一般",
   "cfg.section.catch_rates": "釣り上げ確率",
   "cfg.section.updates": "アップデート",
+  "cfg.mode.name": "モード",
+  "cfg.mode.desc": "釣りのどこまでをMODに任せるか。\n\n• Skip Everything - 魚がすぐに食いつき、ミニゲームなしで釣り上げます。\n• Auto Hook Only - アタリは自動で合わせます。アタリを待つのと、巻き上げのミニゲームはそのままです。",
   "cfg.rare_fish_catch_rate.name": "レア魚の釣り上げ確率",
   "cfg.rare_fish_catch_rate.desc": "ゴールド魚、ゴールドサケ、ゴールドチョウザメ、ゴールドフナといったレア魚の釣れやすさです。パーセントは最良の竿、宝石ルアー、距離 3、昼間の釣りを想定しています。他の竿や場所でも同様の感覚になります。\\n\\n• バニラ - 約 20 回に 1 回（約 5%、ゲーム既定値）。\\n• やや増加 - 約 9 回に 1 回（約 11%）。\\n• 増加 - 約 5 回に 1 回（約 20%）。\\n• 大幅増加 - 約 3 回に 1 回（約 33%）。\\n• 非常に頻繁 - ほぼ 2 回に 1 回（約 50%）。",
   "cfg.check_for_updates.name": "アップデートを確認",

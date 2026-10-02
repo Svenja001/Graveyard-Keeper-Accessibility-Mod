@@ -29,7 +29,9 @@ public class Plugin : BaseUnityPlugin
     private static ConfigEntry<Color> SaltColor { get; set; }
     private static ConfigEntry<Color> AshColor { get; set; }
     private static ConfigEntry<Color> AlcoholColor { get; set; }
-        
+    private static ConfigEntry<Color> GoldColor { get; set; }
+    private static ConfigEntry<Color> GraphiteColor { get; set; }
+
     internal static string SlowingColorHex => Utils.ColorToHex(SlowingColor.Value);
     internal static string AccelerationColorHex => Utils.ColorToHex(AccelerationColor.Value);
     internal static string HealthColorHex => Utils.ColorToHex(HealthColor.Value);
@@ -47,6 +49,8 @@ public class Plugin : BaseUnityPlugin
     internal static string SaltColorHex => Utils.ColorToHex(SaltColor.Value);
     internal static string AshColorHex => Utils.ColorToHex(AshColor.Value);
     internal static string AlcoholColorHex => Utils.ColorToHex(AlcoholColor.Value);
+    internal static string GoldColorHex => Utils.ColorToHex(GoldColor.Value);
+    internal static string GraphiteColorHex => Utils.ColorToHex(GraphiteColor.Value);
     
     private void Awake()
     {
@@ -77,6 +81,8 @@ public class Plugin : BaseUnityPlugin
         SaltColor         = LocalizedConfig.Bind(Config, ColorsSection, "Salt",         new Color(0.404f, 0.404f, 0.404f), "color_salt");
         AshColor          = LocalizedConfig.Bind(Config, ColorsSection, "Ash",          new Color(0.157f, 0.157f, 0.157f), "color_ash");
         AlcoholColor      = LocalizedConfig.Bind(Config, ColorsSection, "Alcohol",      new Color(0.404f, 0.404f, 0.004f), "color_alcohol");
+        GoldColor         = LocalizedConfig.Bind(Config, ColorsSection, "Gold",         new Color(0.831f, 0.686f, 0.216f), "color_gold");
+        GraphiteColor     = LocalizedConfig.Bind(Config, ColorsSection, "Graphite",     new Color(0.255f, 0.255f, 0.275f), "color_graphite");
 
         CheckForUpdates = LocalizedConfig.Bind(Config, UpdatesSection, "Check for Updates", true, "check_for_updates", order: 0);
 

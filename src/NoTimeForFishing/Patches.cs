@@ -3,10 +3,14 @@ namespace NoTimeForFishing;
 [Harmony]
 public static class Patches
 {
+    private static bool AutoHookOnly => Plugin.Mode.Value == FishingMode.AutoHookOnly;
+
     [HarmonyPrefix]
     [HarmonyPatch(typeof(FishLogic), nameof(FishLogic.CalculateFishPos))]
     public static void FishLogic_CalculateFishPos(ref float pos, ref float rod_zone_size)
     {
+        if (AutoHookOnly) return;
+
         pos = 0f;
         rod_zone_size = 100f;
     }
@@ -15,6 +19,8 @@ public static class Patches
     [HarmonyPatch(typeof(FishingGUI), nameof(FishingGUI.UpdateWaitingForBite), null)]
     private static void FishingGUI_UpdateWaitingForBite_Postfix(FishingGUI __instance)
     {
+        if (AutoHookOnly) return;
+
         var fishy = __instance.GetRandomFish(out __instance._waiting_for_bite_delay);
         __instance._fish_def = fishy;
         __instance._fish = new Item(__instance._fish_def.item_id, 1);
@@ -27,10 +33,24 @@ public static class Patches
         Plugin.Log.LogInfo($"Caught {fishy.item_id} at {spot}, distance {__instance._throwing_distance_int}, rod {rod}{rare}.");
     }
 
+    // Auto Hook Only: hook the bite before the game can time it out. The reel decides the catch.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(FishingGUI), nameof(FishingGUI.UpdateWaitingForPulling), null)]
+    private static bool FishingGUI_UpdateWaitingForPulling_Prefix(FishingGUI __instance)
+    {
+        if (!AutoHookOnly) return true;
+        if (__instance._fish_preset == null) return true;
+
+        __instance.ChangeState(FishingGUI.FishingState.Pulling);
+        return false;
+    }
+
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FishingGUI), nameof(FishingGUI.UpdateWaitingForPulling), null)]
     private static void FishingGUI_UpdateWaitingForPulling(FishingGUI __instance)
     {
+        if (AutoHookOnly) return;
+
         __instance.is_success_fishing = true;
         __instance.ChangeState(FishingGUI.FishingState.Pulling);
     }
@@ -39,6 +59,8 @@ public static class Patches
     [HarmonyPatch(typeof(FishingGUI), nameof(FishingGUI.UpdatePulling), null)]
     private static void FishingGUI_UpdatePulling(FishingGUI __instance)
     {
+        if (AutoHookOnly) return;
+
         __instance.ChangeState(FishingGUI.FishingState.TakingOut);
     }
 

@@ -8,7 +8,11 @@ public static class Patches
     private static int _carrotCount;
     private static int _deliveryCount;
     private static bool _strikeDone;
+    private static int _carrotWarningDay = -1;
     internal static LogicData Ld;
+
+    // The donkey takes this many carrots from the box for each delivery.
+    private const int CarrotsPerDelivery = 5;
 
     private static TimeOfDay.TimeOfDayEnum? _lastPhaseLogged;
     private static bool? _lastTutLogged;
@@ -208,6 +212,25 @@ public static class Patches
         if (Plugin.DebugEnabled) Helpers.Log($"[EoD] All 4 delivery flags reset. New day begins at day={MainGame.me.save.day + 1} dow={(MainGame.me.save.day_of_week + 1) % 7}");
     }
 
+    // Loading another save must not carry today's warning across with it.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(SaveSlotsMenuGUI), nameof(SaveSlotsMenuGUI.PrepareScene))]
+    public static void SaveSlotsMenuGUI_PrepareScene()
+    {
+        _carrotWarningDay = -1;
+    }
+
+    // Said once a day at most. The delivery check runs every frame while a slot is waiting.
+    private static void WarnLowCarrots()
+    {
+        var today = MainGame.me.save.day;
+        if (_carrotWarningDay == today) return;
+
+        _carrotWarningDay = today;
+        Lang.Reload();
+        MainGame.me.player.Say(Lang.Get("CarrotMessage"), null, false, SpeechBubbleGUI.SpeechBubbleType.Think, SmartSpeechEngine.VoiceID.None, true);
+    }
+
     internal static bool ForceDonkey(WorldGameObject donkey)
     {
         if (donkey == null)
@@ -251,9 +274,10 @@ public static class Patches
         }
 
         if (Plugin.DebugEnabled) Helpers.Log($"[Force] carrot_box inventory[0]={_carrotCount}");
-        if (_carrotCount <= 0)
+        if (_carrotCount < CarrotsPerDelivery)
         {
-            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - carrot count <=0; player needs to restock the carrot box.");
+            if (Plugin.DebugEnabled) Helpers.Log($"[Force] Fail - carrot count {_carrotCount} is under {CarrotsPerDelivery}; player needs to restock the carrot box.");
+            WarnLowCarrots();
             return false;
         }
 
@@ -311,10 +335,9 @@ public static class Patches
             }
         }
 
-        if (_carrotCount <= 0)
+        if (_carrotCount < CarrotsPerDelivery)
         {
-            Lang.Reload();
-            MainGame.me.player.Say(Lang.Get("CarrotMessage"), null, false, SpeechBubbleGUI.SpeechBubbleType.Think, SmartSpeechEngine.VoiceID.None, true);
+            WarnLowCarrots();
         }
 
         if (Plugin.DebugEnabled) Helpers.Log($"[Delivery] session count={_deliveryCount}, carrots left={_carrotCount}, phase={TimeOfDay.me.time_of_day_enum} game_time={MainGame.game_time:F4}");

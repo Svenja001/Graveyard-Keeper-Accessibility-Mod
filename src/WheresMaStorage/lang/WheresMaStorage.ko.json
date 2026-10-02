@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "추가 컨테이너 인벤토리 공간",
   "cfg.additional_container_inventory_space.desc": "상자, 랙, 캐비닛 등 공유 가능한 저장소에 부여되는 추가 인벤토리 슬롯 수입니다. '인벤토리 크기 수정' 옵션이 켜져 있어야 합니다.",
   "cfg.show_only_personal_inventory.name": "개인 인벤토리만 표시",
-  "cfg.show_only_personal_inventory.desc": "이 옵션을 켜거나 끕니다.",
+  "cfg.show_only_personal_inventory.desc": "상인과 거래할 때 소지한 아이템만 표시합니다. 끄면 보관함의 아이템도 판매할 수 있습니다(공유 인벤토리가 켜져 있어야 합니다).",
   "cfg.dont_show_empty_rows_in_inventory.name": "인벤토리 빈 줄 숨기기",
   "cfg.dont_show_empty_rows_in_inventory.desc": "인벤토리에 빈 줄을 표시할지 여부를 설정합니다.",
   "cfg.show_used_space_in_titles.name": "제목에 사용된 공간 표시",

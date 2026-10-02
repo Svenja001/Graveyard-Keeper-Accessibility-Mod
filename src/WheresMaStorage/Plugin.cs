@@ -141,7 +141,7 @@ public class Plugin : BaseUnityPlugin
         ModifyStackSize = LocalizedConfig.Bind(Config, ItemStackingSection, "Modify Stack Size", true, "modify_stack_size", order: 100);
         ModifyStackSize.SettingChanged += (_, _) => Fields.StackSizesDirty = true;
 
-        StackSizeForStackables = LocalizedConfig.Bind(Config, ItemStackingSection, "Stack Size For Stackables", 999, "stack_size_for_stackables", new AcceptableValueRange<int>(1, 999), order: 99, dispNamePrefix: "    └ ");
+        StackSizeForStackables = LocalizedConfig.Bind(Config, ItemStackingSection, "Stack Size For Stackables", 999, "stack_size_for_stackables", new AcceptableValueRange<int>(1, Helpers.MaxStackSize), order: 99, dispNamePrefix: "    └ ");
         StackSizeForStackables.SettingChanged += (_, _) => Fields.StackSizesDirty = true;
 
         EnableGraveItemStacking = LocalizedConfig.Bind(Config, ItemStackingSection, "Grave Item Stacking", false, "grave_item_stacking", order: 98, dispNamePrefix: "    └ ");

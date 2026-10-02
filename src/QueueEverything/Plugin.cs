@@ -23,7 +23,6 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> ForceMultiCraft { get; private set; }
     internal static ConfigEntry<bool> AllowMultiQualityMultiCraft { get; private set; }
 
-    internal static ConfigEntry<float> FcTimeAdjustment { get; private set; }
     internal static ConfigEntry<bool> Debug { get; private set; }
     internal static bool DebugEnabled;
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
@@ -72,10 +71,6 @@ public class Plugin : BaseUnityPlugin
     internal static bool AlreadyRun { get; set; }
     internal static bool CcAlreadyRun { get; set; }
     internal static bool CraftsStarted { get; set; }
-    internal static bool ExhaustlessEnabled { get; set; }
-    internal static bool FasterCraftEnabled { get; set; }
-    internal static bool FasterCraftReloaded { get; set; }
-    internal static float TimeAdjustment { get; set; }
 
     private void Awake()
     {
@@ -91,15 +86,6 @@ public class Plugin : BaseUnityPlugin
 
     private void InitConfiguration()
     {
-        const string fcGuid = "p1xel8ted.gyk.fastercraftreloaded";
-        if (Harmony.HasAnyPatches(fcGuid))
-        {
-            var config = new ConfigFile(Path.Combine(Paths.ConfigPath, $"{fcGuid}.cfg"), true);
-            var cg = new ConfigDefinition("3. Speed Settings", "Craft Speed Multiplier");
-            FcTimeAdjustment = config.Bind(cg, 2f);
-            Log.LogInfo("Loading FasterCraft Reloaded Config");
-        }
-
         Debug = LocalizedConfig.Bind(Config, AdvancedSection, "Debug Logging", false, "debug_logging", order: 10);
         DebugEnabled = Debug.Value;
         Debug.SettingChanged += (_, _) => DebugEnabled = Debug.Value;

@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "Additional Container Inventory Space",
   "cfg.additional_container_inventory_space.desc": "Number of additional inventory spaces granted to chests, racks, cabinets and other shareable storage. Requires Modify Inventory Size to be on.",
   "cfg.show_only_personal_inventory.name": "Show Only Personal Inventory",
-  "cfg.show_only_personal_inventory.desc": "Enable or disable this option.",
+  "cfg.show_only_personal_inventory.desc": "At traders, show only the items you're carrying. Turn off to also sell items from your storage (needs Shared Inventory on).",
   "cfg.dont_show_empty_rows_in_inventory.name": "Dont Show Empty Rows In Inventory",
   "cfg.dont_show_empty_rows_in_inventory.desc": "Enable or disable displaying empty rows in the inventory.",
   "cfg.show_used_space_in_titles.name": "Show Used Space In Titles",

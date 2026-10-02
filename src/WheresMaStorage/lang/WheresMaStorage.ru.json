@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "Доп. ячейки в контейнерах",
   "cfg.additional_container_inventory_space.desc": "Сколько доп. ячеек дать сундукам, стеллажам, шкафам и другому общему хранилищу. Требует включённого Modify Inventory Size.",
   "cfg.show_only_personal_inventory.name": "Только личный инвентарь",
-  "cfg.show_only_personal_inventory.desc": "Включает или выключает эту опцию.",
+  "cfg.show_only_personal_inventory.desc": "У торговцев показывает только предметы, которые вы носите с собой. Выключите, чтобы продавать и предметы из хранилищ (нужен включённый Общий инвентарь).",
   "cfg.dont_show_empty_rows_in_inventory.name": "Не показывать пустые строки инвентаря",
   "cfg.dont_show_empty_rows_in_inventory.desc": "Показывать ли пустые строки в инвентаре.",
   "cfg.show_used_space_in_titles.name": "Показывать занятое место в заголовках",

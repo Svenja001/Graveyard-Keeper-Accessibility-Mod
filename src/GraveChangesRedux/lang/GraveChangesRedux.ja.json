@@ -11,5 +11,6 @@
   "cfg.ignore_skull_limit.name": "遺体のドクロ上限を無視",
   "cfg.ignore_skull_limit.desc": "遺体の白ドクロが少なくても、墓の装飾品質を全て反映させます。通常は墓のスコアが遺体の白ドクロ数で上限になりますが、その上限を解除します。元の挙動に戻すにはオフにしてください。",
   "cfg.check_for_updates.name": "アップデートを確認",
-  "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。"
+  "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。",
+  "FirstTalkNotice": "墓の変更は、司教との最初の会話を終えて道具を受け取るまで有効になりません。"
 }

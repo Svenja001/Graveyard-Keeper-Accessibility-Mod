@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "generated_at": "2026-07-18T05:09:31Z",
-  "generated_by": "update-manifest.yml@07121771",
+  "generated_at": "2026-10-02T16:30:14Z",
+  "generated_by": "update-manifest.yml@2180807c",
   "game_domain": "graveyardkeeper",
   "mods": [
     {
@@ -18,10 +18,10 @@
       "plugin_guid": "p1xel8ted.gyk.alchemyresearchredux",
       "nexus_mod_id": 90,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/90",
-      "latest_version": "0.1.8",
-      "latest_file_id": 1217,
+      "latest_version": "0.1.9",
+      "latest_file_id": 1324,
       "latest_file_name": "Alchemy Research Redux",
-      "uploaded_unix": 1780133999,
+      "uploaded_unix": 1790928618,
       "status": "ok"
     },
     {
@@ -58,10 +58,10 @@
       "plugin_guid": "p1xel8ted.gyk.bringoutyerdead",
       "nexus_mod_id": 73,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/73",
-      "latest_version": "0.2.8",
-      "latest_file_id": 1168,
+      "latest_version": "0.2.9",
+      "latest_file_id": 1325,
       "latest_file_name": "Bring Out Yer Dead",
-      "uploaded_unix": 1779190375,
+      "uploaded_unix": 1790928652,
       "status": "ok"
     },
     {
@@ -78,10 +78,10 @@
       "plugin_guid": "p1xel8ted.gyk.decompdelight",
       "nexus_mod_id": 86,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/86",
-      "latest_version": "0.1.9",
-      "latest_file_id": 1169,
+      "latest_version": "0.2.0",
+      "latest_file_id": 1320,
       "latest_file_name": "Decomp Delight",
-      "uploaded_unix": 1779190391,
+      "uploaded_unix": 1790928474,
       "status": "ok"
     },
     {
@@ -158,10 +158,10 @@
       "plugin_guid": "p1xel8ted.gyk.gravechangesredux",
       "nexus_mod_id": 89,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/89",
-      "latest_version": "0.1.11",
-      "latest_file_id": 1223,
+      "latest_version": "0.2.0",
+      "latest_file_id": 1319,
       "latest_file_name": "Grave Changes Redux",
-      "uploaded_unix": 1780819176,
+      "uploaded_unix": 1790928435,
       "status": "ok"
     },
     {
@@ -188,20 +188,20 @@
       "plugin_guid": "p1xel8ted.gyk.keeperscandles",
       "nexus_mod_id": 87,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/87",
-      "latest_version": "0.2.0",
-      "latest_file_id": 1232,
+      "latest_version": "0.2.1",
+      "latest_file_id": 1277,
       "latest_file_name": "Keepers Candles",
-      "uploaded_unix": 1781931600,
+      "uploaded_unix": 1789284470,
       "status": "ok"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.longerdays",
       "nexus_mod_id": 53,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/53",
-      "latest_version": "1.7.0",
-      "latest_file_id": 1250,
+      "latest_version": "1.7.2",
+      "latest_file_id": 1317,
       "latest_file_name": "Longer Days",
-      "uploaded_unix": 1784336771,
+      "uploaded_unix": 1790928354,
       "status": "ok"
     },
     {
@@ -268,10 +268,10 @@
       "plugin_guid": "p1xel8ted.gyk.notimeforfishing",
       "nexus_mod_id": 44,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/44",
-      "latest_version": "3.2.11",
-      "latest_file_id": 1186,
+      "latest_version": "3.3.0",
+      "latest_file_id": 1323,
       "latest_file_name": "No Time For Fishing",
-      "uploaded_unix": 1779190771,
+      "uploaded_unix": 1790928581,
       "status": "ok"
     },
     {
@@ -288,10 +288,10 @@
       "plugin_guid": "p1xel8ted.gyk.queueeverything",
       "nexus_mod_id": 57,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/57",
-      "latest_version": "2.2.0",
-      "latest_file_id": 1253,
+      "latest_version": "2.2.1",
+      "latest_file_id": 1280,
       "latest_file_name": "Queue Everything",
-      "uploaded_unix": 1784340499,
+      "uploaded_unix": 1789284628,
       "status": "ok"
     },
     {
@@ -308,10 +308,10 @@
       "plugin_guid": "p1xel8ted.gyk.restinpatches",
       "nexus_mod_id": 125,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/125",
-      "latest_version": "0.1.5",
-      "latest_file_id": 1230,
+      "latest_version": "0.1.7",
+      "latest_file_id": 1321,
       "latest_file_name": "Rest In Patches",
-      "uploaded_unix": 1781931533,
+      "uploaded_unix": 1790928510,
       "status": "ok"
     },
     {
@@ -338,20 +338,20 @@
       "plugin_guid": "p1xel8ted.gyk.theseedequalizer",
       "nexus_mod_id": 58,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/58",
-      "latest_version": "1.3.13",
-      "latest_file_id": 1192,
+      "latest_version": "1.4.0",
+      "latest_file_id": 1326,
       "latest_file_name": "The Seed Equalizer",
-      "uploaded_unix": 1779190896,
+      "uploaded_unix": 1790928820,
       "status": "ok"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.thoughtfulreminders",
       "nexus_mod_id": 52,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/52",
-      "latest_version": "2.2.14",
-      "latest_file_id": 1193,
+      "latest_version": "2.3.1",
+      "latest_file_id": 1322,
       "latest_file_name": "Thoughtful Reminders",
-      "uploaded_unix": 1779190910,
+      "uploaded_unix": 1790928545,
       "status": "ok"
     },
     {
@@ -368,20 +368,20 @@
       "plugin_guid": "p1xel8ted.gyk.wheresmapoints",
       "nexus_mod_id": 71,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/71",
-      "latest_version": "0.3.6",
-      "latest_file_id": 1195,
+      "latest_version": "0.3.7",
+      "latest_file_id": 1278,
       "latest_file_name": "Wheres Ma Points",
-      "uploaded_unix": 1779190940,
+      "uploaded_unix": 1789284545,
       "status": "ok"
     },
     {
       "plugin_guid": "p1xel8ted.gyk.wheresmastorage",
       "nexus_mod_id": 62,
       "nexus_url": "https://www.nexusmods.com/graveyardkeeper/mods/62",
-      "latest_version": "2.2.0",
-      "latest_file_id": 1231,
+      "latest_version": "2.2.2",
+      "latest_file_id": 1318,
       "latest_file_name": "Where's Ma Storage",
-      "uploaded_unix": 1781931562,
+      "uploaded_unix": 1790928393,
       "status": "ok"
     },
     {

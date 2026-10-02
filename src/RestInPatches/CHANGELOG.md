@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.7 | 2 October 2026
+
+- Fixed D-pad presses counting twice at high frame rates
+
+## 0.1.6 | 13 September 2026
+
+- Fixed the Max Footprints setting having no effect
+- Footprints now fade away instead of vanishing on the spot
+- Added a setting for how quickly footprints fade out when the limit removes them
+- Fixed the rest of the mod failing to load when another footprint mod is installed
+
 ## 0.1.5 | 20 June 2026
 
 - Added an option to turn off player movement smoothing

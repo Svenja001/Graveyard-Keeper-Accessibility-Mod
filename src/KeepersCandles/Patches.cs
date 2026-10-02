@@ -95,6 +95,7 @@ public static class Patches
             {
                 Helpers.Log($"[Extinguish:{typeLabel}] no lit {typeLabel}s in current zone");
             }
+            ResetArrow();
             MainGame.me.player.Say(Lang.Get(noneFoundLangKey), null, false, SpeechBubbleGUI.SpeechBubbleType.Think, SmartSpeechEngine.VoiceID.None, true);
         }
     }
@@ -143,27 +144,25 @@ public static class Patches
         try
         {
             var craftUpdates = 0;
+            // Visit every candle and incense definition, including the ones set to burn down, so
+            // switching burn-down on puts the game's own values back.
             foreach (var obj in GameBalance._instance.craft_data.Where(obj => Plugin.ShouldProcess(obj.id)))
             {
-                obj.dur_needs_item = 0f;
-                obj.dur_parameter = 0f;
-                obj.can_craft_always = true;
+                BalanceSnapshots.Apply(obj, Plugin.KeepsBurning(obj.id));
                 craftUpdates++;
             }
 
             var defUpdates = 0;
             foreach (var obj in GameBalance._instance.objs_data.Where(obj => Plugin.ShouldProcess(obj.id)))
             {
-                obj.durability_modificator = 0f;
-                obj.always_active = true;
+                BalanceSnapshots.Apply(obj, Plugin.KeepsBurning(obj.id));
                 defUpdates++;
             }
 
             var wgoUpdates = 0;
             foreach (var wgo in WorldMap._objs.Where(wgo => Plugin.ShouldProcess(wgo.obj_id) || Plugin.ShouldProcess(wgo.obj_def.id)))
             {
-                wgo.obj_def.durability_modificator = 0f;
-                wgo.obj_def.always_active = true;
+                BalanceSnapshots.Apply(wgo.obj_def, Plugin.KeepsBurning(wgo.obj_id) || Plugin.KeepsBurning(wgo.obj_def.id));
                 wgoUpdates++;
             }
 
@@ -173,6 +172,7 @@ public static class Patches
             }
 
             FixCandles();
+            ClearStrandedIncense();
             ChurchColumnsToggle();
         }
         catch (Exception ex)
@@ -186,42 +186,83 @@ public static class Patches
 
     private static void ReplaceAndDrop(WorldGameObject wgo, string unlitCandle)
     {
+        var litId = wgo.obj_id;
+        var startOutputs = wgo.components.craft.current_craft?.output_to_wgo_on_start;
+
+        // With burn-down on, giving the candle or incense back would let a player put it out
+        // just before it finishes and relight it, so it never burns down.
+        var burnsDown = !Plugin.KeepsBurning(litId);
+        List<Item> refund = burnsDown ? [] : GetRefund(wgo, litId, unlitCandle);
+
         wgo.ReplaceWithObject(unlitCandle, true);
         wgo.components.craft.is_crafting = false;
 
-        var candleItem = wgo.components.craft._cur_craft_items_used.FirstOrDefault();
-        if (candleItem != null)
+        // Lighting incense puts a hidden church rating item inside the burner. The game takes it
+        // back out when a craft ends, but ours never ends, so remove it here.
+        if (startOutputs is { Count: > 0 })
+        {
+            wgo.data.RemoveItems(startOutputs);
+        }
+
+        var cleared = ClearStrandedRatingItems(wgo);
+        if (cleared > 0 && Plugin.DebugEnabled)
+        {
+            Helpers.Log($"[ReplaceAndDrop] removed {cleared} leftover church rating item(s) from '{wgo.obj_id}'");
+        }
+
+        if (burnsDown)
         {
             if (Plugin.DebugEnabled)
             {
-                Helpers.Log($"[ReplaceAndDrop] dropping recovered candle item={candleItem.id} qty={candleItem.value} at {wgo.tf.position}");
+                Helpers.Log($"[ReplaceAndDrop] no refund for '{litId}' - burn-down is on for this type");
             }
-            DropResGameObject.Drop(wgo.tf.position, candleItem, wgo.tf.parent, Direction.ToPlayer, 3f, Random.Range(0, 2), force_stacked_drop: true);
+            return;
         }
-        else
+
+        if (refund.Count == 0)
         {
-            Helpers.Log($"Could not find candle item used for {wgo.obj_id}. Please report this!", true);
+            Helpers.Log($"Could not find candle item used for {litId}. Please report this!", true);
+            return;
         }
+
+        foreach (var item in refund)
+        {
+            if (Plugin.DebugEnabled)
+            {
+                Helpers.Log($"[ReplaceAndDrop] dropping recovered candle item={item.id} qty={item.value} at {wgo.tf.position}");
+            }
+            DropResGameObject.Drop(wgo.tf.position, item, wgo.tf.parent, Direction.ToPlayer, 3f, Random.Range(0, 2), force_stacked_drop: true);
+        }
+    }
+
+    // What to hand back when extinguishing. Candle holders start their burn-out craft the moment
+    // they're lit, which wipes the list of candles used, so read the candles off the recipe that
+    // lit the holder instead. The drop keeps the item it's given, so always hand it a copy.
+    private static List<Item> GetRefund(WorldGameObject wgo, string litId, string unlitId)
+    {
+        if (!Plugin.MatchesKeyword(litId, Plugin.Candelabrum))
+        {
+            var used = wgo.components.craft._cur_craft_items_used.FirstOrDefault();
+            return used == null ? [] : [new Item(used)];
+        }
+
+        // wall_candelabrum_3_3 was lit by wall_candelabrum_3_to_3_3.
+        var marker = Plugin.Candelabrum + "_";
+        var at = litId.IndexOf(marker, StringComparison.Ordinal);
+        if (at < 0) return [];
+
+        var craftId = $"{unlitId}_to_{litId.Substring(at + marker.Length)}";
+        var craft = GameBalance.me.GetDataOrNull<CraftDefinition>(craftId);
+        if (craft?.needs == null) return [];
+
+        return craft.needs.Where(need => need != null && need.value > 0).Select(need => new Item(need)).ToList();
     }
 
     private static void FixCandles()
     {
         var fixedCount = 0;
-        foreach (var wgo in WorldMap._objs.Where(wgo => Plugin.ShouldProcess(wgo.obj_id) || Plugin.ShouldProcess(wgo.obj_def.id)))
+        foreach (var wgo in WorldMap._objs.Where(wgo => Plugin.IsLit(wgo.obj_id) && Plugin.KeepsBurning(wgo.obj_id)))
         {
-            bool lit;
-            if (Plugin.MatchesKeyword(wgo.obj_id, Plugin.Incense))
-            {
-                // c_obj_incense_N is the lit burner; the _place version is the empty build state.
-                lit = !wgo.obj_id.EndsWith("_place");
-            }
-            else
-            {
-                // candelabrum_N_q has two underscores after the keyword; the bare candelabrum_N has one.
-                var postfix = wgo.obj_id.Split([Plugin.Candelabrum], StringSplitOptions.None).Last();
-                lit = postfix.Count(c => c == '_') >= 2;
-            }
-            if (!lit) continue;
             if (Plugin.DebugEnabled)
             {
                 Helpers.Log($"[FixCandles] correcting '{wgo.obj_id}' crafting status → true");
@@ -249,9 +290,39 @@ public static class Patches
             {
                 Helpers.Log($"[ChunkedGameObject.Init] registered church column '{name}' (total={Plugin.ChurchColumnsList.Count})");
             }
+
+            ChurchColumnsToggle();
+        }
+    }
+
+    // Empty incense burners. Their balance data gives them no inventory, so any rating item
+    // found in one was left behind by an earlier extinguish.
+    private static readonly string[] UnlitIncenseIds = ["c_obj_incense_1_place", "c_obj_incense_2_place"];
+    private const string RatingItemPrefix = "pseudo_item_qual_";
+
+    private static int ClearStrandedRatingItems(WorldGameObject wgo)
+    {
+        if (!wgo || !UnlitIncenseIds.Contains(wgo.obj_id)) return 0;
+
+        var inventory = wgo.data?.inventory;
+        if (inventory == null) return 0;
+
+        return inventory.RemoveAll(item => item?.id != null && item.id.StartsWith(RatingItemPrefix));
+    }
+
+    // Fixes saves where extinguishing incense on an older version already left extra rating behind.
+    private static void ClearStrandedIncense()
+    {
+        var removed = 0;
+        foreach (var wgo in WorldMap._objs)
+        {
+            removed += ClearStrandedRatingItems(wgo);
         }
 
-        ChurchColumnsToggle();
+        if (removed > 0 && Plugin.DebugEnabled)
+        {
+            Helpers.Log($"[ClearStrandedIncense] removed {removed} leftover church rating item(s) from empty incense burners");
+        }
     }
 
     [HarmonyPostfix]
@@ -268,7 +339,7 @@ public static class Patches
     [HarmonyPatch(typeof(CraftComponent), nameof(CraftComponent.ReallyUpdateComponent))]
     public static bool CraftComponent_ReallyUpdateComponent(CraftComponent __instance)
     {
-        var blocked = Plugin.ShouldProcess(__instance.wgo.obj_id);
+        var blocked = Plugin.KeepsBurning(__instance.wgo.obj_id);
         if (blocked && Plugin.DebugEnabled)
         {
             Helpers.Log($"[CraftComponent.ReallyUpdateComponent] skipping craft tick for '{__instance.wgo.obj_id}' (keeps candle/incense lit indefinitely)");

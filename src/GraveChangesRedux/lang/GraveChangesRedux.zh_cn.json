@@ -11,5 +11,6 @@
   "cfg.ignore_skull_limit.name": "忽略尸体骷髅上限",
   "cfg.ignore_skull_limit.desc": "即使尸体的白骷髅很少，也让坟墓计入全部装饰品质。原版会把墓地分数限制在尸体白骷髅数以内，此选项解除该上限。想恢复原版表现请关闭。",
   "cfg.check_for_updates.name": "检查更新",
-  "cfg.check_for_updates.desc": "当 NexusMods 上有此模组的更新版本时，在主菜单显示提示。点击提示可打开模组页面。"
+  "cfg.check_for_updates.desc": "当 NexusMods 上有此模组的更新版本时，在主菜单显示提示。点击提示可打开模组页面。",
+  "FirstTalkNotice": "在你与主教完成第一次对话并拿到工具之前，墓地改动不会生效。"
 }

@@ -23,6 +23,8 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> Debug { get; private set; }
     internal static ConfigEntry<float> ExtinguishDistance { get; private set; }
     internal static ConfigEntry<bool> DirectionalArrow { get; private set; }
+    internal static ConfigEntry<bool> CandlesBurnDown { get; private set; }
+    internal static ConfigEntry<bool> IncenseBurnsDown { get; private set; }
     internal static ConfigEntry<bool> ChurchColumns { get; private set; }
     internal static ConfigEntry<KeyboardShortcut> ExtinguishCandleKeyBind { get; private set; }
     internal static ConfigEntry<string> ExtinguishCandleControllerButton { get; private set; }
@@ -58,6 +60,12 @@ public class Plugin : BaseUnityPlugin
         };
 
         DirectionalArrow = LocalizedConfig.Bind(Config, CandlesSection, "Directional Arrow", true, "directional_arrow", order: 99);
+
+        // Both are bound before either handler, because a change re-runs the pass that reads both.
+        CandlesBurnDown = LocalizedConfig.Bind(Config, CandlesSection, "Candles Burn Down", false, "candles_burn_down", order: 98);
+        IncenseBurnsDown = LocalizedConfig.Bind(Config, CandlesSection, "Incense Burns Down", false, "incense_burns_down", order: 97);
+        CandlesBurnDown.SettingChanged += (_, _) => Patches.OnGameBalanceLoaded();
+        IncenseBurnsDown.SettingChanged += (_, _) => Patches.OnGameBalanceLoaded();
         DirectionalArrow.SettingChanged += (_, _) => Patches.ResetArrow();
 
         ChurchColumns = LocalizedConfig.Bind(Config, ChurchSection, "Church Columns", true, "church_columns", order: 100);
@@ -85,23 +93,52 @@ public class Plugin : BaseUnityPlugin
         return !id.Contains(Souls) && (id.Contains(Candelabrum) || id.Contains(Incense));
     }
 
+    // Whether this candle holder or incense burner stays lit forever with the current settings.
+    internal static bool KeepsBurning(string id)
+    {
+        if (!ShouldProcess(id)) return false;
+
+        return id.Contains(Candelabrum) ? !CandlesBurnDown.Value : !IncenseBurnsDown.Value;
+    }
+
     internal static bool MatchesKeyword(string id, string keyword)
     {
         return !id.Contains(Souls) && id.Contains(keyword);
     }
 
+    // A burner's own id says whether it's lit.
+    internal static bool IsLit(string id)
+    {
+        // c_obj_incense_N is the lit burner; the _place version is the empty build state.
+        if (MatchesKeyword(id, Incense)) return !id.EndsWith("_place");
+        if (!MatchesKeyword(id, Candelabrum)) return false;
+
+        // candelabrum_N_q has two underscores after the keyword; the bare candelabrum_N has one.
+        var postfix = id.Split([Candelabrum], StringSplitOptions.None).Last();
+        return postfix.Count(c => c == '_') >= 2;
+    }
+
     internal static string GetUnlitReplacement(WorldGameObject wgo)
     {
+        string unlit;
+
         // Incense burner: lit "c_obj_incense_2" turns back into empty "c_obj_incense_2_place".
         // If it already ends in _place it's empty, so there's nothing to extinguish.
         if (MatchesKeyword(wgo.obj_id, Incense))
         {
-            return wgo.obj_id.EndsWith("_place") ? string.Empty : wgo.obj_id + "_place";
+            unlit = wgo.obj_id.EndsWith("_place") ? string.Empty : wgo.obj_id + "_place";
+        }
+        else
+        {
+            // Candelabrum: lit "wall_candelabrum_2_1" drops its candle-count suffix back to "wall_candelabrum_2".
+            var cut = wgo.obj_id.LastIndexOf('_');
+            unlit = cut > 0 ? wgo.obj_id.Substring(0, cut) : string.Empty;
         }
 
-        // Candelabrum: lit "wall_candelabrum_2_1" drops its candle-count suffix back to "wall_candelabrum_2".
-        var cut = wgo.obj_id.LastIndexOf('_');
-        return cut > 0 ? wgo.obj_id.Substring(0, cut) : string.Empty;
+        if (string.IsNullOrWhiteSpace(unlit)) return string.Empty;
+
+        // Swapping in an id the game has no object for breaks the object, so check it exists first.
+        return GameBalance.me.GetDataOrNull<ObjectDefinition>(unlit) != null ? unlit : string.Empty;
     }
 
     internal static List<WorldGameObject> GetCandles()  => GetLitBurners(Candelabrum);
@@ -109,13 +146,14 @@ public class Plugin : BaseUnityPlugin
 
     private static List<WorldGameObject> GetLitBurners(string keyword)
     {
+        // Outside any zone there's nothing nearby to point at. Searching the whole world found
+        // candles in the church from across the map and aimed the arrow off the edge of it.
         var zone = MainGame.me.player.GetMyWorldZone();
+        if (!zone) return [];
 
-        var all = zone
-            ? zone.GetZoneWGOs().Where(wgo => MatchesKeyword(wgo.obj_id, keyword) || MatchesKeyword(wgo.obj_def.id, keyword)).ToList()
-            : WorldMap._objs.Where(wgo => MatchesKeyword(wgo.obj_id, keyword) || MatchesKeyword(wgo.obj_def.id, keyword)).ToList();
-
-        return all.Where(wgo => wgo.components.craft.is_crafting).ToList();
+        // A burner marked for demolition has a craft running, so it would otherwise look lit.
+        // Leave those to the build desk.
+        return zone.GetZoneWGOs().Where(wgo => MatchesKeyword(wgo.obj_id, keyword) && IsLit(wgo.obj_id) && !wgo.is_removing).ToList();
     }
 
     internal static string GetPath(Transform transform)

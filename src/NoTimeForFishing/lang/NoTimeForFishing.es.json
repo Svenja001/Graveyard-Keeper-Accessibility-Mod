@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "General",
   "cfg.section.catch_rates": "Probabilidades de captura",
   "cfg.section.updates": "Actualizaciones",
+  "cfg.mode.name": "Modo",
+  "cfg.mode.desc": "Cuánto de la pesca hace el mod por ti.\n\n• Skip Everything - el pez pica al instante y se captura sin el minijuego.\n• Auto Hook Only - el mod engancha la picada por ti. Sigues esperando la picada y jugando el minijuego de recoger el sedal.",
   "cfg.rare_fish_catch_rate.name": "Probabilidad de pez raro",
   "cfg.rare_fish_catch_rate.desc": "Con qué frecuencia sacas peces raros - el pez de oro, el salmón de oro, el esturión de oro y el carpín de oro. Los porcentajes asumen la mejor caña, cebo de gema, distancia 3 y pesca de día; otras cañas o lugares se sentirán similares.\\n\\n• Vanilla - unos 1 raro cada 20 lanzamientos (alrededor del 5%, el valor del juego).\\n• Ligeramente aumentada - unos 1 de cada 9 lanzamientos (alrededor del 11%).\\n• Aumentada - unos 1 de cada 5 lanzamientos (alrededor del 20%).\\n• Muy aumentada - unos 1 de cada 3 lanzamientos (alrededor del 33%).\\n• Muy común - aproximadamente uno sí y otro no (alrededor del 50%).",
   "cfg.check_for_updates.name": "Buscar actualizaciones",

@@ -15,6 +15,8 @@
   "cfg.smooth_player_movement.desc": "物理補間でプレイヤーの移動を滑らかにし、ピクセル単位の動きに縛られないようにします。キャラクターが対象にうまく合わせられない場合などは、オフにすると元の移動に戻ります。",
   "cfg.max_footprints.name": "足跡の最大数",
   "cfg.max_footprints.desc": "保持する足跡の最大数。超過分は古いものから削除。0 で上限なし。",
+  "cfg.footprint_fade_seconds.name": "足跡のフェード時間",
+  "cfg.footprint_fade_seconds.desc": "最大足跡数の上限によって足跡が削除されるとき、表示中の足跡が消えるまでの秒数です。0 にすると即座に削除します。通常の足跡の持続時間は変わりません。変更は以降に削除される足跡に適用されます。",
   "cfg.check_for_updates.name": "アップデートを確認",
   "cfg.check_for_updates.desc": "NexusMods にこの MOD の新しいバージョンが公開されると、メインメニューに通知を表示します。通知をクリックすると MOD ページが開きます。"
 }

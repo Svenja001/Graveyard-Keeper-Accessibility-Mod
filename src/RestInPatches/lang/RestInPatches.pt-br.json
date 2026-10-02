@@ -15,6 +15,8 @@
   "cfg.smooth_player_movement.desc": "Suaviza o movimento do jogador com interpolação física para que ele não fique preso à grade de pixels. Desative para restaurar o movimento original do jogo, por exemplo se o personagem tiver dificuldade de se alinhar aos pontos de interação.",
   "cfg.max_footprints.name": "Máx. de pegadas",
   "cfg.max_footprints.desc": "Número máximo de pegadas antes de remover as mais antigas. 0 desativa o limite.",
+  "cfg.footprint_fade_seconds.name": "Tempo de desaparecimento das pegadas",
+  "cfg.footprint_fade_seconds.desc": "Tempo em segundos para as pegadas visíveis desaparecerem quando o limite máximo de pegadas as remove. Defina como 0 para removê-las instantaneamente. Não altera a duração normal das pegadas. As alterações valem para as pegadas removidas a partir de agora.",
   "cfg.check_for_updates.name": "Verificar atualizações",
   "cfg.check_for_updates.desc": "Mostra um aviso no menu principal quando há uma nova versão deste mod no NexusMods. Clique no aviso para abrir a página do mod."
 }

@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "Allgemein",
   "cfg.section.catch_rates": "Fangchancen",
   "cfg.section.updates": "Aktualisierungen",
+  "cfg.mode.name": "Modus",
+  "cfg.mode.desc": "Wie viel vom Angeln der Mod für dich übernimmt.\n\n• Skip Everything - der Fisch beißt sofort an und wird ohne Minispiel gefangen.\n• Auto Hook Only - der Biss wird für dich angeschlagen. Du wartest weiterhin auf den Biss und spielst das Einhol-Minispiel.",
   "cfg.rare_fish_catch_rate.name": "Fangchance für seltene Fische",
   "cfg.rare_fish_catch_rate.desc": "Wie oft du seltene Fische fängst - den Goldfisch, Lachs in Gold, Stör in Gold und Karausche in Gold. Prozentwerte gelten für die beste Rute, Edelstein-Köder, Distanz 3 und Tageslicht; andere Ruten oder Stellen fühlen sich ähnlich an.\\n\\n• Vanilla - etwa 1 seltener Fisch alle 20 Würfe (rund 5%, die Standardchance).\\n• Etwas erhöht - etwa 1 von 9 Würfen (rund 11%).\\n• Erhöht - etwa 1 von 5 Würfen (rund 20%).\\n• Stark erhöht - etwa 1 von 3 Würfen (rund 33%).\\n• Sehr häufig - etwa jeder zweite Wurf (rund 50%).",
   "cfg.check_for_updates.name": "Auf Updates prüfen",

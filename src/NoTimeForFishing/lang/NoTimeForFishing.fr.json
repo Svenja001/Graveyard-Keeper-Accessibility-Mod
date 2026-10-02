@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "Général",
   "cfg.section.catch_rates": "Taux de capture",
   "cfg.section.updates": "Mises à jour",
+  "cfg.mode.name": "Mode",
+  "cfg.mode.desc": "Quelle part de la pêche le mod fait à votre place.\n\n• Skip Everything - le poisson mord tout de suite et est attrapé sans le mini-jeu.\n• Auto Hook Only - la touche est ferrée pour vous. Vous attendez toujours la touche et jouez le mini-jeu du moulinet.",
   "cfg.rare_fish_catch_rate.name": "Taux de poissons rares",
   "cfg.rare_fish_catch_rate.desc": "Fréquence à laquelle tu attrapes des poissons rares - le poisson d'or, le saumon en or, l'esturgeon en or et le carassin en or. Les pourcentages supposent la meilleure canne, appât en gemme, distance 3, et pêche de jour ; les autres cannes ou spots se ressentent de manière similaire.\\n\\n• Vanilla - environ 1 rare sur 20 lancers (autour de 5%, le taux du jeu).\\n• Légèrement augmenté - environ 1 sur 9 lancers (autour de 11%).\\n• Augmenté - environ 1 sur 5 lancers (autour de 20%).\\n• Fortement augmenté - environ 1 sur 3 lancers (autour de 33%).\\n• Très courant - environ un lancer sur deux (autour de 50%).",
   "cfg.check_for_updates.name": "Vérifier les mises à jour",

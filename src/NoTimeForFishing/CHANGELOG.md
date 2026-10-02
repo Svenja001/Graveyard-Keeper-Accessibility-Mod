@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.3.0 | 2 October 2026
+
+- Added a Mode setting. Auto Hook Only hooks the bite for you and leaves the wait and the reel mini-game to play
+
 ## 3.2.11 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

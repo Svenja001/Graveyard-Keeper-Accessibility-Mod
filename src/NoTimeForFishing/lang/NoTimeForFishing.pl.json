@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "Ogólne",
   "cfg.section.catch_rates": "Szanse złowienia",
   "cfg.section.updates": "Aktualizacje",
+  "cfg.mode.name": "Tryb",
+  "cfg.mode.desc": "Ile łowienia mod robi za ciebie.\n\n• Skip Everything - ryba bierze od razu i zostaje złowiona bez minigry.\n• Auto Hook Only - branie jest zacinane za ciebie. Nadal czekasz na branie i grasz w minigrę zwijania.",
   "cfg.rare_fish_catch_rate.name": "Szansa na rzadką rybę",
   "cfg.rare_fish_catch_rate.desc": "Jak często łowisz rzadkie ryby - złotą rybkę, złotego łososia, złotego jesiotra i złotego karasia. Procenty zakładają najlepszą wędkę, przynętę z klejnotu, dystans 3 i łowienie za dnia; inne wędki lub miejsca dają podobne odczucia.\\n\\n• Vanilla - około 1 rzadka na 20 zarzutów (około 5%, oryginalny współczynnik).\\n• Lekko zwiększona - około 1 na 9 zarzutów (około 11%).\\n• Zwiększona - około 1 na 5 zarzutów (około 20%).\\n• Znacznie zwiększona - około 1 na 3 zarzuty (około 33%).\\n• Bardzo częsta - mniej więcej co drugi zarzut (około 50%).",
   "cfg.check_for_updates.name": "Sprawdź aktualizacje",

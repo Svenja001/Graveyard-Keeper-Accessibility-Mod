@@ -15,6 +15,8 @@
   "cfg.smooth_player_movement.desc": "Wygładza ruch gracza interpolacją fizyki, by nie był przywiązany do siatki pikseli. Wyłącz, aby przywrócić oryginalny ruch gry, na przykład gdy postać ma problem z trafieniem w punkty interakcji.",
   "cfg.max_footprints.name": "Maks. śladów",
   "cfg.max_footprints.desc": "Maks. liczba śladów przed usunięciem najstarszych. 0 wyłącza limit.",
+  "cfg.footprint_fade_seconds.name": "Czas zanikania śladów",
+  "cfg.footprint_fade_seconds.desc": "Czas w sekundach, w jakim widoczne ślady znikają, gdy limit maksymalnej liczby śladów je usuwa. Ustaw 0, aby usuwać je natychmiast. Nie zmienia normalnego czasu trwania śladów. Zmiany dotyczą śladów usuwanych od tej pory.",
   "cfg.check_for_updates.name": "Sprawdź aktualizacje",
   "cfg.check_for_updates.desc": "Wyświetla powiadomienie w menu głównym, gdy na NexusMods pojawi się nowsza wersja tego moda. Kliknij powiadomienie, aby otworzyć stronę moda."
 }

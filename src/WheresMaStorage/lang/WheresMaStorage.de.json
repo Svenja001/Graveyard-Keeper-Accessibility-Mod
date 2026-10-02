@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "Zusätzliche Container-Inventarplätze",
   "cfg.additional_container_inventory_space.desc": "Anzahl zusätzlicher Inventarplätze für Kisten, Regale, Schränke und andere teilbare Lager. Benötigt aktiviertes Modify Inventory Size.",
   "cfg.show_only_personal_inventory.name": "Nur persönliches Inventar anzeigen",
-  "cfg.show_only_personal_inventory.desc": "Diese Option aktivieren oder deaktivieren.",
+  "cfg.show_only_personal_inventory.desc": "Zeigt bei Händlern nur die Gegenstände, die du bei dir trägst. Ausschalten, um auch Gegenstände aus deinen Lagern zu verkaufen (Geteiltes Inventar muss aktiv sein).",
   "cfg.dont_show_empty_rows_in_inventory.name": "Leere Inventarzeilen ausblenden",
   "cfg.dont_show_empty_rows_in_inventory.desc": "Leere Zeilen im Inventar anzeigen oder ausblenden.",
   "cfg.show_used_space_in_titles.name": "Belegung in Titeln anzeigen",

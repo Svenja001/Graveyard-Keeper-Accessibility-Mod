@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.7 | 13 September 2026
+
+- Orbs still lying on the ground are now added to your totals
+
 ## 0.3.6 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

@@ -6,6 +6,16 @@ public static class Helpers
     internal static readonly Dictionary<string, int> OriginalInventorySizes = new();
     private static readonly Dictionary<string, int> OriginalStackSizes = new();
 
+    internal const int MaxStackSize = 9999;
+
+    // Up to 999 the setting is added to the item's own size and stops at 999, as it always has.
+    // Above 999 the setting is the stack size.
+    private static int NewStackSize(int current)
+    {
+        var wanted = Plugin.StackSizeForStackables.Value;
+        return Mathf.Min(current + wanted, Mathf.Max(wanted, 999));
+    }
+
     internal static void RunWmsTasks()
     {
         if (!MainGame.game_started) return;
@@ -64,12 +74,13 @@ public static class Helpers
         RestoreStackSizes();
         if (!Plugin.ModifyStackSize.Value) return;
 
+        // 999 here is not the cap. It keeps the game's own huge counters (faith, science) out.
         foreach (var id in GameBalance.me.items_data.Where(id => id.stack_count is > 1 and <= 999))
         {
             if (id.is_tool || id.IsWeapon() || id.IsEquipment() || id.type == ItemDefinition.ItemType.Preach || Fields.PenPaperInkItems.Contains(id.id) || Fields.ChiselItems.Contains(id.id) || Fields.GraveItems.Contains(id.type) || Fields.SinShardItems.Contains(id.id)) continue;
             if (!OriginalStackSizes.TryGetValue(id.id, out var originalSize)) continue;
 
-            var newSize = Mathf.Min(originalSize + Plugin.StackSizeForStackables.Value, 999);
+            var newSize = NewStackSize(originalSize);
             if (Plugin.DebugEnabled) Log($"Modifying stack size for: {id.id}, {id.stack_count} -> {newSize}");
             id.stack_count = newSize;
         }
@@ -78,7 +89,7 @@ public static class Helpers
         {
             foreach (var item in GameBalance.me.items_data.Where(item => item.IsEquipment() && !item.is_tool))
             {
-                item.stack_count = Mathf.Min(item.stack_count + Plugin.StackSizeForStackables.Value, 999);
+                item.stack_count = NewStackSize(item.stack_count);
                 if (Plugin.DebugEnabled) Log($"EquipmentStacking: Modifying stack size for: {item.id}, {item.stack_count}");
             }
         }
@@ -87,7 +98,7 @@ public static class Helpers
         {
             foreach (var item in GameBalance.me.items_data.Where(item => item.IsWeapon()))
             {
-                item.stack_count = Mathf.Min(item.stack_count + Plugin.StackSizeForStackables.Value, 999);
+                item.stack_count = NewStackSize(item.stack_count);
                 if (Plugin.DebugEnabled) Log($"WeaponStacking: Modifying stack size for: {item.id}, {item.stack_count}");
             }
         }
@@ -97,7 +108,7 @@ public static class Helpers
         {
             foreach (var item in GameBalance.me.items_data.Where(item => item.is_tool && !item.IsWeapon()))
             {
-                item.stack_count = Mathf.Min(item.stack_count + Plugin.StackSizeForStackables.Value, 999);
+                item.stack_count = NewStackSize(item.stack_count);
                 if (Plugin.DebugEnabled) Log($"ToolStacking: Modifying stack size for: {item.id}, {item.stack_count}");
             }
         }
@@ -106,7 +117,7 @@ public static class Helpers
         {
             foreach (var item in GameBalance.me.items_data.Where(item => item.type == ItemDefinition.ItemType.Preach))
             {
-                item.stack_count = Mathf.Min(item.stack_count + Plugin.StackSizeForStackables.Value, 999);
+                item.stack_count = NewStackSize(item.stack_count);
                 if (Plugin.DebugEnabled) Log($"PrayerStacking: Modifying stack size for: {item.id}, {item.stack_count}");
             }
         }
@@ -115,7 +126,7 @@ public static class Helpers
         {
             foreach (var item in GameBalance.me.items_data.Where(item => Fields.PenPaperInkItems.Any(item.id.Contains)))
             {
-                item.stack_count = Mathf.Min(item.stack_count + Plugin.StackSizeForStackables.Value, 999);
+                item.stack_count = NewStackSize(item.stack_count);
                 if (Plugin.DebugEnabled) Log($"PenPaperInkStacking: Modifying stack size for: {item.id}, {item.stack_count}");
             }
         }
@@ -124,7 +135,7 @@ public static class Helpers
         {
             foreach (var item in GameBalance.me.items_data.Where(item => Fields.ChiselItems.Any(item.id.Contains)))
             {
-                item.stack_count = Mathf.Min(item.stack_count + Plugin.StackSizeForStackables.Value, 999);
+                item.stack_count = NewStackSize(item.stack_count);
                 if (Plugin.DebugEnabled) Log($"ChiselStacking: Modifying stack size for: {item.id}, {item.stack_count}");
             }
         }
@@ -133,7 +144,7 @@ public static class Helpers
         {
             foreach (var item in GameBalance.me.items_data.Where(item => Fields.GraveItems.Contains(item.type)))
             {
-                item.stack_count = Mathf.Min(item.stack_count + Plugin.StackSizeForStackables.Value, 999);
+                item.stack_count = NewStackSize(item.stack_count);
                 if (Plugin.DebugEnabled) Log($"GraveItemStacking: Modifying stack size for: {item.id}, {item.stack_count}");
             }
         }
@@ -688,5 +699,6 @@ public static class Helpers
         Fields.IsWritersTable = false;
         Fields.IsSoulBox = false;
         Fields.IsChurchPulpit = false;
+        Fields.FilterHiddenWidgets.Clear();
     }
 }

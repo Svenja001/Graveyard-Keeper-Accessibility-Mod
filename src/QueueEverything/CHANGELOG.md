@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.1 | 13 September 2026
+
+- Fixed Auto Select Highest Quality Recipe having no effect on quality recipes such as beer, mead, grape juice, wine and oven meals
+- The amount arrows now work at the organ workbench, raising several levels in one craft for the combined cost (thanks aorek)
+- Energy and gratitude costs in the craft window now show the reduced price when Exhaust-less is installed
+- Craft times now follow your FasterCraft Reloaded speed setting instead of always assuming the default
+- Fixed the gratitude cost showing red when you could afford it
+
 ## 2.2.0 | 18 July 2026
 
 - Fixed the +1 / -1 arrows in the expanded craft view changing the amount by two per click

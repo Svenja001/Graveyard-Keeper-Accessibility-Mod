@@ -15,6 +15,8 @@
   "cfg.smooth_player_movement.desc": "Suaviza el movimiento del jugador con interpolación física para que no quede atado a la cuadrícula de píxeles. Desactívalo para recuperar el movimiento original del juego, por ejemplo si tu personaje no consigue alinearse con los puntos de interacción.",
   "cfg.max_footprints.name": "Máx. de huellas",
   "cfg.max_footprints.desc": "Número máximo de huellas antes de eliminar las más antiguas. 0 desactiva el límite.",
+  "cfg.footprint_fade_seconds.name": "Tiempo de desvanecimiento de las huellas",
+  "cfg.footprint_fade_seconds.desc": "Tiempo en segundos que tardan en desvanecerse las huellas visibles cuando el límite de huellas máximas las elimina. Ponlo a 0 para eliminarlas al instante. No cambia la duración normal de las huellas. Los cambios se aplican a las huellas eliminadas a partir de ahora.",
   "cfg.check_for_updates.name": "Buscar actualizaciones",
   "cfg.check_for_updates.desc": "Muestra un aviso en el menú principal cuando hay una versión más nueva de este mod en NexusMods. Haz clic en el aviso para abrir la página del mod."
 }

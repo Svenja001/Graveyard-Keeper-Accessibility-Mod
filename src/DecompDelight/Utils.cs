@@ -48,6 +48,8 @@ public static class Utils
             ElementMaps.Element.Salt => $"[c][{Plugin.SaltColorHex}]",
             ElementMaps.Element.Ash => $"[c][{Plugin.AshColorHex}]",
             ElementMaps.Element.Alcohol => $"[c][{Plugin.AlcoholColorHex}]",
+            ElementMaps.Element.Gold => $"[c][{Plugin.GoldColorHex}]",
+            ElementMaps.Element.Graphite => $"[c][{Plugin.GraphiteColorHex}]",
             _ => string.Empty
         };
     }

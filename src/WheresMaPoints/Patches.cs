@@ -42,6 +42,31 @@ public static class Patches
     }
 
 
+    // Orbs already lying on the ground get saved and put back every time you load.
+    // Add them to your totals instead of dropping them back into the world.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(SerializableGameMap), nameof(SerializableGameMap.DeserializeTechPoints))]
+    public static bool SerializableGameMap_DeserializeTechPoints(SerializableGameMap __instance)
+    {
+        if (__instance?._tech_drops == null) return false;
+
+        foreach (var drop in __instance._tech_drops)
+        {
+            if (drop == null) continue;
+
+            var index = (int) drop.type;
+            if (index < 0 || index > 2) continue;
+
+            var letter = TechDefinition.TECH_POINTS[index];
+            MainGame.me.player.AddToParams(letter, 1);
+            MainGame.me.save.achievements.CheckKeyQuests($"tech_collect_{letter}");
+        }
+
+        GUIElements.me?.hud?.tech_points_bar?.Redraw();
+        return false;
+    }
+
+
     [HarmonyPrefix]
     [HarmonyPatch(typeof(AnimatedGUIPanel), nameof(AnimatedGUIPanel.Update))]
     public static bool AnimatedGUIPanel_Update(AnimatedGUIPanel __instance)

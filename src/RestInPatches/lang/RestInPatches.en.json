@@ -15,6 +15,8 @@
   "cfg.smooth_player_movement.desc": "Smooths player movement with physics interpolation so it isn't tied to the pixel grid. Turn off to restore the game's original movement, for example if your character struggles to line up with interaction spots.",
   "cfg.max_footprints.name": "Max Footprints",
   "cfg.max_footprints.desc": "Maximum number of footprints kept before the oldest are removed. 0 disables the cap.",
+  "cfg.footprint_fade_seconds.name": "Footprint Fade Time",
+  "cfg.footprint_fade_seconds.desc": "Time in seconds for visible footprints to fade out when the Max Footprints limit removes them. Set to 0 to remove them instantly. Does not change normal footprint lifetimes. Changes apply to newly removed footprints.",
   "cfg.check_for_updates.name": "Check for Updates",
   "cfg.check_for_updates.desc": "Show a notice on the main menu when a newer version of this mod is available on NexusMods. Click the notice to open the mod's page."
 }

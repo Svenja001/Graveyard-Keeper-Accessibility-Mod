@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "コンテナ追加インベントリ枠",
   "cfg.additional_container_inventory_space.desc": "チェスト・棚・キャビネットなど共有可能な保管庫に与える追加枠数。Modify Inventory Size を有効にする必要があります。",
   "cfg.show_only_personal_inventory.name": "個人インベントリのみ表示",
-  "cfg.show_only_personal_inventory.desc": "このオプションのオン/オフ。",
+  "cfg.show_only_personal_inventory.desc": "商人との取引では、持ち歩いているアイテムだけを表示します。オフにすると倉庫のアイテムも売却できます(共有インベントリがオンである必要があります)。",
   "cfg.dont_show_empty_rows_in_inventory.name": "インベントリの空行を非表示",
   "cfg.dont_show_empty_rows_in_inventory.desc": "インベントリの空行を表示するかどうか。",
   "cfg.show_used_space_in_titles.name": "タイトルに使用容量を表示",

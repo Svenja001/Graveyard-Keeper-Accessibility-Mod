@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "General",
   "cfg.section.catch_rates": "Catch Rates",
   "cfg.section.updates": "Updates",
+  "cfg.mode.name": "Mode",
+  "cfg.mode.desc": "How much of fishing the mod does for you.\n\n• Skip Everything - the fish bites straight away and is caught without the mini-game.\n• Auto Hook Only - the bite is hooked for you. You still wait for the bite and play the reel mini-game.",
   "cfg.rare_fish_catch_rate.name": "Rare Fish Catch Rate",
   "cfg.rare_fish_catch_rate.desc": "How often you reel in rare fish - the gold fish, gold-tier salmon, gold-tier sturgeon, and gold-tier crucian. Percentages assume the best rod, gem lure, distance 3, and daytime fishing; other rods or spots will feel similar.\\n\\n• Vanilla - about 1 rare in 20 casts (around 5%, the default game rate).\\n• Slightly Increased - about 1 in 9 casts (around 11%).\\n• Increased - about 1 in 5 casts (around 20%).\\n• Greatly Increased - about 1 in 3 casts (around 33%).\\n• Very Common - about every other cast (around 50%).",
   "cfg.check_for_updates.name": "Check for Updates",

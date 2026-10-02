@@ -1,5 +1,5 @@
 {
-  "CarrotMessage": "哎呀，胡萝卜给驴吃完了！！",
+  "CarrotMessage": "哎呀，箱子里给驴的胡萝卜不够了！",
   "DebugWarning": "请注意，调试模式已开启。除非有特定目的，否则不建议保持开启状态。",
   "cfg.section.advanced": "高级",
   "cfg.section.delivery_times": "送达时段",

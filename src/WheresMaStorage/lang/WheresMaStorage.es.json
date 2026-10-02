@@ -41,7 +41,7 @@
   "cfg.additional_container_inventory_space.name": "Espacio extra para contenedores",
   "cfg.additional_container_inventory_space.desc": "Número de espacios extras para cofres, estanterías, armarios y otros almacenes compartibles. Requiere Modify Inventory Size activado.",
   "cfg.show_only_personal_inventory.name": "Mostrar solo inventario personal",
-  "cfg.show_only_personal_inventory.desc": "Activa o desactiva esta opción.",
+  "cfg.show_only_personal_inventory.desc": "Con los comerciantes, muestra solo los objetos que llevas encima. Desactívalo para vender también objetos de tus almacenes (requiere Inventario compartido activado).",
   "cfg.dont_show_empty_rows_in_inventory.name": "Ocultar filas vacías del inventario",
   "cfg.dont_show_empty_rows_in_inventory.desc": "Muestra o oculta filas vacías en el inventario.",
   "cfg.show_used_space_in_titles.name": "Mostrar espacio usado en títulos",

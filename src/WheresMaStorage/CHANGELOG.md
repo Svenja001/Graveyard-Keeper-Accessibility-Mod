@@ -1,6 +1,13 @@
 # Changelog
 
-## 2.2.1 | 18 July 2026
+## 2.2.2 | 2 October 2026
+
+- Items taken back out of a trade offer now reappear in your inventory when Hide Invalid Selections is on
+- The "Show Only Personal Inventory" setting now explains that turning it off lets you sell from storage
+- Stack size can now be set up to 9999
+- Equipped tools a workbench can't use now show greyed out instead of disappearing when Hide Invalid Selections is on
+
+## 2.2.1 | 13 September 2026
 
 - Equipped tools show again when choosing an item at the grindstone, research table and similar menus
 - The equipped-tools row in those menus is now labelled "Tools" instead of showing as the player row

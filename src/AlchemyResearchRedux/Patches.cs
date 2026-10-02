@@ -37,13 +37,21 @@ public static class Patches
     [HarmonyPatch(typeof(MixedCraftGUI), nameof(MixedCraftGUI.OnResourcePickerClosed))]
     public static void MixedCraftGUI_OnResourcePickerClosed(MixedCraftGUI __instance, Item item)
     {
-        var objId = __instance.GetCrafteryWGO().obj_id;
-        var crafteryTransform = GetCrafteryTransform(__instance.transform, objId);
-        var resultTransform = __instance.transform.Find(IngredientContainerResult);
+        RefreshResultPreview(__instance);
+    }
+
+    // Shows what the chosen ingredients make, or the unknown icon when they are not a real recipe.
+    private static void RefreshResultPreview(MixedCraftGUI gui)
+    {
+        var resultTransform = gui.transform.Find(IngredientContainerResult);
+        if (!resultTransform) return;
+
+        var objId = gui.GetCrafteryWGO().obj_id;
+        var crafteryTransform = GetCrafteryTransform(gui.transform, objId);
 
         if (!crafteryTransform)
         {
-            ResultPreviewDrawUnknown(__instance.transform.Find(IngredientContainerResult));
+            ResultPreviewDrawUnknown(resultTransform);
             return;
         }
 
@@ -59,13 +67,18 @@ public static class Patches
 
         var resultId = AlchemyRecipe.GetRecipeResult(craftId)?.Result ?? string.Empty;
 
-        if (resultId.IsNullOrWhiteSpace()) return;
+        if (resultId.IsNullOrWhiteSpace())
+        {
+            ResultPreviewDrawUnknown(resultTransform);
+            return;
+        }
 
         var itemDef = GameBalance.me.GetData<ItemDefinition>(resultId);
 
         if (itemDef == null)
         {
             Plugin.Log.LogWarning($"No item definition found: {resultId}");
+            ResultPreviewDrawUnknown(resultTransform);
             return;
         }
 
@@ -266,6 +279,7 @@ public static class Patches
         }
 
         gui._craft_button.SetEnabled(gui.IsCraftAllowed());
+        RefreshResultPreview(gui);
     }
 
 

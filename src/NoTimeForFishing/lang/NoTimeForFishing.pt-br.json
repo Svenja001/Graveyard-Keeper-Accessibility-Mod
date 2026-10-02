@@ -1,6 +1,9 @@
 {
+  "cfg.section.general": "Geral",
   "cfg.section.catch_rates": "Taxas de captura",
   "cfg.section.updates": "Atualizações",
+  "cfg.mode.name": "Modo",
+  "cfg.mode.desc": "Quanto da pescaria o mod faz por você.\n\n• Skip Everything - o peixe morde na hora e é pego sem o minijogo.\n• Auto Hook Only - a fisgada é feita automaticamente para você. Você ainda espera o peixe morder e joga o minijogo de recolher a linha.",
   "cfg.rare_fish_catch_rate.name": "Taxa de peixes raros",
   "cfg.rare_fish_catch_rate.desc": "Com que frequência você fisga peixes raros - o peixe dourado, salmão dourado, esturjão dourado e carpa-cruciana dourada. As porcentagens assumem a melhor vara, isca de gema, distância 3 e pescaria diurna; outras varas ou locais sentem-se semelhantes.\\n\\n• Vanilla - cerca de 1 raro a cada 20 lançamentos (cerca de 5%, o valor padrão).\\n• Levemente aumentada - cerca de 1 a cada 9 lançamentos (cerca de 11%).\\n• Aumentada - cerca de 1 a cada 5 lançamentos (cerca de 20%).\\n• Muito aumentada - cerca de 1 a cada 3 lançamentos (cerca de 33%).\\n• Muito comum - aproximadamente um sim e um não (cerca de 50%).",
   "cfg.check_for_updates.name": "Verificar atualizações",

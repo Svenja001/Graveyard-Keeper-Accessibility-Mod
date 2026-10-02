@@ -11,5 +11,6 @@
   "cfg.ignore_skull_limit.name": "시신 해골 제한 무시",
   "cfg.ignore_skull_limit.desc": "시신의 흰 해골이 적어도 묘지가 장식 품질을 전부 반영하도록 합니다. 기본 게임은 묘지 점수를 시신의 흰 해골 수로 제한하는데, 이 제한을 해제합니다. 기본 동작으로 돌리려면 끄세요.",
   "cfg.check_for_updates.name": "업데이트 확인",
-  "cfg.check_for_updates.desc": "넥서스모드에 이 모드의 최신 버전이 나오면 메인 메뉴에 알림을 띄웁니다. 알림을 누르면 모드 페이지가 열립니다."
+  "cfg.check_for_updates.desc": "넥서스모드에 이 모드의 최신 버전이 나오면 메인 메뉴에 알림을 띄웁니다. 알림을 누르면 모드 페이지가 열립니다.",
+  "FirstTalkNotice": "무덤 변경 사항은 주교와 첫 대화를 나누고 도구를 챙길 때까지 적용되지 않습니다."
 }

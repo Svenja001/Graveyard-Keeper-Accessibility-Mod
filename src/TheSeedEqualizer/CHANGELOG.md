@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 | 2 October 2026
+
+- Modify Player Gardens is now on by default for new installs
+
 ## 1.3.13 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

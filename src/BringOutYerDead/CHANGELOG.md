@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.9 | 2 October 2026
+
+- The low-carrot warning now appears when the box has too few carrots for a delivery, not only when it is empty
+
 ## 0.2.8 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

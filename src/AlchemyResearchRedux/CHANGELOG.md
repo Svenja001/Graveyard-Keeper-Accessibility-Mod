@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9 | 2 October 2026
+
+- Fixed the result preview showing the previous result after swapping in a wrong ingredient
+- The result preview now updates when you refill your last mix
+
 ## 0.1.8 | 30 May 2026
 
 - Added a hotkey (default R) to refill an alchemy mixing station with the ingredients you last used there, with an optional auto-fill when you open it

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 | 2 October 2026
+
+- Gold nuggets and graphite now show Gold and Graphite instead of Acceleration
+- Fixed the Salt element not showing, and "None" appearing on items with no element
+
 ## 0.1.9 | 19 May 2026
 
 - Fixed a launch crash on the 32-bit GOG build with certain mod combinations

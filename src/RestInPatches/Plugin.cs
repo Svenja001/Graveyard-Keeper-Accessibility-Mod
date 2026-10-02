@@ -16,6 +16,7 @@ public class Plugin : BaseUnityPlugin
     private static ConfigEntry<bool> MuteWhenUnfocused { get; set; }
     internal static ConfigEntry<bool> SmoothPlayerMovement { get; private set; }
     internal static ConfigEntry<int> MaxFootprints { get; private set; }
+    internal static ConfigEntry<float> FootprintFadeSeconds { get; private set; }
     internal static ConfigEntry<bool> CheckForUpdates { get; private set; }
 
     private void Awake()
@@ -85,6 +86,12 @@ public class Plugin : BaseUnityPlugin
         };
 
         MaxFootprints = LocalizedConfig.Bind(Config, FootprintsSection, "Max Footprints", 1000, "max_footprints", new AcceptableValueRange<int>(0, 10000));
+        MaxFootprints.SettingChanged += (_, _) =>
+        {
+            Patches.FootprintPatches.TrimPending = true;
+        };
+
+        FootprintFadeSeconds = LocalizedConfig.Bind(Config, FootprintsSection, "Footprint Fade Time", 1f, "footprint_fade_seconds", new AcceptableValueRange<float>(0f, 5f));
 
         CheckForUpdates = LocalizedConfig.Bind(Config, UpdatesSection, "Check for Updates", true, "check_for_updates");
     }
