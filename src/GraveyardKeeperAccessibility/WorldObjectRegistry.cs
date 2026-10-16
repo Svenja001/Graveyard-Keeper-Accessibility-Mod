@@ -629,7 +629,7 @@ internal static class WorldObjectRegistry
 
             if (IsExcluded(obj, i)) continue;
             if (!IsDlcAvailable(obj, i)) continue;
-            if (StockPointFilter.IsParked(p)) continue;   // off-stage NPC parking spot
+            if (StockPointFilter.IsParked(obj, p)) continue;   // off-stage NPC parking spot
 
             try
             {
@@ -675,7 +675,7 @@ internal static class WorldObjectRegistry
             // Never announce, target or path to a character the game has parked off-stage. Applied
             // unconditionally, including for the combat scans that skip the other filters: a mob
             // sitting in the stock pile is not in the player's world at all.
-            if (StockPointFilter.IsParked(p)) continue;
+            if (StockPointFilter.IsParked(obj, p)) continue;
 
             try
             {

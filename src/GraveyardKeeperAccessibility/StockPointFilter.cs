@@ -62,6 +62,15 @@ internal static class StockPointFilter
     /// </summary>
     private const float SamePointRadius = 8f;
 
+    /// <summary>
+    /// A pile-up this close to the player is never learned as a parking spot. Parking spots are
+    /// off-stage by definition — nobody stands next to one — while a crowd the player is standing
+    /// next to is one a sighted player can see: the church visitors queueing out of a sermon pile
+    /// onto the exact same point, twice over, right beside the player.
+    /// </summary>
+    private const float LearnMinPlayerDistance = 20f * TileSize;
+    private const float LearnMinPlayerDistanceSqr = LearnMinPlayerDistance * LearnMinPlayerDistance;
+
     private static ManualLogSource _log;
 
     private static readonly List<Vector2> _points = new(4);
@@ -93,10 +102,28 @@ internal static class StockPointFilter
     internal static bool IsParked(WorldGameObject obj)
     {
         if (obj == null) return false;
+        try { return IsParked(obj, obj.pos); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// <see cref="IsParked(WorldGameObject)"/> for a caller that has already read the position.
+    ///
+    /// Only CHARACTERS are ever parked, so only a character is hidden for standing near a parking
+    /// spot. Letting the position test hit every object was a real bug (2026-10-14): a sermon's
+    /// crowd of church visitors pile up on one point by the church door as they leave, that spot
+    /// was learned as a parking place, and everything within two tiles of it went with them — the
+    /// church's exit door and the donation box vanished from every list for the rest of the session.
+    /// </summary>
+    internal static bool IsParked(WorldGameObject obj, Vector2 pos)
+    {
+        if (obj == null) return false;
         try
         {
             if (IsStockTag(obj.cur_gd_point)) return true;
-            return IsParked(obj.pos);
+            var def = obj.obj_def;
+            if (def == null || !def.IsCharacter()) return false;
+            return IsParked(pos);
         }
         catch { return false; }
     }
@@ -215,10 +242,17 @@ internal static class StockPointFilter
         {
             Cluster(characters, SamePointRadius * SamePointRadius);
 
+            var player = MainGame.me?.player;
+            Vector2? playerPos = player != null ? player.pos : (Vector2?)null;
+
             for (int i = 0; i < _stackPos.Count; i++)
             {
                 if (_stackCount[i] < StackThreshold) continue;
                 if (IsParked(_stackPos[i])) continue;      // already a known parking point
+                // In plain view of the player, so not off-stage — see LearnMinPlayerDistance.
+                if (playerPos.HasValue &&
+                    (_stackPos[i] - playerPos.Value).sqrMagnitude < LearnMinPlayerDistanceSqr)
+                    continue;
 
                 string key = $"{Mathf.RoundToInt(_stackPos[i].x)},{Mathf.RoundToInt(_stackPos[i].y)}";
 

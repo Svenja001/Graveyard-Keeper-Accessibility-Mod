@@ -1,3 +1,14 @@
+## 0.3.2 | 17 October 2026
+
+- **The church door and donation box no longer disappear.** After visitors crowded around the
+  church entrance, the mod mistook them for off-duty NPCs parked out of sight and hid everything
+  near them, including the church's exit door and the donation box, until the game was restarted.
+  Only characters are ever hidden that way now.
+
+- **The soul room now has a way out.** It has no door of its own: you leave it on foot through the
+  opening into the morgue, so the Doors list there was empty. It now lists the morgue's exit door,
+  and walking to it takes you back through the morgue to the door outside.
+
 ## 0.3.1 | 20 September 2026
 
 **Every sound cue in the fishing mini-game was silent, the instructions cut themselves off

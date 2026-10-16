@@ -5140,6 +5140,13 @@ internal static class ObjectNavigator
                 ? SafeWorldZone(MainGame.me?.player)
                 : null;
 
+            // The Better Save Soul room has no door of its own: once Euric opens the morgue's back
+            // wall it is just the far end of the morgue, left on foot through the gap. It is its own
+            // WorldZone, though, so the interior reveal — same zone only — never offered the
+            // morgue's exit door from in there, and the Doors list was empty. See SoulRoomExitFamily.
+            bool inSoulRoom = interiorPlayerZone != null &&
+                              string.Equals(interiorPlayerZone.id, "souls", StringComparison.OrdinalIgnoreCase);
+
             // A dungeon is the ONE enclosed interior where we deliberately reveal everything at
             // once — a blind player can't scout ahead, so they need every enemy, the exit, and the
             // loot located in one pass instead of only whatever happens to be on screen. This is
@@ -5302,7 +5309,9 @@ internal static class ObjectNavigator
                 // doors may be revealed — and DedupeDoorVariants below collapses whatever variants
                 // still make it through into a single entry per doorway.
                 bool revealable = category != NavCategory.Doors || IsCameraCulled(obj);
-                if (!keepIfCulled && !obj.gameObject.activeInHierarchy &&
+                bool soulRoomExit = inSoulRoom && category == NavCategory.Doors && revealable &&
+                                    IsSoulRoomExit(obj);
+                if (!keepIfCulled && !soulRoomExit && !obj.gameObject.activeInHierarchy &&
                     !(revealable &&
                       IsInPlayerInterior(obj, distance, interiorSightBlocked, interiorPlayerZone)))
                     continue;
@@ -7448,6 +7457,40 @@ internal static class ObjectNavigator
             return parts.Count == 0 ? null : string.Join("_", parts.ToArray());
         }
         catch { return null; }
+    }
+
+    // The morgue's own exit door, the one that leads outside. Leaving the morgue lands you on
+    // tp_mortuary_a, so the door inside carries the opposite end, tp_mortuary_b_ (variant numbers
+    // folded out by DoorVariantFamily). Its hatches are different families — mortuary_hatch_b,
+    // mortuary_from_church_b, mortuary_from_euric_b — and are deliberately not matched.
+    private const string SoulRoomExitFamily = "mortuary_b";
+    private static bool _soulRoomExitLogged;
+    private static readonly HashSet<string> _soulRoomDoorsSeen = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// True for the morgue exit door, listed under Doors while the player is in the soul room (see
+    /// inSoulRoom in RefreshDestinations). Walking to it takes the player back through the opened
+    /// wall and out of the morgue, which is the "door to go outside" a player there is looking for.
+    /// </summary>
+    private static bool IsSoulRoomExit(WorldGameObject obj)
+    {
+        var family = DoorVariantFamily(obj);
+        if (family != SoulRoomExitFamily)
+        {
+            // The family above is inferred, not read off a scene dump: if no door ever matches, this
+            // line names the doors that were in reach so the right one can be picked.
+            if (_soulRoomDoorsSeen.Add(obj.custom_tag ?? ""))
+                _log?.LogInfo($"[NAVIGATOR] Soul room: door {obj.obj_id} (tag {obj.custom_tag}, " +
+                              $"family {family}) at {obj.pos} is not the morgue exit");
+            return false;
+        }
+        if (!_soulRoomExitLogged)
+        {
+            _soulRoomExitLogged = true;
+            _log?.LogInfo($"[NAVIGATOR] Soul room: listing the morgue exit {obj.obj_id} " +
+                          $"(tag {obj.custom_tag}) at {obj.pos}");
+        }
+        return true;
     }
 
     /// <summary>The variant number in a door tag ("tp_church_2_a_" → "2"), or null when it has none.</summary>
