@@ -63,7 +63,7 @@ internal enum NavCategory
     Other
 }
 
-internal static class ObjectNavigator
+internal static partial class ObjectNavigator
 {
     private static ManualLogSource _log;
     private static bool _initialized = false;
@@ -572,6 +572,9 @@ internal static class ObjectNavigator
 
         try
         {
+            // A fine-grid route finished on its worker thread: act on it here, on the main thread.
+            PumpFinePlan();
+
             // Always-on teleport detector (runs whether or not navigation is busy): a single-frame
             // position jump means the player teleported (stone/fast-travel/dungeon). TeleportWithFade
             // doesn't rescan the navmesh at the landing, so schedule a few bounded rescans over the
@@ -1197,6 +1200,7 @@ internal static class ObjectNavigator
         _astarFailedForWalk = false;
         _rescanRetried = false;
         _wallRecoveries = 0;
+        ResetRouteLookahead();
         _currentRoute = null;
         _routeIsWorldMesh = false;
         _rescanRetryPending = false;
@@ -1307,6 +1311,7 @@ internal static class ObjectNavigator
         _astarFailedForWalk = false;
         _rescanRetried = false;
         _wallRecoveries = 0;
+        ResetRouteLookahead();
         _currentRoute = null;
         _routeIsWorldMesh = false;
         _rescanRetryPending = false;
@@ -1455,12 +1460,30 @@ internal static class ObjectNavigator
     /// wall/fence). Uses <see cref="AstarPath.StartPath"/> directly rather than the player's
     /// Seeker, so the player-only 17-unit endpoint cap does not apply and we get a full route.
     /// </summary>
-    private static void RequestGraph0Route(Vector2 from, Vector2 to)
+    private static void RequestGraph0Route(Vector2 from, Vector2 to, bool relaxWalls = false, bool skipFine = false)
     {
         _routePending = false;
         try
         {
             if (AstarPath.active == null) return;
+            EnsureWallSurvey();
+            // Any fine-grid answer still in flight belongs to an older request.
+            _fineJob = null;
+            _fineToken++;
+            if (!skipFine) _fineFoundNoPath = false;
+
+            // First choice: the fine world grid, built from the real walls, which sees the narrow
+            // swamp walkways the 76-unit road network cannot (see ObjectNavigator.FinePlanner.cs).
+            // Its answer arrives through PumpFinePlan; if it finds nothing it calls back here with
+            // skipFine set.
+            if (!relaxWalls && !skipFine && TryStartFinePlan(from, to))
+            {
+                _routePending = true;
+                return;
+            }
+            _routeWallsRelaxed = relaxWalls || _wallCells == null;
+            _routeQueryFrom = from;
+            _routeQueryTo = to;
 
             // Snap the destination onto an actual graph-0 node first. A landmark anchor (a door
             // at a building wall, a zone object) can sit on a navmesh VOID — then the path query's
@@ -1498,10 +1521,14 @@ internal static class ObjectNavigator
             var constraint = Pathfinding.NNConstraint.Default;
             constraint.graphMask = 1 << 0;
             path.nnConstraint = constraint;
+            // Keep off crossings found closed (see Blocked crossings) and, unless relaxed, off the
+            // surveyed walls (see World wall survey).
+            path.enabledTags = _routeWallsRelaxed ? RouteTagMask : RouteTagMaskWalls;
 
             _routePending = true;
             AstarPath.StartPath(path);
-            _log?.LogInfo($"[NAVIGATOR] Graph-0 route requested {from} -> {to}");
+            _log?.LogInfo($"[NAVIGATOR] Graph-0 route requested {from} -> {to}" +
+                          (_routeWallsRelaxed && _wallCells != null ? " (ignoring surveyed walls)" : ""));
         }
         catch (Exception ex)
         {
@@ -1526,6 +1553,12 @@ internal static class ObjectNavigator
                 var why = p?.errorLog;
                 if (!string.IsNullOrEmpty(why))
                     _log?.LogInfo($"[NAVIGATOR] Graph-0 route failed: {why.Replace('\n', ' ').Trim()}");
+                if (!_routeWallsRelaxed)
+                {
+                    _log?.LogInfo("[NAVIGATOR] No road route clear of the surveyed walls; asking again without them");
+                    RequestGraph0Route(_routeQueryFrom, _routeQueryTo, relaxWalls: true);
+                    return;
+                }
                 HandleNoRoute();
                 return;
             }
@@ -1535,6 +1568,15 @@ internal static class ObjectNavigator
             var endpoint = (Vector2)p.vectorPath[p.vectorPath.Count - 1];
             var endGap = Vector2.Distance(endpoint, _longWalkDest);
             _routeReachesTarget = endGap <= PartialRouteThreshold;
+
+            // Short of the target only because the wall marks closed the last gap: try without.
+            if (!_routeReachesTarget && !_routeWallsRelaxed)
+            {
+                _log?.LogInfo($"[NAVIGATOR] Road route clear of the surveyed walls stops {endGap:F0}u short; " +
+                              "asking again without them");
+                RequestGraph0Route(_routeQueryFrom, _routeQueryTo, relaxWalls: true);
+                return;
+            }
 
             if (_routeReachesTarget)
             {
@@ -1551,6 +1593,7 @@ internal static class ObjectNavigator
                               $"(best {_bestEndGap:F0}, stalled {_stalledRecomputes}, final={_finalPartial})");
             }
 
+            if (RefuseFallbackTour(p.vectorPath, _routeQueryFrom, _longWalkDest)) return;
             StartNativePathWalk(p.vectorPath);
         }
         catch (Exception ex)
@@ -1656,7 +1699,16 @@ internal static class ObjectNavigator
                 target_gd_point: null);
 
             character.cur_astar_path = path;
+            // GoTo does NOT always leave path_waypoint at 1. It returns early, before touching
+            // anything, when the new destination is within a tenth of a tile of the one it is
+            // already walking to (MovementComponent.GoTo: astar.destination.GridDistTo(dest) < 0.1)
+            // — and every mid-walk re-injection keeps the same destination: a resumed road route,
+            // a wall recovery, a lookahead detour. The follower then kept its OLD index into the
+            // NEW list and headed for waypoint 34 of a fresh 58-point route, in a straight line
+            // from wherever the player stood, through whatever lay between. Set it ourselves.
+            SetFollowerWaypoint(character, 1);
             _currentRoute = path;
+            _lookaheadCheckedAt = null;   // a new route has not been looked along yet
             // checkAgainstWorldMesh is only ever true for a graph-0 route, so it doubles as "this
             // route came from the road network" — the thing a wall recovery must not discard.
             _routeIsWorldMesh = fromWorldMesh ?? checkAgainstWorldMesh;
@@ -1808,6 +1860,865 @@ internal static class ObjectNavigator
         if (path == null || !_longWalkActive) { FallBackToEscapeOrBeacon(); return; }
         _log?.LogInfo("[NAVIGATOR] Nothing routes around it; walking the road route as it is");
         StartNativePathWalk(path, checkAgainstWorldMesh: false, fromWorldMesh: true);
+    }
+
+    // ---- Route lookahead ---------------------------------------------------
+    //
+    // WHY EVERY PLAN-TIME CHECK WAS HALF BLIND. The game switches off every object outside a box
+    // around the camera (ChunkManager: (screen width / 160) + 1 tiles sideways, (screen height /
+    // 160) + 1 up and down — about 13 x 8 tiles at 1080p), and a switched-off object's colliders
+    // are gone from physics. So at the moment a route is planned, everything past the screen edge
+    // does not exist:
+    //
+    //   - FirstRouteLegThroughSolid asks physics, and sees open ground out there.
+    //   - The fine player graph is SCANNED from physics (AStarTools.RefreshPlayerGraph →
+    //     AstarPath.Scan with collision checks), so a fine route planned across more than a screen
+    //     goes straight through the far cliffs. That is why fine routes clipped MORE than road
+    //     routes did, even though the code assumed they "already respect these colliders".
+    //
+    // Measured, 2026-11-04 log: all 15 solidity rejections were within 13 tiles of the planning
+    // spot; every one of the 40 graph-0 crossings that slipped through was 8.6+ tiles out, and the
+    // fine-route crossings sat in the same band. The walk to Clotho is the whole story in one
+    // journey: a 332-point fine route from 25 tiles away into the swamp walls, then a road leg
+    // into a far collider, then a fine route into the witch's hut — each invisible when planned.
+    //
+    // The game never meets this because a player only ever pathfinds across the screen. So do
+    // what the screen does: keep looking along the route while walking, ask physics only about
+    // ground that is switched ON right now, and when something solid turns up ahead, route around
+    // that stretch on the fine graph — scanned NOW, with the obstacle in it — and splice the
+    // detour back onto the rest of the route.
+    //
+    // ⚠️ This is NOT the lookahead guard autowalk_wall_clipping says never to try again. That one
+    // probed 32 units along the HEADING and STOPPED the walk, which fired on every cliff a road
+    // runs beside. This probes the planned ROUTE itself (the same question as the plan-time check,
+    // which has a clean record) and never stops anything: it either finds a way round or leaves
+    // the walk exactly as it was, with the in-wall guard still behind it.
+
+    /// How far the player must move before the route ahead is looked along again. Each check costs
+    /// at most a few hundred point probes, so this is about not repeating the same answer.
+    private const float LookaheadRecheckDistance = 0.5f * TileSize;
+
+    /// Ignore anything closer than this along the route: the player is upon it already, and that
+    /// is the in-wall guard's business — a detour planned from inside the edge of a collider is
+    /// planned from a node the fine graph calls blocked.
+    private const float LookaheadMinAhead = 0.75f * TileSize;
+
+    /// How far along the route to look. The trusted window usually ends sooner; this caps the cost
+    /// on a big monitor, where the window is wider.
+    private const float LookaheadMaxAlong = 14f * TileSize;
+
+    /// Tiles kept clear of the window edge. ChunkManager decides visibility on a worker thread a
+    /// frame or two behind the camera, and rounds the camera to a whole tile; two tiles covers both.
+    private const int LookaheadWindowMargin = 2;
+
+    /// Open ground needed past an obstacle before the route counts as clear again, so the detour
+    /// rejoins on the far side of a fence rather than in the gap between two of its posts.
+    private const float LookaheadRejoinClear = 0.5f * TileSize;
+
+    /// Detours per journey. A normal cross-map walk needs a handful; this only stops a pathological
+    /// case (an obstacle the fine graph keeps routing back into) from rescanning forever.
+    private const int MaxLookaheadDetours = 20;
+
+    /// A blocking obstacle with no way round is called out once it is this close. Further off, the
+    /// ground beyond it may simply not be switched on yet, so the detour is tried again nearer.
+    private const float LookaheadStopDistance = 3.5f * TileSize;
+
+    /// Movement between two tries at the same blocking obstacle. Each try rescans the fine graph,
+    /// which costs a visible frame, so not every half tile.
+    private const float LookaheadRetrySpacing = 1.5f * TileSize;
+
+    /// Solid ground along the route that makes an obstacle a BLOCKAGE rather than scenery the
+    /// walk may slide past. The broken stone bridge's gap reads 0.8-0.9 tiles; a tree trunk or a
+    /// fence rail a fraction of that.
+    private const float LookaheadBlockingRun = 0.75f * TileSize;
+
+    /// A way round may be this many times the straight distance, plus the slack below, before it
+    /// is disbelieved. A longer one leaves the switched-on ground and is planned over colliders
+    /// physics cannot see — on 2026-11-11 such 500-point "detours" sent the walk to the swamp
+    /// back and forth across the river for minutes, each one ending at a wall the next one fled.
+    private const float LookaheadDetourStretch = 3f;
+    private const float LookaheadDetourSlack = 20f * TileSize;
+
+    private static Vector2? _lookaheadCheckedAt;
+    private static bool _lookaheadPending;
+    private static int _lookaheadDetours;
+    private static bool _lookaheadBudgetLogged;
+    /// Obstacles a detour was already tried for and could not get round. Not asked again this
+    /// journey; the walk carries on and the in-wall guard handles them as before.
+    private static readonly List<Vector2> _lookaheadGivenUp = new List<Vector2>();
+    /// Where each successful detour of this journey was triggered, with its number. Being sent
+    /// back to one of these spots after detouring elsewhere means the walk is going in circles.
+    private static readonly List<KeyValuePair<Vector2, int>> _lookaheadDetoured = new List<KeyValuePair<Vector2, int>>();
+    /// A blocking obstacle that had no way round from further off, and where the player stood.
+    private static Vector2? _lookaheadRetryFrom;
+    private static Vector2 _lookaheadRetryHit;
+
+    private static AccessTools.FieldRef<MovementComponent, int> _pathWaypointRef;
+    private static System.Reflection.FieldInfo _chunkManagerMeField;
+
+    private static void ResetRouteLookahead()
+    {
+        _lookaheadCheckedAt = null;
+        _lookaheadPending = false;
+        _lookaheadDetours = 0;
+        _lookaheadBudgetLogged = false;
+        _lookaheadGivenUp.Clear();
+        _lookaheadDetoured.Clear();
+        _lookaheadRetryFrom = null;
+        _blockedReroutes = 0;
+        RefreshBlockedCrossings();
+    }
+
+    private static int FollowerWaypoint(MovementComponent mc)
+    {
+        try
+        {
+            _pathWaypointRef ??= AccessTools.FieldRefAccess<MovementComponent, int>("path_waypoint");
+            return _pathWaypointRef(mc);
+        }
+        catch { return -1; }
+    }
+
+    private static void SetFollowerWaypoint(MovementComponent mc, int index)
+    {
+        try
+        {
+            _pathWaypointRef ??= AccessTools.FieldRefAccess<MovementComponent, int>("path_waypoint");
+            _pathWaypointRef(mc) = index;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Could not reset the follower's waypoint index: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Is every object that could cover this point switched on right now? Mirrors
+    /// ChunkManager.UpdateThreadFunction: an object is active when its chunk extent overlaps
+    /// (radius) tiles of the camera, rounded to whole tiles. A point a safe margin inside that box
+    /// is therefore one physics can be trusted about.
+    /// </summary>
+    private static bool InActiveWindow(Vector2 p, Vector2 camTile, int rx, int ry)
+    {
+        return Mathf.Abs(p.x / TileSize - camTile.x) < rx && Mathf.Abs(p.y / TileSize - camTile.y) < ry;
+    }
+
+    private static void ActiveWindow(out Vector2 camTile, out int rx, out int ry)
+    {
+        var cam = (Vector2)MainGame.me.transform.position;   // the same position ChunkManager uses
+        camTile = new Vector2(Mathf.Round(cam.x / TileSize), Mathf.Round(cam.y / TileSize));
+        rx = 9; ry = 6;   // what 1080p gives minus a tile or two, should the real values be unreadable
+        try
+        {
+            _chunkManagerMeField ??= AccessTools.Field(typeof(ChunkManager), "_me");
+            if (_chunkManagerMeField?.GetValue(null) is ChunkManager cm)
+            {
+                rx = cm.visible_chunk_radius_x;
+                ry = cm.visible_chunk_radius_y;
+            }
+        }
+        catch { }
+        rx = Mathf.Max(2, rx - LookaheadWindowMargin);
+        ry = Mathf.Max(2, ry - LookaheadWindowMargin);
+    }
+
+    /// <summary>
+    /// Look along the rest of the route over the ground the game has switched on, and if something
+    /// solid now sits on it, route around that stretch. Called every frame from TickLongWalk;
+    /// does real work only every <see cref="LookaheadRecheckDistance"/> of movement.
+    /// </summary>
+    private static void CheckRouteAhead(WorldGameObject player)
+    {
+        if (!_isWalking || _lookaheadPending || _gameOwnsPlayer) return;
+        var route = _currentRoute;
+        if (route == null || route.Count < 2) return;
+
+        var pos = player.pos;
+        if (_lookaheadCheckedAt.HasValue &&
+            (pos - _lookaheadCheckedAt.Value).sqrMagnitude < LookaheadRecheckDistance * LookaheadRecheckDistance)
+            return;
+        _lookaheadCheckedAt = pos;
+
+        try
+        {
+            var character = player.components?.character;
+            if (character == null || !ReferenceEquals(character.cur_astar_path, route)) return;
+
+            // Already in something: the in-wall guard owns that, and a detour planned from here
+            // would start on a blocked node.
+            if (SolidAt(PlayerBodyPos(player)) != null) return;
+
+            int wp = FollowerWaypoint(character);
+            if (wp < 1 || wp >= route.Count) return;
+
+            ActiveWindow(out var camTile, out int rx, out int ry);
+
+            if (!ScanRouteAhead(route, wp, pos, camTile, rx, ry,
+                                out var hit, out var hitName, out var rejoin, out int tailFrom,
+                                out bool hitIsWall, out float solidRun, out bool pastView))
+                return;
+
+            float ahead = Vector2.Distance(pos, hit);
+
+            // The obstacle runs on off the switched-on ground and is still some way off: anything
+            // planned now would be planned over the part nobody can see (that is how a single bush
+            // ten tiles out once replaced a whole road route with a 682-point blind one). Walk on;
+            // the far side comes into view as the player nears it.
+            if (pastView && ahead > LookaheadStopDistance) return;
+
+            bool blocking = hitIsWall || pastView || solidRun >= LookaheadBlockingRun;
+
+            // Already found no way past this one from further back: only try again once the
+            // player has come noticeably closer.
+            if (_lookaheadRetryFrom.HasValue &&
+                (hit - _lookaheadRetryHit).sqrMagnitude < TileSize * TileSize &&
+                (pos - _lookaheadRetryFrom.Value).sqrMagnitude < LookaheadRetrySpacing * LookaheadRetrySpacing)
+                return;
+
+            // Back at an obstacle this journey already went round, with another detour since:
+            // the detours are chasing each other. Saying so beats pacing until the player gives up.
+            if (CameBackTo(hit))
+            {
+                StopRouteBlocked(hit, hitName, "the walk came back to an obstacle it already went round");
+                return;
+            }
+
+            if (_lookaheadDetours >= MaxLookaheadDetours)
+            {
+                // Out of detours is no licence to walk through a real blockage: on 2026-11-18 the
+                // walk did exactly that over the broken bridge, then 1.5 tiles through a swamp
+                // wall into a pocket nothing could get out of. Treat it as no way round — which
+                // re-plans the road network first, and stops short only if that is spent too.
+                if (blocking)
+                {
+                    NoWayRound(hit, hitName, true, $"{MaxLookaheadDetours} detours already this journey");
+                    return;
+                }
+                if (!_lookaheadBudgetLogged)
+                {
+                    _lookaheadBudgetLogged = true;
+                    _log?.LogWarning($"[NAVIGATOR] Lookahead: '{hitName}' ahead at {hit}, but {MaxLookaheadDetours} " +
+                                     "detours already this journey; leaving the route alone");
+                }
+                return;
+            }
+
+            StartLookaheadDetour(route, pos, hit, hitName, rejoin, tailFrom, blocking);
+        }
+        catch (Exception ex)
+        {
+            // Never the reason a walk breaks.
+            _log?.LogWarning($"[NAVIGATOR] Route lookahead failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Walk the route from the player's current leg and report the first solid stretch on it that
+    /// lies inside the active window, plus where the route is clear again beyond it.
+    /// </summary>
+    /// <param name="rejoin">The first clear point past the obstacle, or the journey's destination
+    /// when the route does not come clear inside the window.</param>
+    /// <param name="tailFrom">Index of the first original waypoint to keep after the detour
+    /// (route.Count when the detour goes all the way to the destination).</param>
+    /// <param name="hitIsWall">Some of the solid stretch is level geometry.</param>
+    /// <param name="solidRun">Length of route inside the obstacle, as far as it can be seen.</param>
+    /// <param name="pastView">The obstacle runs on beyond the switched-on ground.</param>
+    private static bool ScanRouteAhead(List<Vector3> route, int wp, Vector2 start, Vector2 camTile, int rx, int ry,
+                                       out Vector2 hit, out string hitName, out Vector2 rejoin, out int tailFrom,
+                                       out bool hitIsWall, out float solidRun, out bool pastView)
+    {
+        hit = default; hitName = null; rejoin = default; tailFrom = route.Count;
+        hitIsWall = false; solidRun = 0f; pastView = false;
+
+        float along = 0f;
+        bool found = false;
+        int propRun = 0;
+        Vector2 runStart = default;
+        float runStartAlong = 0f;
+        string runName = null;
+        float clearRun = 0f;
+        var prev = start;
+        var end = (Vector2)route[route.Count - 1];
+
+        for (int i = wp; i < route.Count; i++)
+        {
+            Vector2 b = route[i];
+            var delta = b - prev;
+            float len = delta.magnitude;
+            if (len < 0.01f) { prev = b; continue; }
+            var dir = delta / len;
+
+            // Samples at every SolidProbeStep along the leg, and always at its end — fine-graph
+            // legs are 8 units, shorter than one step, and would otherwise never be sampled.
+            float t = 0f;
+            while (t < len)
+            {
+                float step = Mathf.Min(SolidProbeStep, len - t);
+                t += step;
+                along += step;
+                var p = prev + dir * t;
+
+                // Past what the screen has switched on: physics knows nothing here yet. Next time.
+                if (!InActiveWindow(p, camTile, rx, ry) || along > LookaheadMaxAlong)
+                {
+                    if (!found) return false;
+                    // The obstacle runs on past the trusted ground: go round it to the destination
+                    // and let later checks vet the far end as it comes into view.
+                    rejoin = end; tailFrom = route.Count;
+                    solidRun = along - runStartAlong;
+                    pastView = true;
+                    return true;
+                }
+
+                // The last stretch hugs the target by design — SolidAt already ignores the target
+                // object itself, and this skirt covers whatever it stands against.
+                bool nearEnd = (p - end).sqrMagnitude < SolidEndSkirt * SolidEndSkirt;
+
+                if (along >= LookaheadMinAhead && !nearEnd)
+                {
+                    var solid = SolidAt(p, out bool isWall);
+                    if (!found)
+                    {
+                        if (solid != null && !NearGivenUp(p))
+                        {
+                            if (propRun == 0) { runStart = p; runName = solid; runStartAlong = along; }
+                            propRun++;
+                            // A wall counts at first touch. A prop has to be more than a corner
+                            // kiss — two consecutive probes, a sixth of a tile of overlap — or the
+                            // route would be re-planned around every tree trunk it grazes by a
+                            // finger's width, which nobody watching would call clipping.
+                            if (isWall || propRun >= 2)
+                            {
+                                found = true;
+                                hit = runStart; hitName = isWall ? solid : runName;
+                                hitIsWall = isWall;
+                                clearRun = 0f;
+                            }
+                        }
+                        else propRun = 0;
+                    }
+                    else if (solid == null)
+                    {
+                        clearRun += step;
+                        if (clearRun >= LookaheadRejoinClear)
+                        {
+                            rejoin = p;
+                            tailFrom = i;   // route[i] is the next waypoint after p
+                            solidRun = along - clearRun - runStartAlong;
+                            return true;
+                        }
+                    }
+                    else
+                    {
+                        clearRun = 0f;
+                        if (isWall) hitIsWall = true;
+                    }
+                }
+                else if (found && nearEnd)
+                {
+                    // Came clear only at the target: detour straight to it.
+                    rejoin = end; tailFrom = route.Count;
+                    solidRun = along - runStartAlong;
+                    return true;
+                }
+            }
+            prev = b;
+        }
+
+        if (!found) return false;
+        rejoin = end; tailFrom = route.Count;
+        solidRun = along - runStartAlong;
+        return true;
+    }
+
+    private static bool CameBackTo(Vector2 hit)
+    {
+        const float near = 1.5f * TileSize;
+        for (int i = 0; i < _lookaheadDetoured.Count; i++)
+        {
+            var e = _lookaheadDetoured[i];
+            if (e.Value <= _lookaheadDetours - 1 && (e.Key - hit).sqrMagnitude < near * near) return true;
+        }
+        return false;
+    }
+
+    private static float PathLength(List<Vector3> pts, int from = 0)
+    {
+        float len = 0f;
+        for (int i = from + 1; i < pts.Count; i++) len += Vector2.Distance(pts[i - 1], pts[i]);
+        return len;
+    }
+
+    /// <summary>
+    /// The lookahead found nothing that gets past an obstacle. Scenery the walk may slide past is
+    /// left to the walk as before; a real blockage is called out once the player is close, rather
+    /// than walked into (the in-wall guard lets anything under two tiles through — which is how
+    /// auto-walk crossed the broken stone bridge's gap to the swamp) or detoured round blind.
+    /// </summary>
+    private static void NoWayRound(Vector2 hit, string hitName, bool blocking, string why)
+    {
+        var now = MainGame.me?.player?.pos ?? hit;
+        float dist = Vector2.Distance(now, hit);
+        if (blocking && dist <= LookaheadStopDistance)
+        {
+            StopRouteBlocked(hit, hitName, why);
+            return;
+        }
+        if (blocking)
+        {
+            _lookaheadRetryFrom = now;
+            _lookaheadRetryHit = hit;
+            _log?.LogInfo($"[NAVIGATOR] Lookahead: {why} for '{hitName}' {dist / TileSize:F1} tiles ahead; " +
+                          "trying again closer");
+            return;
+        }
+        _lookaheadGivenUp.Add(hit);
+        _log?.LogInfo($"[NAVIGATOR] Lookahead: {why} for '{hitName}'; keeping the route");
+    }
+
+    /// <summary>
+    /// End the walk short of an obstacle nothing gets past, and say what it is. The player stays
+    /// on open ground and can decide — repair a bridge, take another target, walk by hand.
+    /// </summary>
+    private static void StopRouteBlocked(Vector2 hit, string hitName, string why)
+    {
+        _log?.LogWarning($"[NAVIGATOR] Lookahead: no way past '{hitName}' at {hit} ({why})");
+
+        string label = null;
+        WorldGameObject blocker = null;
+        Collider2D wall = null;
+        try
+        {
+            SolidAt(hit, out _, out blocker);
+            wall = _lastSolidWall;
+            if (blocker != null)
+                label = ScreenReader.StripNguiCodes(InteractionDetector.GetObjectLabel(blocker) ?? "").Trim();
+        }
+        catch { }
+
+        // First: take another way. The road network (graph 0) is baked with every crossing open —
+        // the broken stone bridge included — so it keeps sending the walk over it, while sighted
+        // players take the wooden bridge far up north. Mark this spot off-limits for OUR queries
+        // and ask the road network again.
+        if (_longWalkActive && _blockedReroutes < MaxBlockedReroutes &&
+            TagBlockedCrossing(hit, blocker, wall, hitName))
+        {
+            _blockedReroutes++;
+            // A new road route gets its own detours; MaxBlockedReroutes bounds the total.
+            _lookaheadDetours = 0;
+            _lookaheadBudgetLogged = false;
+            _lookaheadDetoured.Clear();
+            _lookaheadRetryFrom = null;
+            _lookaheadCheckedAt = null;
+            var from = MainGame.me?.player?.pos ?? hit;
+            _log?.LogInfo($"[NAVIGATOR] Re-asking the road network without '{hitName}' " +
+                          $"(reroute {_blockedReroutes}/{MaxBlockedReroutes})");
+            ScreenReader.Say(string.IsNullOrEmpty(label) ? Loc.Get("nav.blocked_rerouting_plain")
+                                                         : Loc.Fmt("nav.blocked_rerouting", label),
+                             interrupt: true);
+            RequestGraph0Route(from, _longWalkDest);
+            return;
+        }
+        _log?.LogWarning("[NAVIGATOR] No other way to try; stopping the walk");
+
+        // Never hand control back inside geometry: the body turns Dynamic and wedges.
+        try
+        {
+            var player = MainGame.me?.player;
+            if (player != null && _hasLastClearPos && SolidAt(PlayerBodyPos(player)) != null)
+            {
+                var here = player.transform.position;
+                player.transform.position = new Vector3(_lastClearPlayerPos.x, _lastClearPlayerPos.y, here.z);
+                player.RefreshPositionCache();
+                _log?.LogInfo($"[NAVIGATOR] Stepped back out of the wall to {_lastClearPlayerPos}");
+            }
+        }
+        catch { }
+
+        StopLongWalk(announce: false);
+        ScreenReader.Say(string.IsNullOrEmpty(label) ? Loc.Get("nav.way_blocked")
+                                                     : Loc.Fmt("nav.way_blocked_by", label),
+                         interrupt: true);
+    }
+
+    // ---- Blocked crossings -------------------------------------------------
+    //
+    // Graph 0 never changes at runtime, so a crossing that is closed in the game (the stone bridge
+    // to the swamp until it is repaired) is open in it forever, and every road route takes it.
+    // Nodes over such a crossing get a tag the game itself never uses; NPC seekers walk every tag
+    // (Seeker.traversableTags = -1), so they are unaffected, while the mod's own queries exclude it.
+
+    private const int BlockedTag = 31;
+    private const int RouteTagMask = ~(1 << BlockedTag);
+
+    /// Re-plans per journey after a blockage. Graph 0 also calls the river walkable, so the first
+    /// new route may try another impossible crossing before it finds the real bridge.
+    private const int MaxBlockedReroutes = 6;
+
+    /// An object whose colliders span more than this is not a crossing but a building or a hill;
+    /// tagging all of it could close off the roads around it, so only the hit spot is tagged.
+    private const float MaxBlockedObjectSpan = 20f * TileSize;
+
+    /// Graph-0 cells within this fraction of a node of a wall are marked with it. Small enough to
+    /// leave a road along a cliff open, large enough that a thin river wall cannot slip between two
+    /// unmarked neighbours.
+    private const float WallTagHalfBox = 0.35f;
+
+    /// A wall collider whose bounds hold more graph-0 cells than this is tested only at the hit.
+    private const int MaxWallTagCandidates = 60000;
+
+    private sealed class BlockedCrossing
+    {
+        public Vector2 Min, Max;
+        public WorldGameObject Wgo;   // null: level geometry, blocked for the rest of the session
+        public string ObjId;
+        public string Name;
+        /// Level geometry marked along its whole shape: the graph-0 node indices it covers, and
+        /// the collider itself. Null for a rectangle mark.
+        public List<int> Nodes;
+        public Collider2D Wall;
+    }
+
+    /// The wall collider the last <see cref="SolidAt(Vector2, out bool, out WorldGameObject)"/>
+    /// reported, so a blockage can be marked along its whole length.
+    private static Collider2D _lastSolidWall;
+    private static readonly Collider2D[] _wallTagBuffer = new Collider2D[32];
+
+    /// Is the graph-0 cell under this point marked blocked?
+    private static bool OnBlockedNode(Pathfinding.GridGraph gg, Vector2 p)
+    {
+        if (gg?.nodes == null || gg.nodes.Length != gg.width * gg.depth) return false;
+        var v = gg.inverseMatrix.MultiplyPoint3x4(new Vector3(p.x, p.y, 0f));
+        int x = Mathf.RoundToInt(v.x - 0.5f), z = Mathf.RoundToInt(v.z - 0.5f);
+        if (x < 0 || z < 0 || x >= gg.width || z >= gg.depth) return false;
+        var nd = gg.nodes[z * gg.width + x];
+        return nd != null && nd.Tag == BlockedTag;
+    }
+
+    /// First point of a route that runs over a blocked crossing, or null.
+    private static Vector2? RouteOverBlocked(List<Vector3> pts)
+    {
+        if (_blockedCrossings.Count == 0 || pts == null) return null;
+        var gg = Graph0Grid();
+        if (gg == null) return null;
+        for (int i = 0; i < pts.Count; i++)
+            if (OnBlockedNode(gg, pts[i])) return pts[i];
+        return null;
+    }
+
+    /// Mark every graph-0 cell the wall actually covers — the whole river bank, not the 3x3 cells
+    /// where the route met it. On 2026-11-18 the river took three re-plans that each just moved the
+    /// crossing a few cells along the bank, the 20-detour budget ran out, and the walk clipped over
+    /// the broken bridge into a walled-in pocket of the swamp.
+    private static List<int> WallNodes(Pathfinding.GridGraph gg, Collider2D wall, out Vector2 min, out Vector2 max)
+    {
+        min = max = default;
+        if (wall == null || !wall.enabled || !wall.gameObject.activeInHierarchy) return null;
+        var b = wall.bounds;
+        float node = gg.nodeSize;
+        float half = node * WallTagHalfBox;
+        min = new Vector2(b.min.x - half, b.min.y - half);
+        max = new Vector2(b.max.x + half, b.max.y + half);
+        if ((max.x - min.x) / node * ((max.y - min.y) / node) > MaxWallTagCandidates) return null;
+
+        var box = new Vector2(half * 2f, half * 2f);
+        int mask = 1 << wall.gameObject.layer;
+        var result = new List<int>();
+        var nodes = gg.nodes;
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            var nd = nodes[i];
+            if (nd == null) continue;
+            var p = (Vector3)nd.position;
+            if (p.x < min.x || p.x > max.x || p.y < min.y || p.y > max.y) continue;
+            int n = Physics2D.OverlapBoxNonAlloc(p, box, 0f, _wallTagBuffer, mask);
+            for (int k = 0; k < n; k++)
+                if (_wallTagBuffer[k] == wall) { result.Add(i); break; }
+        }
+        return result;
+    }
+
+    private static readonly List<BlockedCrossing> _blockedCrossings = new List<BlockedCrossing>();
+    private static int _blockedReroutes;
+
+    private static Pathfinding.GridGraph Graph0Grid()
+    {
+        try
+        {
+            var graphs = AstarPath.active?.graphs;
+            return graphs != null && graphs.Length > 0 ? graphs[0] as Pathfinding.GridGraph : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Mark the graph-0 nodes over a blockage so the mod's routes avoid it. False when
+    /// there is nothing to mark or this spot was already marked (re-planning again would only
+    /// produce the same route).</summary>
+    private static bool TagBlockedCrossing(Vector2 hit, WorldGameObject blocker, Collider2D wall, string hitName)
+    {
+        var gg = Graph0Grid();
+        if (gg == null || gg.nodes == null) return false;
+
+        foreach (var c in _blockedCrossings)
+        {
+            bool same = c.Nodes != null
+                ? (wall != null && c.Wall == wall) || OnBlockedNode(gg, hit)
+                : hit.x >= c.Min.x && hit.x <= c.Max.x && hit.y >= c.Min.y && hit.y <= c.Max.y;
+            if (same)
+            {
+                // The road network already keeps off it, so what brought the walk here was a
+                // fine-graph detour, not a road route — a fresh road route avoids it. On 2026-11-18
+                // "already marked" stopped the church walk dead instead; the next try walked fine.
+                // MaxBlockedReroutes still bounds the asking.
+                _log?.LogInfo($"[NAVIGATOR] '{hitName}' at {hit} is already marked as blocked ({c.Name}); " +
+                              "a fresh road route will keep off it");
+                return true;
+            }
+        }
+
+        float node = gg.nodeSize;
+        var entry = new BlockedCrossing { Name = hitName };
+        bool haveBounds = false;
+        if (blocker == null && wall != null)
+        {
+            try
+            {
+                var wallNodes = WallNodes(gg, wall, out var wmin, out var wmax);
+                if (wallNodes != null && wallNodes.Count > 0)
+                {
+                    entry.Nodes = wallNodes;
+                    entry.Wall = wall;
+                    entry.Min = wmin;
+                    entry.Max = wmax;
+                    haveBounds = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning($"[NAVIGATOR] Marking the whole of '{hitName}' failed: {ex.Message}");
+            }
+        }
+        if (blocker != null)
+        {
+            try
+            {
+                Bounds b = default;
+                foreach (var col in blocker.GetComponentsInChildren<Collider2D>())
+                {
+                    if (col == null || col.isTrigger || !col.enabled || !col.gameObject.activeInHierarchy) continue;
+                    if (!haveBounds) { b = col.bounds; haveBounds = true; }
+                    else b.Encapsulate(col.bounds);
+                }
+                if (haveBounds && b.size.x <= MaxBlockedObjectSpan && b.size.y <= MaxBlockedObjectSpan)
+                {
+                    // A little over half a node of padding, so a crossing narrower than a node
+                    // still has the row of nodes along it marked.
+                    float pad = node * 0.6f;
+                    entry.Min = new Vector2(b.min.x - pad, b.min.y - pad);
+                    entry.Max = new Vector2(b.max.x + pad, b.max.y + pad);
+                    entry.Wgo = blocker;
+                    entry.ObjId = blocker.obj_id;
+                }
+                else haveBounds = false;
+            }
+            catch { haveBounds = false; }
+        }
+        if (!haveBounds)
+        {
+            // A bare wall, or a huge object: just the stretch the route ran into.
+            entry.Min = hit - new Vector2(node, node);
+            entry.Max = hit + new Vector2(node, node);
+            entry.Wgo = null;
+        }
+
+        _blockedCrossings.Add(entry);
+        int n = ApplyBlockedTags(gg, clearFirst: false, only: entry);
+        _log?.LogInfo($"[NAVIGATOR] Marked {n} road-network nodes over '{hitName}' as blocked " +
+                      $"({(entry.Nodes != null ? "its whole shape within " : "")}{entry.Min} .. {entry.Max}" +
+                      $"{(entry.Wgo != null ? ", until " + entry.ObjId + " changes" : "")})");
+        return n > 0;
+    }
+
+    /// <summary>Drop marks whose object has gone or changed (a bridge repaired becomes a different
+    /// object), and re-apply the rest — a save load can bring back a fresh graph.</summary>
+    private static void RefreshBlockedCrossings()
+    {
+        if (_blockedCrossings.Count == 0) return;
+        try
+        {
+            int before = _blockedCrossings.Count;
+            _blockedCrossings.RemoveAll(c =>
+            {
+                if (c.ObjId == null) return false;
+                if (c.Wgo == null || c.Wgo.obj_id != c.ObjId)
+                {
+                    _log?.LogInfo($"[NAVIGATOR] '{c.Name}' is no longer there as {c.ObjId}; unblocking it");
+                    return true;
+                }
+                return false;
+            });
+            var gg = Graph0Grid();
+            if (gg != null && gg.nodes != null) ApplyBlockedTags(gg, clearFirst: true, only: null);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning($"[NAVIGATOR] Refreshing blocked crossings failed: {ex.Message}");
+        }
+    }
+
+    private static int ApplyBlockedTags(Pathfinding.GridGraph gg, bool clearFirst, BlockedCrossing only)
+    {
+        var nodes = gg.nodes;
+        var entries = only != null ? new List<BlockedCrossing> { only } : _blockedCrossings;
+        var marked = new HashSet<int>();
+        var rects = new List<BlockedCrossing>();
+        foreach (var c in entries)
+        {
+            if (c.Nodes == null) { rects.Add(c); continue; }
+            foreach (int i in c.Nodes)
+                if (i >= 0 && i < nodes.Length && nodes[i] != null) marked.Add(i);
+        }
+        if (rects.Count > 0)
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                var nd = nodes[i];
+                if (nd == null) continue;
+                var p = (Vector3)nd.position;
+                foreach (var c in rects)
+                    if (p.x >= c.Min.x && p.x <= c.Max.x && p.y >= c.Min.y && p.y <= c.Max.y) { marked.Add(i); break; }
+            }
+
+        var toTag = new List<Pathfinding.GraphNode>(marked.Count);
+        foreach (int i in marked) toTag.Add(nodes[i]);
+        var toClear = new List<KeyValuePair<Pathfinding.GraphNode, uint>>();
+        if (clearFirst)
+            for (int i = 0; i < nodes.Length; i++)
+                if (nodes[i] != null && nodes[i].Tag == BlockedTag && !marked.Contains(i))
+                    toClear.Add(new KeyValuePair<Pathfinding.GraphNode, uint>(nodes[i], IsWallCell(i) ? (uint)WallTag : 0u));
+
+        // Graph data belongs to the pathfinding thread; change it from a work item, flushed now so
+        // the very next route query already sees it.
+        var astar = AstarPath.active;
+        astar.AddWorkItem(new AstarPath.AstarWorkItem(force =>
+        {
+            foreach (var kv in toClear) kv.Key.Tag = kv.Value;
+            foreach (var nd in toTag) nd.Tag = BlockedTag;
+            return true;
+        }));
+        astar.FlushWorkItems();
+        return toTag.Count;
+    }
+
+    private static bool NearGivenUp(Vector2 p)
+    {
+        for (int i = 0; i < _lookaheadGivenUp.Count; i++)
+            if ((_lookaheadGivenUp[i] - p).sqrMagnitude < TileSize * TileSize) return true;
+        return false;
+    }
+
+    private static void StartLookaheadDetour(List<Vector3> route, Vector2 from, Vector2 hit, string hitName,
+                                             Vector2 rejoin, int tailFrom, bool blocking)
+    {
+        _lookaheadPending = true;
+        _lookaheadDetours++;
+        float ahead = Vector2.Distance(from, hit) / TileSize;
+        _log?.LogInfo($"[NAVIGATOR] Lookahead: '{hitName}' on the route {ahead:F1} tiles ahead at {hit}; " +
+                      $"routing round it to {rejoin} (detour {_lookaheadDetours})");
+
+        // Rescan the fine graph over just this stretch, which is all on screen — so, unlike a
+        // cross-map fine route, the obstacle is actually in the scan.
+        _widePlayerGraphPad = true;
+        PadPlayerGraph = true;
+        try { AStarTools.RefreshPlayerGraph(from, rejoin); }
+        catch (Exception ex) { _log?.LogWarning($"[NAVIGATOR] Lookahead rescan failed: {ex.Message}"); }
+        finally { PadPlayerGraph = false; _widePlayerGraphPad = false; }
+
+        bool started = StartRouteQuery(from, rejoin, AStarTools.PLAYER_GRAPH_N, detour =>
+        {
+            _lookaheadPending = false;
+            try
+            {
+                // The walk moved on while we were asking (a wall stop, a recovery, a new walk):
+                // this answer is about a route that is no longer being driven.
+                if (!_longWalkActive || !_isWalking || !ReferenceEquals(_currentRoute, route)) return;
+
+                if (detour == null || detour.Count < 2)
+                {
+                    NoWayRound(hit, hitName, blocking, "nothing routes round");
+                    return;
+                }
+
+                var wps = new List<Vector3>(detour.Count + Math.Max(0, route.Count - tailFrom));
+                foreach (var w in detour) wps.Add(new Vector3(w.x, w.y, 0f));
+
+                // A way round many times longer than the gap it gets round leaves the switched-on
+                // ground, and out there the fine graph is planning over colliders it cannot see.
+                float detourLen = PathLength(wps);
+                float straight = Vector2.Distance(from, rejoin);
+                if (detourLen > straight * LookaheadDetourStretch + LookaheadDetourSlack)
+                {
+                    NoWayRound(hit, hitName, blocking,
+                               $"the only way round is {detourLen / TileSize:F0} tiles for a " +
+                               $"{straight / TileSize:F1}-tile gap, over ground not loaded");
+                    return;
+                }
+
+                // The detour must itself be clean where we can see. The fine graph is scanned with
+                // the player's collision diameter, but its route can still shave a corner.
+                var detourHit = FirstRouteLegThroughSolid(wps, out var detourWhat);
+                if (detourHit.HasValue)
+                {
+                    NoWayRound(hit, hitName, blocking,
+                               $"the way round passes through '{detourWhat}' at {detourHit.Value}");
+                    return;
+                }
+
+                // The fine graph knows nothing of blocked crossings. On 2026-11-18 a 626-point
+                // detour "to the destination" took the walk straight back over the broken bridge
+                // that had just been marked, undoing three re-plans.
+                var overBlocked = RouteOverBlocked(wps);
+                if (overBlocked.HasValue)
+                {
+                    NoWayRound(hit, hitName, blocking,
+                               $"the way round runs over a blocked crossing at {overBlocked.Value}");
+                    return;
+                }
+
+                // The player kept walking while the query ran; start the detour from its point
+                // nearest to where they are now, not from where they were, so it does not begin
+                // with a step backwards.
+                var now = MainGame.me?.player?.pos ?? from;
+                int startAt = 0;
+                float bestSq = float.MaxValue;
+                int scan = Math.Min(wps.Count - 1, 24);
+                for (int k = 0; k <= scan; k++)
+                {
+                    float sq = ((Vector2)wps[k] - now).sqrMagnitude;
+                    if (sq < bestSq) { bestSq = sq; startAt = k; }
+                }
+                var spliced = new List<Vector3>(wps.Count - startAt + Math.Max(0, route.Count - tailFrom) + 1);
+                spliced.Add(new Vector3(now.x, now.y, 0f));
+                for (int k = startAt; k < wps.Count; k++) spliced.Add(wps[k]);
+                for (int k = tailFrom; k < route.Count; k++) spliced.Add(route[k]);
+
+                _log?.LogInfo($"[NAVIGATOR] Lookahead: detour of {wps.Count - startAt} points round '{hitName}', " +
+                              $"rejoining the route with {route.Count - tailFrom} of its {route.Count} points left");
+                _lookaheadDetoured.Add(new KeyValuePair<Vector2, int>(hit, _lookaheadDetours));
+                _lookaheadRetryFrom = null;
+                StartNativePathWalk(spliced, checkAgainstWorldMesh: false, fromWorldMesh: _routeIsWorldMesh);
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning($"[NAVIGATOR] Lookahead splice failed: {ex.Message}");
+            }
+        });
+
+        if (!started)
+        {
+            _lookaheadPending = false;
+            // A query that never ran says nothing about the ground: never a reason to stop.
+            NoWayRound(hit, hitName, blocking: false, "could not start a detour query");
+        }
     }
 
     private static void OnNativeWalkComplete()
@@ -2743,6 +3654,9 @@ internal static class ObjectNavigator
             return;
         }
 
+        // Look along the route as the game switches the ground ahead on. See CheckRouteAhead.
+        CheckRouteAhead(player);
+
         // Periodic remaining-distance announcement so the player knows it's progressing.
         if (Vector2.Distance(playerPos, _longWalkAnnouncePos) >= AnnounceProgressDistance)
         {
@@ -2928,9 +3842,15 @@ internal static class ObjectNavigator
     /// is exactly the regression this pass exists to undo, so only walls stop a walk. Props are
     /// still reported to the log.
     /// </summary>
-    private static string SolidAt(Vector2 p, out bool isWall)
+    private static string SolidAt(Vector2 p, out bool isWall) => SolidAt(p, out isWall, out _);
+
+    /// <summary>As above, also handing back the world object that is in the way (null for a wall,
+    /// which has none) so it can be named to the player.</summary>
+    private static string SolidAt(Vector2 p, out bool isWall, out WorldGameObject blocker)
     {
         isWall = false;
+        blocker = null;
+        _lastSolidWall = null;
         try
         {
             var player = MainGame.me?.player;
@@ -2967,11 +3887,17 @@ internal static class ObjectNavigator
                     if (_shortWalkTarget.Object != null && wgo == _shortWalkTarget.Object) continue;
                     if (_longWalkTarget.Object != null && wgo == _longWalkTarget.Object) continue;
                     // Remember it, but keep looking: a wall at the same point outranks a prop.
-                    prop ??= $"{col.gameObject.name} (object {wgo.obj_id})";
+                    if (prop == null)
+                    {
+                        prop = $"{col.gameObject.name} (object {wgo.obj_id})";
+                        blocker = wgo;
+                    }
                     continue;
                 }
 
                 isWall = true;
+                blocker = null;
+                _lastSolidWall = col;
                 return $"{col.gameObject.name} (level geometry)";
             }
             return prop;
@@ -3325,10 +4251,12 @@ internal static class ObjectNavigator
                 ? a
                 : a + ab * Mathf.Clamp01(Vector2.Dot(pos - a, ab) / lenSq);
 
+            // The true minimum, no early exit. This used to stop at the first segment inside the
+            // slack, so the log reported "1.4 tiles off route" / "1.5 tiles off route" for a player
+            // walking dead centre on a later leg — 25 of the 47 readings in the 2026-11-04 log were
+            // that artefact. Only a log line reads this, so the full pass costs nothing that matters.
             float sq = (pos - closest).sqrMagnitude;
-            if (sq >= bestSq) continue;
-            bestSq = sq;
-            if (bestSq <= slackSq) break;   // close enough; no need to measure the rest
+            if (sq < bestSq) bestSq = sq;
         }
 
         distance = Mathf.Sqrt(bestSq);
@@ -3831,11 +4759,18 @@ internal static class ObjectNavigator
     }
 
     /// One async path query on one graph. Null to the callback on any failure.
-    private static bool StartRouteQuery(Vector2 from, Vector2 to, int graph, Action<List<Vector2>> onDone)
+    private static bool StartRouteQuery(Vector2 from, Vector2 to, int graph, Action<List<Vector2>> onDone,
+                                        bool relaxWalls = false)
     {
         try
         {
             if (AstarPath.active == null) return false;
+            bool useWalls = false;
+            if (graph == 0 && !relaxWalls)
+            {
+                EnsureWallSurvey();
+                useWalls = _wallCells != null;
+            }
 
             var path = Pathfinding.ABPath.Construct(
                 new Vector3(from.x, from.y, 0f),
@@ -3844,6 +4779,12 @@ internal static class ObjectNavigator
                 {
                     try
                     {
+                        if (useWalls && (p == null || p.error || p.vectorPath == null || p.vectorPath.Count < 2))
+                        {
+                            _log?.LogInfo("[NAVIGATOR] Guided route on graph 0: nothing clear of the surveyed walls; asking again without them");
+                            if (!StartRouteQuery(from, to, graph, onDone, relaxWalls: true)) onDone(null);
+                            return;
+                        }
                         if (p == null || p.error || p.vectorPath == null || p.vectorPath.Count < 2)
                         {
                             _log?.LogInfo($"[NAVIGATOR] Guided route on graph {graph}: no path");
@@ -3866,6 +4807,7 @@ internal static class ObjectNavigator
             var constraint = Pathfinding.NNConstraint.Default;
             constraint.graphMask = 1 << graph;
             path.nnConstraint = constraint;
+            path.enabledTags = useWalls ? RouteTagMaskWalls : RouteTagMask;
 
             AstarPath.StartPath(path);
             return true;
@@ -4900,6 +5842,7 @@ internal static class ObjectNavigator
         _astarFailedForWalk = false;
         _rescanRetried = false;
         _wallRecoveries = 0;
+        ResetRouteLookahead();
         _currentRoute = null;
         _routeIsWorldMesh = false;
         _rescanRetryPending = false;

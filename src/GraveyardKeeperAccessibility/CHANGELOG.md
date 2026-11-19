@@ -1,3 +1,15 @@
+## 0.3.3 | 19 November 2026
+
+- **Auto-walk now plans long walks around the real walls of the map.** Long walks used to follow
+  the villagers' road network, which knows nothing about cliffs, riverbanks or the narrow swamp
+  walkways, so a walk could run into a cliff, try the next gap a few steps along, and end up on a
+  tour of half the map. Auto-walk now has its own detailed map of every wall, fence, building and
+  blockade, including the parts that are off screen, and plans the whole route before you set off.
+  The walk from home to the grapes goes straight through the kitchen garden instead of wandering
+  north into the blockades, and once the blockade on the north route is cleared, the walk to
+  witchs land takes you over the wooden bridge and through the swamp labyrinth in one go. Expect the
+  distance to grow now and then on the way: the labyrinth winds, and so does the route.
+
 ## 0.3.2 | 17 October 2026
 
 - **The church door and donation box no longer disappear.** After visitors crowded around the
